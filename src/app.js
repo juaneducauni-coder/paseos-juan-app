@@ -2049,7 +2049,7 @@ function HeaderMinimal(activeRole) {
     <header class="topbar ${menuOpen ? "menu-is-open" : ""}">
       <a class="brand" href="/" data-link aria-label="Ir al inicio">
         <span class="brand-mark">
-          <img src="/src/assets/paseos-juan-logo.png" alt="" />
+          <img src="/paseos-juan-logo.png" alt="" />
         </span>
         <span>
           <strong>Paseos Juan</strong>
@@ -2074,7 +2074,7 @@ function MobileMenu() {
     <aside class="mobile-menu ${menuOpen ? "is-open" : ""}" aria-hidden="${!menuOpen}">
       <div class="mobile-menu-head">
         <a class="menu-brand" href="/" data-link>
-          <img src="/src/assets/paseos-juan-logo.png" alt="" />
+          <img src="/paseos-juan-logo.png" alt="" />
           <span>
             <strong>Paseos Juan</strong>
             <small>Más que un simple paseo</small>
@@ -2138,7 +2138,7 @@ function HeroSection() {
       </div>
       <div class="hero-media reveal">
         <div class="dog-frame">
-          <img src="/src/assets/hero-dog-premium.png" alt="Perro entrenado con estética premium de Paseos Juan" />
+          <img src="/hero-dog-premium.png" alt="Perro entrenado con estética premium de Paseos Juan" />
           <div class="dog-glass-card">
             <span class="glass-icon">${icon("radar")}</span>
             <strong>Control total</strong>
@@ -2366,7 +2366,7 @@ function Footer() {
   return `
     <footer class="footer reveal">
       <a class="menu-brand" href="/" data-link>
-        <img src="/src/assets/paseos-juan-logo.png" alt="" />
+        <img src="/paseos-juan-logo.png" alt="" />
         <span>
           <strong>Paseos Juan</strong>
           <small>Más que un simple paseo</small>
@@ -2509,7 +2509,7 @@ function WalkerHeader() {
     <header class="walker-header">
       <a class="walker-brand" href="/paseador" data-link aria-label="Paseos Juan Operativo">
         <span class="walker-logo">
-          <img src="/src/assets/paseos-juan-logo-white.svg" alt="" />
+          <img src="/paseos-juan-logo-white.svg" alt="" />
         </span>
         <span>
           <strong>Paseos Juan Operativo</strong>
@@ -2532,7 +2532,7 @@ function SupervisorHeader() {
     <header class="walker-header supervisor-header">
       <a class="walker-brand" href="/supervisor" data-link aria-label="Paseos Juan Control">
         <span class="walker-logo">
-          <img src="/src/assets/paseos-juan-logo-white.svg" alt="" />
+          <img src="/paseos-juan-logo-white.svg" alt="" />
         </span>
         <span>
           <strong>Paseos Juan Control</strong>
@@ -2555,7 +2555,7 @@ function CoordinatorHeader() {
     <header class="coordinator-header">
       <a class="coordinator-brand" href="/coordinador" data-link aria-label="Paseos Juan Gestión">
         <span class="coordinator-logo">
-          <img src="/src/assets/paseos-juan-logo-green.svg" alt="" />
+          <img src="/paseos-juan-logo-green.svg" alt="" />
         </span>
         <span>
           <strong>Paseos Juan Gestión</strong>
@@ -2578,7 +2578,7 @@ function AdminHeader() {
     <header class="admin-header">
       <a class="admin-brand" href="/admin" data-link aria-label="Paseos Juan Admin">
         <span class="admin-logo">
-          <img src="/src/assets/paseos-juan-logo-white.svg" alt="" />
+          <img src="/paseos-juan-logo-white.svg" alt="" />
         </span>
         <span>
           <strong>Paseos Juan Admin</strong>
