@@ -1,0 +1,20 @@
+# Configuración para desplegar en Render (render.com).
+# OJO: el disco persistente (para no perder la base de datos SQLite
+# entre reinicios) requiere el plan "Starter" de pago. En el plan
+# gratuito el archivo data/paseosjuan.db se borra cada vez que el
+# servicio se reinicia o se redespliega. Ver DEPLOY.md para el detalle
+# y las alternativas.
+services:
+  - type: web
+    name: paseos-juan
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+    disk:
+      name: paseos-juan-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
