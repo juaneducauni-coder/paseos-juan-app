@@ -39,6 +39,41 @@ const ROLES = {
   },
 };
 
+// Plataforma interna real (backend con autenticacion real, ya publicada).
+// Los accesos del equipo interno (admin/coordinador/supervisor/paseador)
+// ya no abren los paneles demo de este sitio: van directo a la plataforma real.
+const INTERNAL_PLATFORM_URL = "https://paseos-juan-app.onrender.com";
+
+// A donde manda cada rol interno dentro de la plataforma real.
+// "admin" abre directo la seccion de administrador; el resto cae en su
+// pantalla propia, protegida por el login real de esa plataforma.
+const INTERNAL_PLATFORM_ROUTES = {
+  admin: "/administrador/usuarios",
+  coordinador: "/coordinador/perros",
+  supervisor: "/supervisor/rutas",
+  paseador: "/paseador/jornada",
+};
+
+function goToInternalPlatform(roleKey) {
+  const path = INTERNAL_PLATFORM_ROUTES[roleKey] || "/login";
+  window.location.href = `${INTERNAL_PLATFORM_URL}${path}`;
+}
+
+// Rutas locales de este sitio (demo) que ahora corresponden a un rol interno
+// real. Se usa para decidir, tanto desde el login como desde la navegacion
+// directa, cuando hay que mandar a la plataforma real en vez de mostrar el
+// panel demo local.
+const INTERNAL_ROLE_KEY_BY_ROUTE = {
+  "/admin": "admin",
+  "/dashboard/admin": "admin",
+  "/coordinador": "coordinador",
+  "/dashboard/coordinador": "coordinador",
+  "/supervisor": "supervisor",
+  "/dashboard/supervisor": "supervisor",
+  "/paseador": "paseador",
+  "/dashboard/paseador": "paseador",
+};
+
 const DOGS = [
   {
     id: "luna",
@@ -934,7 +969,13 @@ document.addEventListener("click", (event) => {
     event.preventDefault();
     const form = loginButton.closest("form");
     const email = form?.querySelector("[name='email']")?.value?.trim() || "";
-    navigate(getLoginRouteByEmail(email));
+    const target = getLoginRouteByEmail(email);
+    const internalRoleKey = INTERNAL_ROLE_KEY_BY_ROUTE[target];
+    if (internalRoleKey) {
+      goToInternalPlatform(internalRoleKey);
+      return;
+    }
+    navigate(target);
     return;
   }
 
@@ -1728,6 +1769,14 @@ function render() {
   if (path === "/registro" || path === "/register") {
     app.innerHTML = authPage("register");
     hydrateAfterRender();
+    return;
+  }
+
+  // Accesos internos (admin/coordinador/supervisor/paseador): ya no muestran
+  // el panel demo local, van directo a la plataforma real publicada.
+  const internalRoleKey = INTERNAL_ROLE_KEY_BY_ROUTE[path];
+  if (internalRoleKey) {
+    goToInternalPlatform(internalRoleKey);
     return;
   }
 
