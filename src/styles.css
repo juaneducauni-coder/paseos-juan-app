@@ -5721,3 +5721,111 @@ dd {
 .dark-panel .chat-empty-state {
   color: #9ca39d;
 }
+
+/* ---- Mejoras de la página pública (12/11/2026) ---- */
+
+/* Sección de evaluación alineada con el resto de la página en pantallas grandes */
+.contact-section {
+  padding-inline: max(24px, calc((100% - 1180px) / 2));
+}
+
+.contact-section > :first-child {
+  justify-self: start;
+}
+
+.contact-section h2 {
+  font-size: clamp(2.2rem, 3.4vw, 3.45rem);
+}
+
+a.ghost-button,
+a.primary-button {
+  text-decoration: none;
+}
+
+.price-card a.ghost-button {
+  margin-top: auto;
+}
+
+.promo-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  border-color: rgba(2, 95, 64, 0.28);
+  background: linear-gradient(160deg, rgba(234, 244, 239, 0.95), rgba(250, 248, 242, 0.95));
+}
+
+.promo-panel h3 {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.promo-panel p:not(.eyebrow) {
+  margin: 0;
+  color: var(--text);
+}
+
+.promo-panel .eyebrow {
+  margin: 0;
+}
+
+.evaluation-form [aria-invalid] {
+  border-color: #b3261e;
+  box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.12);
+}
+
+.evaluation-status {
+  margin: 0;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.evaluation-status:empty {
+  display: none;
+}
+
+.evaluation-status.is-error {
+  color: #b3261e;
+}
+
+.menu-whatsapp,
+.footer-whatsapp {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--green);
+  font-weight: 800;
+  padding: 0 18px;
+  text-decoration: none;
+}
+
+.menu-whatsapp:hover,
+.footer-whatsapp:hover {
+  border-color: var(--green);
+  background: rgba(2, 95, 64, 0.06);
+}
+
+@media (max-width: 760px) {
+  .footer {
+    flex-direction: column;
+    align-items: flex-start;
+    padding-bottom: 110px;
+  }
+}
+
+/* Quien pide menos movimiento ve todo el contenido sin animaciones */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+.mobile-menu .menu-whatsapp {
+  border-color: rgba(159, 189, 114, 0.5);
+  color: #9fbd72;
+}

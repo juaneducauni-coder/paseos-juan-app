@@ -39,6 +39,29 @@ const ROLES = {
   },
 };
 
+// Datos públicos del negocio. Cambiar acá y se actualiza toda la página.
+const BUSINESS = {
+  whatsapp: "5491151460864", // 11 5146-0864
+  whatsappLabel: "11 5146-0864",
+  zone: "Pilar y La Lonja",
+};
+
+// Promo vigente. Se oculta sola al pasar la fecha "until" (formato AAAA-MM-DD).
+const PROMO = {
+  title: "Muestra gratis de DogPro o CatPro + un paseo de regalo",
+  detail: "Abierta a cualquier persona: no hace falta ser cliente ni hacer una visita previa.",
+  until: "2026-12-01",
+  untilLabel: "01/12/2026",
+};
+
+function whatsappLink(message) {
+  return `https://wa.me/${BUSINESS.whatsapp}?text=${encodeURIComponent(message)}`;
+}
+
+function isPromoActive(now = new Date()) {
+  return now <= new Date(`${PROMO.until}T23:59:59-03:00`);
+}
+
 const DOGS = [
   {
     id: "luna",
@@ -753,7 +776,7 @@ const MENU_ITEMS = [
   ["Inicio", "/", "home"],
   ["Sobre nosotros", "/#sobre-nosotros", "shieldCheck"],
   ["Planes", "/#planes", "calendarCheck"],
-  ["Testimonios", "/#testimonios", "message"],
+  ["Compromiso", "/#testimonios", "message"],
   ["Preguntas frecuentes", "/#faq", "help"],
   ["Contacto", "/#contacto", "mail"],
   ["Login", "/login", "logIn"],
@@ -2057,7 +2080,7 @@ function HeaderMinimal(activeRole) {
         </span>
       </a>
       <div class="header-actions">
-        <a class="header-cta" href="/#evaluacion" data-link>Evaluación gratuita</a>
+        <a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>
         <button class="menu-button ${menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${menuOpen}" aria-label="Abrir menu">
           <span></span>
           <span></span>
@@ -2090,12 +2113,10 @@ function MobileMenu() {
           </a>
         `).join("")}
       </nav>
-      <a class="menu-evaluation" href="/#evaluacion" data-link>Evaluación gratuita</a>
-      <div class="menu-social">
-        <span>IG</span>
-        <span>WA</span>
-        <span>FB</span>
-      </div>
+      <a class="menu-evaluation" href="/#evaluacion" data-link>Pedí tu evaluación</a>
+      <a class="menu-whatsapp" href="${whatsappLink("Hola, quiero información sobre los paseos de Paseos Juan.")}" target="_blank" rel="noreferrer">
+        WhatsApp ${BUSINESS.whatsappLabel}
+      </a>
     </aside>
   `;
 }
@@ -2111,7 +2132,7 @@ function landingPage() {
       ${FeatureCards()}
       ${CTASection()}
       ${Footer()}
-      <a class="whatsapp" href="https://wa.me/5491100000000" target="_blank" rel="noreferrer">WhatsApp</a>
+      <a class="whatsapp" href="${whatsappLink("Hola, quiero información sobre los paseos de Paseos Juan.")}" target="_blank" rel="noreferrer" aria-label="Escribinos por WhatsApp">WhatsApp</a>
     </main>
   `);
 }
@@ -2129,10 +2150,10 @@ function HeroSection() {
         </h1>
         <p>
           Paseos organizados por conducta, energía y compatibilidad para que tu perro viva una
-          experiencia segura, activa y equilibrada.
+          experiencia segura, activa y equilibrada. Cuidado y confianza como en casa, en ${BUSINESS.zone}.
         </p>
         <div class="hero-actions">
-          <a class="primary-button" href="#evaluacion" data-link>Evaluación gratuita</a>
+          <a class="primary-button" href="#evaluacion" data-link>Pedí tu evaluación</a>
           <a class="secondary-button" href="#sobre-nosotros" data-link>Conocé más</a>
         </div>
       </div>
@@ -2171,17 +2192,18 @@ function FeatureCards() {
 
     <section class="trust-section reveal" id="testimonios">
       <div>
-        <p class="eyebrow">Testimonios</p>
+        <p class="eyebrow">Nuestro compromiso</p>
         <blockquote>
-          "Por primera vez puedo ver cómo vuelve mi perro, quién lo paseó y si hubo algo a observar."
+          "Que tu perro esté tan bien cuidado como cuando lo cuidás vos."
         </blockquote>
-        <cite>Cliente de Palermo</cite>
+        <cite>Paseos Juan · ${BUSINESS.zone}</cite>
       </div>
       <div class="faq" id="faq">
         <h3>Preguntas frecuentes</h3>
         ${faqItem("¿Cómo empieza el servicio?", "Con una evaluación inicial para conocer conducta, energía, vacunas y compatibilidades.")}
-        ${faqItem("¿Puedo ver fotos del paseo?", "Sí. El perfil cliente centraliza estado, historial y material del paseo.")}
-        ${faqItem("¿Hay seguimiento en tiempo real?", "El sistema queda preparado para incorporarlo en una etapa futura.")}
+        ${faqItem("¿En qué zona trabajan?", `En ${BUSINESS.zone}. Si estás cerca y no sabés si llegamos, escribinos y te confirmamos.`)}
+        ${faqItem("¿Qué pasa si mi perro no se lleva bien con otros perros?", "Lo evaluamos antes de sumarlo a un grupo. Si necesita paseo individual o una adaptación, te lo contamos antes de empezar.")}
+        ${faqItem("¿Cómo consulto disponibilidad?", `Escribinos por WhatsApp al ${BUSINESS.whatsappLabel} o completá el formulario de evaluación.`)}
       </div>
     </section>
   `;
@@ -2198,21 +2220,21 @@ function CTASection() {
           para armar una experiencia segura.
         </p>
       </div>
-      <form class="evaluation-form" id="evaluacion">
+      <form class="evaluation-form" id="evaluacion" data-evaluation-form novalidate>
         <fieldset class="evaluation-board">
           <legend>Datos del perro</legend>
           <p>Información básica para entender tamaño, edad y contexto general.</p>
           <div class="form-grid">
-            <label>Nombre del perro <input placeholder="Ej. Luna" /></label>
-            <label>Edad del perro <input placeholder="Ej. 4 años" /></label>
+            <label>Nombre del perro * <input name="perro" required autocomplete="off" placeholder="Ej. Luna" /></label>
+            <label>Edad del perro <input name="edad" placeholder="Ej. 4 años" /></label>
             <label>Tamaño
-              <select>
+              <select name="tamano">
                 <option>Pequeño</option>
                 <option>Mediano</option>
                 <option>Grande</option>
               </select>
             </label>
-            <label>Raza o cruza <input placeholder="Ej. Mestizo" /></label>
+            <label>Raza o cruza <input name="raza" placeholder="Ej. Mestizo" /></label>
           </div>
         </fieldset>
 
@@ -2221,27 +2243,28 @@ function CTASection() {
           <p>Datos clave para definir compatibilidad, ritmo y nivel de supervisión.</p>
           <div class="form-grid">
             <label>Nivel de energía
-              <select>
+              <select name="energia">
                 <option>Baja</option>
                 <option>Media</option>
                 <option>Alta</option>
               </select>
             </label>
             <label>¿Se lleva bien con otros perros?
-              <select>
+              <select name="perros">
                 <option>Sí</option>
                 <option>No</option>
                 <option>Depende</option>
               </select>
             </label>
-            <label>¿Tiene antecedentes de agresividad?
-              <select>
+            <label>¿Alguna vez mordió o intentó morder a una persona o a otro perro?
+              <select name="mordida">
                 <option>No</option>
                 <option>Sí</option>
+                <option>No estoy seguro</option>
               </select>
             </label>
             <label class="span-2">Observaciones de conducta
-              <textarea placeholder="Miedos, reactividad, hábitos o detalles importantes"></textarea>
+              <textarea name="conducta" placeholder="Miedos, cosas que lo ponen nervioso (motos, bicis, ruidos), si tira de la correa"></textarea>
             </label>
           </div>
         </fieldset>
@@ -2250,10 +2273,10 @@ function CTASection() {
           <legend>Datos del responsable</legend>
           <p>Canales y zona para coordinar la primera evaluación.</p>
           <div class="form-grid">
-            <label>Nombre del dueño/responsable <input placeholder="Tu nombre" /></label>
-            <label>Teléfono / WhatsApp <input placeholder="11 0000 0000" /></label>
-            <label>Zona o barrio <input placeholder="Ej. Palermo" /></label>
-            <label>Dirección aproximada <input placeholder="Entre calles o referencia" /></label>
+            <label>Tu nombre * <input name="responsable" required autocomplete="name" placeholder="Tu nombre" /></label>
+            <label>Teléfono / WhatsApp * <input name="telefono" required type="tel" autocomplete="tel" placeholder="11 0000 0000" /></label>
+            <label>Zona o barrio <input name="zona" placeholder="Ej. Pilar" /></label>
+            <label>Barrio privado o referencia <input name="referencia" placeholder="Ej. nombre del barrio" /></label>
           </div>
         </fieldset>
 
@@ -2262,32 +2285,33 @@ function CTASection() {
           <p>Preferencias iniciales para orientar la propuesta.</p>
           <div class="form-grid">
             <label>Tipo de paseo
-              <select>
+              <select name="tipo">
                 <option>Grupal</option>
                 <option>Evaluación inicial</option>
                 <option>Consulta</option>
               </select>
             </label>
             <label>Horario preferido
-              <select>
+              <select name="horario">
                 <option>Mañana</option>
                 <option>Tarde</option>
                 <option>Indistinto</option>
               </select>
             </label>
-            <label>Días posibles <input placeholder="Ej. lunes, miércoles y viernes" /></label>
+            <label>Días posibles <input name="dias" placeholder="Ej. lunes, miércoles y viernes" /></label>
             <label class="span-2">Comentario adicional
-              <textarea placeholder="Contanos cualquier detalle que ayude a evaluar mejor"></textarea>
+              <textarea name="comentario" placeholder="Contanos cualquier detalle que ayude a evaluar mejor"></textarea>
             </label>
           </div>
         </fieldset>
 
         <div class="evaluation-submit">
-          <button class="primary-button" type="button">Solicitar evaluación</button>
+          <button class="primary-button" type="submit">Enviar por WhatsApp</button>
           <small>
-            Te vamos a contactar para coordinar una primera evaluación y confirmar si el perro
-            puede integrarse al grupo.
+            Se abre WhatsApp con tus respuestas listas para enviar. Te contestamos para coordinar
+            la evaluación y confirmar si tu perro puede sumarse a un grupo. Los campos con * son obligatorios.
           </small>
+          <p class="evaluation-status" data-evaluation-status role="status" aria-live="polite"></p>
         </div>
       </form>
     </section>
@@ -2345,22 +2369,71 @@ function PricingSection() {
           `).join("")}
         </article>
 
-        <aside class="panel products-panel">
-          <h3>Catálogo de productos</h3>
-          ${PRODUCTS.map((product) => `
-            <div class="list-row">
-              <span>
-                <strong>${product.name}</strong>
-                <small>${product.tag}</small>
-              </span>
-              <b>${product.price}</b>
-            </div>
-          `).join("")}
-        </aside>
+        ${PromoPanel()}
       </div>
     </section>
   `;
 }
+
+function PromoPanel() {
+  if (isPromoActive()) {
+    return `
+      <aside class="panel products-panel promo-panel">
+        <p class="eyebrow">Promo hasta el ${PROMO.untilLabel}</p>
+        <h3>${PROMO.title}</h3>
+        <p>${PROMO.detail}</p>
+        <a class="primary-button" href="${whatsappLink("Hola, quiero la muestra gratis de DogPro o CatPro y el paseo de regalo.")}" target="_blank" rel="noreferrer">Quiero la promo</a>
+      </aside>
+    `;
+  }
+  return `
+    <aside class="panel products-panel promo-panel">
+      <h3>¿Tenés dudas?</h3>
+      <p>Escribinos y te contamos qué plan le conviene a tu perro.</p>
+      <a class="primary-button" href="${whatsappLink("Hola, quiero información sobre los paseos de Paseos Juan.")}" target="_blank" rel="noreferrer">Escribinos</a>
+    </aside>
+  `;
+}
+
+function buildEvaluationMessage(data) {
+  const line = (label, key) => (data.get(key) || "").toString().trim() ? `${label}: ${data.get(key).toString().trim()}` : null;
+  return [
+    "Hola, quiero pedir una evaluación para mi perro.",
+    "",
+    "*Perro*",
+    line("Nombre", "perro"), line("Edad", "edad"), line("Tamaño", "tamano"), line("Raza o cruza", "raza"),
+    "",
+    "*Conducta y energía*",
+    line("Energía", "energia"), line("Se lleva bien con otros perros", "perros"),
+    line("Mordió o intentó morder", "mordida"), line("Observaciones", "conducta"),
+    "",
+    "*Responsable*",
+    line("Nombre", "responsable"), line("Teléfono", "telefono"), line("Zona", "zona"), line("Referencia", "referencia"),
+    "",
+    "*Preferencias*",
+    line("Tipo", "tipo"), line("Horario", "horario"), line("Días", "dias"), line("Comentario", "comentario"),
+  ].filter((item) => item !== null).join("\n");
+}
+
+document.addEventListener("submit", (event) => {
+  const form = event.target.closest("[data-evaluation-form]");
+  if (!form) return;
+  event.preventDefault();
+
+  const status = form.querySelector("[data-evaluation-status]");
+  const missing = [...form.querySelectorAll("[required]")].filter((field) => !field.value.trim());
+  form.querySelectorAll("[required]").forEach((field) => field.toggleAttribute("aria-invalid", missing.includes(field)));
+  if (missing.length) {
+    status.textContent = "Completá el nombre del perro, tu nombre y tu teléfono para poder contactarte.";
+    status.classList.add("is-error");
+    missing[0].focus();
+    return;
+  }
+
+  status.classList.remove("is-error");
+  status.textContent = "Listo. Se abrió WhatsApp con tus respuestas: solo falta tocar Enviar.";
+  window.open(whatsappLink(buildEvaluationMessage(new FormData(form))), "_blank", "noopener");
+});
 
 function Footer() {
   return `
@@ -2372,7 +2445,8 @@ function Footer() {
           <small>Más que un simple paseo</small>
         </span>
       </a>
-      <p>Paseos grupales profesionales con orden, seguridad y bienestar.</p>
+      <p>Paseos grupales profesionales con orden, seguridad y bienestar. ${BUSINESS.zone}.</p>
+      <a class="footer-whatsapp" href="${whatsappLink("Hola, quiero información sobre los paseos de Paseos Juan.")}" target="_blank" rel="noreferrer">WhatsApp ${BUSINESS.whatsappLabel}</a>
     </footer>
   `;
 }
@@ -4830,7 +4904,7 @@ function priceCard(plan) {
           </div>
         `).join("")}
       </div>
-      <button class="ghost-button" type="button">Contratar</button>
+      <a class="ghost-button" href="${whatsappLink(`Hola, quiero consultar por el ${plan.name} (${plan.walks}) para mi perro.`)}" target="_blank" rel="noreferrer">Consultar</a>
     </article>
   `;
 }
