@@ -5829,3 +5829,160 @@ a.primary-button {
   border-color: rgba(159, 189, 114, 0.5);
   color: #9fbd72;
 }
+
+/* ---- Movimiento fluido tipo lámpara de lava ---- */
+
+html {
+  scroll-behavior: smooth;
+}
+
+.lava-lamp {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.landing-main {
+  position: relative;
+  z-index: 1;
+}
+
+/* Fondos más livianos para que la lava se vea detrás */
+.hero::before {
+  opacity: 0.3;
+}
+
+.contact-section {
+  background: transparent;
+}
+
+/* La foto principal cambia de forma lentamente, como una gota de lava */
+.hero-media {
+  position: relative;
+}
+
+.dog-frame {
+  border-radius: 44% 56% 48% 52% / 32% 38% 62% 68%;
+  animation: lavaShape 16s ease-in-out infinite alternate;
+  will-change: border-radius;
+}
+
+.hero-media .dog-glass-card {
+  position: absolute;
+  right: auto;
+  bottom: 48px;
+  left: -36px;
+  z-index: 2;
+  animation: lavaFloat 9s ease-in-out infinite alternate;
+}
+
+@keyframes lavaShape {
+  0% {
+    border-radius: 44% 56% 48% 52% / 32% 38% 62% 68%;
+  }
+  25% {
+    border-radius: 58% 42% 54% 46% / 40% 30% 70% 60%;
+  }
+  50% {
+    border-radius: 40% 60% 38% 62% / 36% 44% 56% 64%;
+  }
+  75% {
+    border-radius: 54% 46% 60% 40% / 28% 40% 60% 72%;
+  }
+  100% {
+    border-radius: 48% 52% 44% 56% / 42% 34% 66% 58%;
+  }
+}
+
+@keyframes lavaFloat {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-18px);
+  }
+}
+
+@media (max-width: 760px) {
+  .hero-media .dog-glass-card {
+    left: 12px;
+    bottom: 20px;
+  }
+}
+
+/* Entradas más suaves al bajar por la página */
+.reveal {
+  filter: blur(8px);
+  transform: translateY(34px) scale(0.985);
+  transition:
+    opacity 1100ms var(--ease),
+    transform 1100ms var(--ease),
+    filter 1100ms var(--ease);
+}
+
+.reveal.is-visible {
+  filter: none;
+  transform: none;
+}
+
+/* Tarjetas que flotan apenas al pasar el mouse */
+.price-card,
+.pricing-details-grid .panel,
+.discount-card,
+.evaluation-board {
+  transition:
+    transform 700ms var(--ease),
+    box-shadow 700ms var(--ease),
+    border-radius 700ms var(--ease);
+}
+
+@media (hover: hover) {
+  .price-card:hover,
+  .pricing-details-grid .panel:hover,
+  .discount-card:hover {
+    transform: translateY(-6px);
+    border-radius: 34px 26px 34px 26px;
+    box-shadow: 0 26px 60px rgba(2, 95, 64, 0.12);
+  }
+}
+
+.primary-button,
+.ghost-button,
+.secondary-button,
+.header-cta,
+.whatsapp {
+  transition:
+    transform 600ms var(--ease),
+    border-radius 600ms var(--ease),
+    background 600ms var(--ease),
+    box-shadow 600ms var(--ease);
+}
+
+@media (hover: hover) {
+  .primary-button:hover,
+  .ghost-button:hover,
+  .secondary-button:hover,
+  .whatsapp:hover {
+    border-radius: 22px 30px 20px 28px;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .dog-frame,
+  .hero-media .dog-glass-card {
+    animation: none;
+  }
+
+  .reveal {
+    filter: none;
+  }
+}
