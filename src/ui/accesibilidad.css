@@ -1,0 +1,195 @@
+/* ---- Accesibilidad: control flotante, tema oscuro y modo calmo ---- */
+
+/* Tema oscuro: tokens base. Cada página completa sus propios ajustes en su CSS
+   usando el selector html[data-theme="dark"]. */
+html[data-theme="dark"] {
+  --green: #5cc497;
+  --green-strong: #2f9a6c;
+  --military: #0b120e;
+  --olive: #9fbd72;
+  --beige: #0f1512;
+  --bone: #eef3ef;
+  --ink: #eef3ef;
+  --text: #b4c0b8;
+  --line: rgba(234, 244, 239, 0.12);
+  --line-strong: rgba(234, 244, 239, 0.22);
+  --surface: rgba(24, 33, 28, 0.9);
+  --white: #18211c;
+  --card: #161e1a;
+  --field: #1c2621;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.45);
+  --soft-shadow: 0 14px 38px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] body {
+  background: var(--beige);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  border-color: var(--line-strong);
+  background: var(--field);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] ::placeholder {
+  color: #7f8b84;
+}
+
+/* Modo calmo: sin animaciones, sin transiciones, sin fondo en movimiento */
+html[data-motion="calm"] *,
+html[data-motion="calm"] *::before,
+html[data-motion="calm"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-motion="calm"] .reveal {
+  opacity: 1 !important;
+  filter: none !important;
+  transform: none !important;
+}
+
+/* Botón flotante (abajo a la izquierda, lejos del botón de WhatsApp) */
+#a11y-root {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 60;
+  font-family: inherit;
+}
+
+.a11y-toggle {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid rgba(15, 31, 19, 0.16);
+  border-radius: 999px;
+  background: #faf8f2;
+  color: #015f3d;
+  box-shadow: 0 12px 30px rgba(15, 31, 19, 0.16);
+  cursor: pointer;
+}
+
+.a11y-toggle:focus-visible,
+.a11y-option:focus-visible,
+.a11y-close:focus-visible {
+  outline: 3px solid #5cc497;
+  outline-offset: 2px;
+}
+
+.a11y-panel {
+  position: absolute;
+  left: 0;
+  bottom: 60px;
+  display: grid;
+  width: min(330px, calc(100vw - 36px));
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(15, 31, 19, 0.14);
+  border-radius: 22px;
+  background: #faf8f2;
+  color: #111;
+  box-shadow: 0 24px 60px rgba(15, 31, 19, 0.2);
+}
+
+.a11y-panel[hidden] {
+  display: none;
+}
+
+.a11y-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.a11y-close {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.a11y-group {
+  display: grid;
+  gap: 8px;
+}
+
+.a11y-group > span {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #444;
+}
+
+.a11y-group small {
+  color: #444;
+  line-height: 1.4;
+}
+
+.a11y-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.a11y-option {
+  min-height: 42px;
+  border: 1px solid rgba(15, 31, 19, 0.18);
+  border-radius: 12px;
+  background: #fff;
+  color: #111;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.a11y-option.is-active {
+  border-color: #015f3d;
+  background: #015f3d;
+  color: #fff;
+}
+
+html[data-theme="dark"] .a11y-toggle,
+html[data-theme="dark"] .a11y-panel {
+  border-color: rgba(234, 244, 239, 0.18);
+  background: #18211c;
+  color: #eef3ef;
+}
+
+html[data-theme="dark"] .a11y-toggle {
+  color: #5cc497;
+}
+
+html[data-theme="dark"] .a11y-group > span,
+html[data-theme="dark"] .a11y-group small {
+  color: #b4c0b8;
+}
+
+html[data-theme="dark"] .a11y-option {
+  border-color: rgba(234, 244, 239, 0.2);
+  background: #1c2621;
+  color: #eef3ef;
+}
+
+html[data-theme="dark"] .a11y-option.is-active {
+  border-color: #5cc497;
+  background: #2f9a6c;
+  color: #0b120e;
+}
+
+@media print {
+  #a11y-root {
+    display: none;
+  }
+}
