@@ -29,6 +29,7 @@ La lista y lo que se sabe de cada uno está en `asistente/proyectos.md`. Es la f
 | `agenda-juan` | Agenda, prioridades y semana de Juan en todos sus proyectos. |
 | `paseos-juan` | Operación de Paseos Juan: perros, fichas, paseos, incidentes, equipo. |
 | `proyectos-juan` | Los otros 7 proyectos: tareas, ideas, mensajes y seguimiento. |
+| `juan-3-0` | Coordinador: reparte trabajos entre chats e IAs y sigue su estado en el Centro de mando. |
 
 ## Modos (`.claude/commands/`)
 
@@ -37,3 +38,8 @@ La lista y lo que se sabe de cada uno está en `asistente/proyectos.md`. Es la f
 - `/auditar`: revisar algo ya hecho y marcar problemas, sin corregirlos solo.
 - `/entregar-a-juan`: resumen final corto, listo para que Juan lo lea.
 - `/semana`: armar la semana con las 3 prioridades.
+- `/encargar`: repartir un trabajo a otro chat o IA (JUAN 3.0).
+
+## JUAN 3.0 — coordinación entre chats e IAs
+
+El reparto de trabajos vive en el Google Doc "Centro de mando — Paseos Juan (JUAN 3.0)" (id `15dlJFl5o20Kr1n0ctMYSCjduPD6eA0Qg8X55qHjwnIQ`). Al empezar una sesión de coordinación, leelo primero.
