@@ -14,6 +14,7 @@ import {
   runHandlers,
 } from "./ui/shared.js";
 import { startLavaLamp, hydrateReveal } from "./ui/lava.js";
+import { initAccessibility, onAccessibilityChange } from "./ui/accesibilidad.js";
 import { landingPage, authPage, registerLandingEvents } from "./views/landing.js";
 import { clientDashboard, registerClienteEvents } from "./views/cliente.js";
 import { walkerShell, walkerDashboard, registerPaseadorEvents } from "./views/paseador.js";
@@ -181,6 +182,8 @@ function dashboardPage(roleKey) {
   `, roleKey);
 }
 
+initAccessibility();
+onAccessibilityChange(() => startLavaLamp());
 render();
 
 document.addEventListener("click", (event) => {

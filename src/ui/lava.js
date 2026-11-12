@@ -1,5 +1,6 @@
 // Efectos visuales: fondo tipo lámpara de lava y aparición de secciones al hacer scroll.
 import { state } from "../state.js";
+import { isCalmMotion, isDarkTheme } from "./accesibilidad.js";
 
 // Fondo tipo lámpara de lava: manchas que suben, bajan y se funden entre sí.
 // Se dibuja en baja resolución y el navegador lo agranda suave: liviano también en celulares.
@@ -27,10 +28,12 @@ export function startLavaLamp() {
   if (!context) return;
 
   const scale = 4;
-  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Modo calmo (o el sistema pide menos movimiento): se dibuja un solo cuadro quieto.
+  const still = isCalmMotion();
   // Colores de marca: de verde suave (#EAF4EF) en el borde a verde medio en el centro.
-  const edge = [184, 218, 198];
-  const core = [132, 186, 157];
+  // En modo oscuro, verdes profundos que no encandilan.
+  const edge = isDarkTheme() ? [22, 52, 39] : [184, 218, 198];
+  const core = isDarkTheme() ? [34, 92, 66] : [132, 186, 157];
   let image;
 
   function resize() {
