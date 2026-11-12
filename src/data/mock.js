@@ -585,7 +585,8 @@ export const PAYMENT_HISTORY = [
   },
 ];
 
-export const PAYMENT_ALIAS = "dejandohuellas.plan";
+// El alias real no se guarda en el código: se envía por WhatsApp.
+export const PAYMENT_ALIAS = "Te lo enviamos por WhatsApp";
 
 export const ADMIN_SUMMARY = [
   ["Perros activos", "24", "pawPrint"],

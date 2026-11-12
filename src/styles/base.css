@@ -3840,3 +3840,144 @@ html {
     filter: none;
   }
 }
+
+/* Avisos breves (toast): arriba al centro, lejos de los botones flotantes */
+.toast {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 10000;
+  max-width: min(92vw, 460px);
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: #015f3d;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 14px 34px rgba(15, 31, 19, 0.22);
+  transform: translateX(-50%);
+}
+
+.toast.is-error {
+  background: #b3261e;
+}
+
+/* ---- Modo oscuro: componentes compartidos y página pública ----
+   --bone se usa como fondo claro y también como texto claro sobre verde o negro.
+   En oscuro queda claro (sirve como texto), así que los fondos que lo usaban
+   pasan a --card y los botones verdes llevan texto oscuro para mantener contraste. */
+html[data-theme="dark"] .topbar,
+html[data-theme="dark"] .mobile-first-header,
+html[data-theme="dark"] .auth-card,
+html[data-theme="dark"] .panel,
+html[data-theme="dark"] .price-card,
+html[data-theme="dark"] .discount-card,
+html[data-theme="dark"] .evaluation-board,
+html[data-theme="dark"] .evaluation-submit,
+html[data-theme="dark"] .compact-plan-card,
+html[data-theme="dark"] .demo-client-card,
+html[data-theme="dark"] .vaccination-card,
+html[data-theme="dark"] .chat-window,
+html[data-theme="dark"] .chat-conversations-list,
+html[data-theme="dark"] .chat-input-area,
+html[data-theme="dark"] .chat-readonly-banner,
+html[data-theme="dark"] .coordinator-header,
+html[data-theme="dark"] .coordinator-module,
+html[data-theme="dark"] .coordinator-request-card,
+html[data-theme="dark"] .coordinator-shell .shared-chat-panel,
+html[data-theme="dark"] .payments-panel,
+html[data-theme="dark"] .payment-alert-card {
+  border-color: var(--line);
+  background: var(--card);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .topbar,
+html[data-theme="dark"] .mobile-first-header {
+  background: rgba(22, 30, 26, 0.86);
+}
+
+html[data-theme="dark"] .ghost-button,
+html[data-theme="dark"] .secondary-button,
+html[data-theme="dark"] .menu-button,
+html[data-theme="dark"] .menu-button:hover,
+html[data-theme="dark"] .brand-mark,
+html[data-theme="dark"] .coordinator-logo,
+html[data-theme="dark"] .footer .menu-brand img,
+html[data-theme="dark"] .chat-head button,
+html[data-theme="dark"] .chat-quick-actions button,
+html[data-theme="dark"] .is-other .chat-message-text,
+html[data-theme="dark"] select,
+html[data-theme="dark"] select:focus,
+html[data-theme="dark"] .coordinator-shell select {
+  border-color: var(--line-strong);
+  background: var(--field);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .menu-button span {
+  background: var(--ink);
+}
+
+html[data-theme="dark"] .header-cta {
+  border-color: rgba(92, 196, 151, 0.4);
+  background: rgba(92, 196, 151, 0.12);
+  color: var(--green);
+}
+
+html[data-theme="dark"] .primary-button,
+html[data-theme="dark"] .whatsapp,
+html[data-theme="dark"] .price-card > strong,
+html[data-theme="dark"] .quick-actions button,
+html[data-theme="dark"] .chat-bubble,
+html[data-theme="dark"] .chat-message.user,
+html[data-theme="dark"] .is-mine .chat-message-text,
+html[data-theme="dark"] .header-cta:hover {
+  background: var(--green);
+  color: #0b120e;
+}
+
+html[data-theme="dark"] .hero::before {
+  background: linear-gradient(118deg, rgba(15, 21, 18, 0.94) 0%, rgba(15, 21, 18, 0.78) 45%, rgba(15, 21, 18, 0.35) 75%, rgba(47, 154, 108, 0.14) 100%);
+  opacity: 1;
+}
+
+html[data-theme="dark"] .promo-panel {
+  border-color: rgba(92, 196, 151, 0.35);
+  background: linear-gradient(160deg, rgba(47, 154, 108, 0.16), var(--card));
+}
+
+html[data-theme="dark"] .menu-whatsapp,
+html[data-theme="dark"] .footer-whatsapp {
+  border-color: rgba(92, 196, 151, 0.4);
+  color: var(--green);
+}
+
+html[data-theme="dark"] .toast {
+  background: #2f9a6c;
+  color: #0b120e;
+}
+
+html[data-theme="dark"] .toast.is-error {
+  background: #f2b8b5;
+  color: #3b0907;
+}
+
+html[data-theme="dark"] .evaluation-form [aria-invalid] {
+  border-color: #f2b8b5;
+}
+
+html[data-theme="dark"] .evaluation-status.is-error {
+  color: #f2b8b5;
+}
+
+/* Cada bloque del formulario arranca arriba aunque el de al lado sea más alto */
+.evaluation-board {
+  align-content: start;
+}
+
+html[data-theme="dark"] .tariff-sizes,
+html[data-theme="dark"] .tariff-table > * {
+  border-color: var(--line);
+  background: var(--card);
+  color: var(--ink);
+}

@@ -453,7 +453,7 @@ export function GlobalModal() {
     case 'admin-client': html = "<h3>Ficha del cliente</h3><p>Detalle demo del cliente.</p><button data-modal-action='close'>Cerrar</button>"; break;
     case 'admin-audit': html = "<h3>Auditoría</h3><p>Auditoría de cambios y chats.</p><button data-modal-action='close'>Cerrar</button>"; break;
     case 'admin-settings': html = "<h3>Configuración del sistema</h3><p>Opciones generales demo.</p><button data-modal-action='close'>Cerrar</button>"; break;
-    case 'client-pay': html = "<h3>Pago online (Demo)</h3><p>Alias: dejandohuellas.plan</p><label>Subir comprobante <input type='file' accept='image/*,.pdf' /></label><button class='primary-button' data-modal-action='confirm-pay'>Enviar comprobante</button> <button data-modal-action='close'>Cerrar</button>"; break;
+    case 'client-pay': html = "<h3>Enviar comprobante</h3><p>El alias y el detalle de pago te los enviamos por WhatsApp. Cuando pagues, subí acá el comprobante.</p><label>Subir comprobante <input type='file' accept='image/*,.pdf' /></label><button class='primary-button' data-modal-action='confirm-pay'>Enviar comprobante</button> <button data-modal-action='close'>Cerrar</button>"; break;
     default: html = "<h3>Modal</h3><button data-modal-action='close'>Cerrar</button>";
   }
 
@@ -466,21 +466,30 @@ export function GlobalModal() {
   `;
 }
 
+let toastTimer = null;
+
 export function GlobalToast() {
-  const toastStr = localStorage.getItem("paseosJuanToast");
-  if (!toastStr) return "";
-  const toast = JSON.parse(toastStr);
-  // Auto close toast is handled by a side effect or setTimeout, but for a render-driven app,
-  // we can use a setTimeout here to clear it.
-  setTimeout(() => {
-    if (localStorage.getItem("paseosJuanToast")) {
-      localStorage.removeItem("paseosJuanToast");
-      window.dispatchEvent(new Event("paseosJuanStoreUpdate"));
-    }
-  }, 3000);
-  
+  let toast = null;
+  try {
+    toast = JSON.parse(localStorage.getItem("paseosJuanToast"));
+  } catch {
+    toast = null;
+  }
+  if (!toast) return "";
+
+  // Un solo temporizador por aviso, aunque la página se redibuje mientras está visible.
+  if (!toastTimer) {
+    toastTimer = setTimeout(() => {
+      toastTimer = null;
+      if (localStorage.getItem("paseosJuanToast")) {
+        localStorage.removeItem("paseosJuanToast");
+        window.dispatchEvent(new Event("paseosJuanStoreUpdate"));
+      }
+    }, 3500);
+  }
+
   return `
-    <div class="toast is-${toast.type}" style="position:fixed; bottom: 20px; right: 20px; z-index: 10000; padding: 12px 24px; background: ${toast.type === 'error' ? '#ef4444' : '#10b981'}; color: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+    <div class="toast is-${toast.type === "error" ? "error" : "success"}" role="status" aria-live="polite">
       ${toast.message}
     </div>
   `;
