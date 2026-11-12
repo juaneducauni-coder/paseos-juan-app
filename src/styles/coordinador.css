@@ -1,0 +1,376 @@
+/* Vista del rol Coordinador (incluye cobros). */
+
+.coordinator-shell .secondary-button {
+  background: rgba(250, 248, 242, 0.84);
+  color: #0f1311;
+}
+
+.coordinator-shell .menu-backdrop,
+.coordinator-shell .mobile-menu {
+  pointer-events: none;
+}
+
+.coordinator-shell .mobile-menu.is-open,
+.coordinator-shell .menu-backdrop.is-open {
+  pointer-events: auto;
+}
+
+.coordinator-shell .coordinator-header {
+  color: #0f1311;
+}
+
+/*
+  Dashboard-specific visibility guard: coordinator is an internal tool, so it
+  must never depend on scroll reveal animation to become readable.
+*/
+
+.coordinator-shell * {
+  visibility: visible;
+}
+
+.coordinator-shell [hidden] {
+  display: none !important;
+}
+
+.coordinator-shell .chat-window {
+  visibility: visible;
+}
+
+.coordinator-shell .chat-window:not(.unused) {
+  color: #0f1311;
+}
+
+.coordinator-shell .chat-window[aria-hidden="true"] {
+  display: none;
+}
+
+.coordinator-shell .floating-chat .chat-window {
+  display: none;
+}
+
+.coordinator-shell .floating-chat.is-open .chat-window {
+  display: grid;
+}
+
+.coordinator-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(2, 95, 64, 0.08), transparent 30%),
+    linear-gradient(180deg, #f7f5ef 0%, #faf8f2 100%);
+}
+
+.coordinator-logo img {
+  width: 38px;
+  height: 38px;
+  object-fit: contain;
+}
+
+.coordinator-hero h1,
+.coordinator-module-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 950;
+  line-height: 0.95;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.coordinator-hero h1 {
+  font-size: clamp(3rem, 7vw, 5.6rem);
+}
+
+.coordinator-hero-stats span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(2, 95, 64, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+  padding: 16px;
+}
+
+.coordinator-module-head h2 {
+  font-size: clamp(1.8rem, 4vw, 3.2rem);
+}
+
+.coordinator-form-grid label {
+  min-width: 0;
+}
+
+.coordinator-feedback.is-compact {
+  max-width: 360px;
+}
+
+.coordinator-request-card:hover {
+  border-color: rgba(2, 95, 64, 0.28);
+  box-shadow: 0 22px 54px rgba(15, 31, 19, 0.1);
+  transform: translateY(-3px);
+}
+
+.coordinator-request-head span {
+  color: var(--green);
+}
+
+.coordinator-request-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.3rem;
+  font-weight: 950;
+}
+
+.coordinator-request-actions .secondary-button {
+  min-height: 42px;
+  justify-content: center;
+  padding: 0 10px;
+}
+
+.payments-heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(2.3rem, 5vw, 4.4rem);
+  font-weight: 950;
+  line-height: 0.94;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.payments-heading p:not(.eyebrow),
+.payments-section-head p {
+  max-width: 650px;
+  margin: 8px 0 0;
+  color: var(--text);
+}
+
+.payment-summary-card span,
+.payment-alias-card > span {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 18px;
+  background: rgba(2, 95, 64, 0.08);
+  color: var(--green);
+}
+
+.payment-summary-card .line-icon,
+.payment-alias-card .line-icon {
+  width: 27px;
+  height: 27px;
+}
+
+.payments-section-head h3,
+.payment-alias-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.15rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.client-payment-card:hover {
+  border-color: rgba(2, 95, 64, 0.28);
+  box-shadow: 0 20px 52px rgba(15, 31, 19, 0.1);
+  transform: translateY(-3px);
+}
+
+.client-payment-head h4 {
+  margin: 4px 0 2px;
+  color: var(--ink);
+  font-size: 1.45rem;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.client-payment-head p,
+.payment-alert-card p,
+.payment-alias-card p,
+.payment-history-row span {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.payment-status.pendiente {
+  border-color: rgba(201, 162, 39, 0.34);
+  background: rgba(201, 162, 39, 0.1);
+  color: #7b621a;
+}
+
+.payment-status.vencido,
+.payment-status.deuda,
+.payment-status.sin-pagar {
+  border-color: rgba(201, 79, 79, 0.34);
+  background: rgba(201, 79, 79, 0.09);
+  color: #943636;
+}
+
+.payment-status.pago-por-confirmar,
+.payment-status.por-confirmar,
+.payment-status.recordatorio-enviado {
+  border-color: rgba(70, 96, 112, 0.28);
+  background: rgba(70, 96, 112, 0.09);
+  color: #465f70;
+}
+
+.payment-detail-grid span {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(2, 95, 64, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 12px;
+}
+
+.payment-actions .secondary-button {
+  min-height: 44px;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.payment-alias-card {
+  align-content: start;
+  grid-template-columns: auto 1fr;
+}
+
+.payment-alias-card .primary-button,
+.payment-alias-card .payment-feedback {
+  grid-column: 1 / -1;
+}
+
+.payment-feedback {
+  color: var(--green);
+  font-weight: 900;
+}
+
+.payment-alert-list,
+.payment-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-alert-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px 12px;
+  align-items: start;
+  padding: 16px;
+}
+
+.payment-alert-card p,
+.payment-alert-card .payment-actions {
+  grid-column: 1 / -1;
+}
+
+.payment-history-row > div {
+  display: grid;
+  gap: 4px;
+}
+
+.payment-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(7, 17, 12, 0.58);
+  padding: 18px;
+  backdrop-filter: blur(14px);
+}
+
+.payment-modal {
+  display: grid;
+  gap: 18px;
+  width: min(760px, 100%);
+  max-height: calc(100svh - 36px);
+  overflow: auto;
+  border: 1px solid rgba(250, 248, 242, 0.18);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(250, 248, 242, 0.98), rgba(247, 245, 239, 0.96)),
+    var(--bone);
+  box-shadow: 0 32px 90px rgba(7, 17, 12, 0.36);
+  padding: 24px;
+}
+
+.payment-modal-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.7rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.payment-modal-head button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid rgba(2, 95, 64, 0.14);
+  border-radius: 16px;
+  background: rgba(2, 95, 64, 0.06);
+  color: var(--green);
+  cursor: pointer;
+}
+
+.payment-form-grid label,
+.payment-reminder-message {
+  color: var(--text);
+}
+
+.payment-reminder-message textarea {
+  min-height: 250px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1120px) {
+  .payments-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .coordinator-hero,
+  .coordinator-operations-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .payments-heading,
+  .payments-panel,
+  .coordinator-hero,
+  .coordinator-module,
+  .payment-modal {
+    border-radius: 24px;
+    padding: 18px;
+  }
+
+  .payments-permissions,
+  .coordinator-action-row .primary-button,
+  .coordinator-action-row .secondary-button,
+  .coordinator-header-actions,
+  .coordinator-header-actions .secondary-button,
+  .payment-modal-actions .primary-button,
+  .payment-modal-actions .secondary-button,
+  .payment-alias-card .primary-button {
+    width: 100%;
+  }
+
+  .coordinator-dashboard {
+    padding: 18px 14px 34px;
+  }
+
+  .payment-alert-card {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-modal-backdrop {
+    padding: 8px;
+  }
+
+  .payment-modal {
+    max-height: calc(100svh - 16px);
+  }
+}

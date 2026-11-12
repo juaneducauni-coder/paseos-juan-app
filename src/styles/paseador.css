@@ -1,0 +1,134 @@
+/* Vista del rol Paseador. */
+
+.walk-progress {
+  display: grid;
+  gap: 10px;
+}
+
+.walk-step {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 11px;
+  align-items: center;
+  border: 1px solid rgba(156, 163, 157, 0.13);
+  border-radius: 18px;
+  background: rgba(7, 17, 12, 0.48);
+  color: #9ca39d;
+  padding: 10px;
+}
+
+.walk-step b {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(244, 241, 232, 0.04);
+}
+
+.walk-step.is-active {
+  border-color: rgba(31, 143, 90, 0.55);
+  color: #f4f1e8;
+  box-shadow: inset 0 0 0 1px rgba(31, 143, 90, 0.14), 0 14px 36px rgba(31, 143, 90, 0.12);
+}
+
+.walker-secondary-button.is-complete {
+  border-color: rgba(31, 143, 90, 0.45);
+  color: #9ee1bd;
+}
+
+.assigned-dog-card.is-retired {
+  border-color: rgba(31, 143, 90, 0.45);
+  background: #13291c;
+}
+
+.assigned-dog-card p {
+  margin: 0;
+  color: #d9d6cc;
+}
+
+.dog-detail-box {
+  display: grid;
+  gap: 8px;
+  border-left: 2px solid #1f8f5a;
+  background: rgba(7, 17, 12, 0.5);
+  color: #9ca39d;
+  padding: 12px;
+}
+
+.dog-detail-box span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.route-panel {
+  background:
+    radial-gradient(circle at 82% 12%, rgba(31, 143, 90, 0.17), transparent 30%),
+    #101f16;
+}
+
+.operative-route-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.operative-route-list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  min-height: 58px;
+  align-items: start;
+}
+
+.operative-route-list li:not(:last-child)::after {
+  position: absolute;
+  top: 38px;
+  bottom: -8px;
+  left: 19px;
+  width: 1px;
+  background: rgba(31, 143, 90, 0.24);
+  content: "";
+}
+
+.operative-route-list li > b {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(31, 143, 90, 0.16);
+  color: #1f8f5a;
+}
+
+.operative-route-list strong,
+.operative-route-list small {
+  display: block;
+}
+
+.operative-route-list strong {
+  color: #f4f1e8;
+}
+
+.walker-upload-field input {
+  position: absolute;
+  opacity: 0;
+}
+
+.walker-upload-field label {
+  display: grid;
+  min-height: 132px;
+  place-items: center;
+  gap: 7px;
+  border: 1px dashed rgba(31, 143, 90, 0.38);
+  border-radius: 22px;
+  background: rgba(7, 17, 12, 0.46);
+  color: #f4f1e8;
+  cursor: pointer;
+  padding: 18px;
+  text-align: center;
+}
