@@ -592,6 +592,18 @@ html[data-theme="dark"] .adm-btn--danger {
   flex: 1 1 calc(33% - 8px);
 }
 
+/* "Ver como": 4 roles en 2 columnas (celular) o una fila (pantalla ancha). */
+.adm-btn-row--2x2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 720px) {
+  .adm-btn-row--2x2 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 /* Un <label> que abre la cámara o el selector de archivos. El input queda adentro, invisible. */
 .adm-file-button {
   position: relative;
@@ -959,6 +971,28 @@ html[data-theme="dark"] .adm-btn--danger {
 
 .adm-num--red strong,
 .adm-num--red span {
+  color: var(--adm-danger);
+}
+
+/* Rutas de hoy: resumen de atrasos por ruta, antes de las listas plegadas. */
+.adm-shell .adm-late-summary {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--adm-danger-line);
+  border-radius: var(--adm-radius);
+  background: var(--adm-danger-bg);
+  color: var(--adm-danger);
+  font-size: 16px;
+  list-style: none;
+}
+
+.adm-late-summary .adm-row-meta {
+  color: inherit;
+  font-weight: 600;
+}
+
+.adm-more--late > summary {
   color: var(--adm-danger);
 }
 
