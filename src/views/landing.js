@@ -136,8 +136,8 @@ function HeroSection() {
         </div>
         <div class="dog-glass-card">
           <span class="glass-icon">${icon("radar")}</span>
-          <strong>Control total</strong>
-          <span>Seguimiento operativo durante todo el paseo.</span>
+          <strong>Seguimiento del paseo</strong>
+          <span>Te avisamos cuando lo retiramos y cuando vuelve.</span>
         </div>
       </div>
       <a class="scroll-indicator" href="#servicios" data-link aria-label="Bajar a servicios">
