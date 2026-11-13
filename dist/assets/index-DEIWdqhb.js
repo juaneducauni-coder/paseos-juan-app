@@ -307,7 +307,7 @@
         ${se(`¿Cómo empieza el servicio?`,`Con una evaluación inicial para conocer conducta, energía, vacunas y compatibilidades, antes de sumarlo al grupo.`)}
         ${se(`¿En qué zona trabajan?`,`En ${n.zone}. Si estás cerca y no sabés si llegamos, escribinos y te confirmamos.`)}
         ${se(`¿Qué pasa si mi perro no se lleva bien con otros perros?`,`Lo evaluamos antes de sumarlo a un grupo y te contamos si puede sumarse o qué adaptación necesita.`)}
-        ${se(`¿Dónde veo los precios?`,`En la página de precios. Pueden cambiar: confirmalos por WhatsApp.`)}
+        ${se(`¿Dónde veo los precios?`,`En la página de precios, con todos los planes resumidos.`)}
         ${se(`¿Cómo consulto disponibilidad?`,`Escribinos por WhatsApp al ${n.whatsappLabel} o completá el formulario de evaluación.`)}
       </div>
     </section>
@@ -433,7 +433,6 @@ Carnet de vacunas: lo adjunté en el formulario de la página.`:null].filter(e=>
         <p class="eyebrow">Precios</p>
         <h1>Precios de Paseos Juan</h1>
         <p class="precios-fecha">Precios vigentes al <strong>${zn}</strong></p>
-        <p class="precios-aviso">${g(`alertCircle`)}<span>Pueden cambiar: confirmalos por WhatsApp.</span></p>
       </header>
 
       <section class="precios-card" aria-labelledby="planes-titulo">

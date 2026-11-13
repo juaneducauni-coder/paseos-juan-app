@@ -264,7 +264,7 @@ function TrustSection() {
         ${faqItem("¿Cómo empieza el servicio?", "Con una evaluación inicial para conocer conducta, energía, vacunas y compatibilidades, antes de sumarlo al grupo.")}
         ${faqItem("¿En qué zona trabajan?", `En ${BUSINESS.zone}. Si estás cerca y no sabés si llegamos, escribinos y te confirmamos.`)}
         ${faqItem("¿Qué pasa si mi perro no se lleva bien con otros perros?", "Lo evaluamos antes de sumarlo a un grupo y te contamos si puede sumarse o qué adaptación necesita.")}
-        ${faqItem("¿Dónde veo los precios?", "En la página de precios. Pueden cambiar: confirmalos por WhatsApp.")}
+        ${faqItem("¿Dónde veo los precios?", "En la página de precios, con todos los planes resumidos.")}
         ${faqItem("¿Cómo consulto disponibilidad?", `Escribinos por WhatsApp al ${BUSINESS.whatsappLabel} o completá el formulario de evaluación.`)}
       </div>
     </section>

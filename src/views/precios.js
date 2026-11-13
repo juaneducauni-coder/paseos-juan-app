@@ -45,7 +45,6 @@ export function preciosPage() {
         <p class="eyebrow">Precios</p>
         <h1>Precios de Paseos Juan</h1>
         <p class="precios-fecha">Precios vigentes al <strong>${PRECIOS_VIGENTES_AL}</strong></p>
-        <p class="precios-aviso">${icon("alertCircle")}<span>Pueden cambiar: confirmalos por WhatsApp.</span></p>
       </header>
 
       <section class="precios-card" aria-labelledby="planes-titulo">
