@@ -388,6 +388,9 @@ export const archivos = {
   // Abre el archivo en una pestaña nueva (lo baja con la sesión, no queda público).
   async abrir(id) {
     const ventana = window.open("", "_blank");
+    if (!ventana) {
+      throw new ApiError(0, "El navegador bloqueó la ventana nueva: permití las ventanas emergentes de esta página para ver el archivo.");
+    }
     try {
       const response = await fetch(`/api/archivos?id=${encodeURIComponent(id)}`, {
         headers: { Authorization: `Bearer ${session.token()}` },
@@ -397,8 +400,7 @@ export const archivos = {
         throw new ApiError(response.status, data.error || "No se pudo abrir el archivo.");
       }
       const url = URL.createObjectURL(await response.blob());
-      if (ventana) ventana.location.href = url;
-      else window.location.href = url;
+      ventana.location.href = url;
       setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
     } catch (error) {
       ventana?.close();
