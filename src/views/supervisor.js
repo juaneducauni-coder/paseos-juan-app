@@ -2,10 +2,16 @@
 // El supervisor NO arma rutas (eso es del coordinador): las VE y, si hace falta un cambio
 // porque habló con alguien o pasó algo, se lo PIDE al coordinador (colección `solicitudes`).
 //
-// Arriba va "Ahora": el turno actual (hora de Argentina), cada ruta del turno con paseador,
-// ayudante y perros en orden con hora prevista de retiro y estado real, atrasos y un contador
-// que se recalcula cada minuto. Después: avisos por barrio, seguridad, pedidos de cambio,
-// observaciones de conducta y cierre del turno.
+// Pensada para el celular (una mano, al sol), con 4 pestañas fijas abajo:
+// - Ahora: contador grande (a tiempo · atrasados · entregados) y una tarjeta por perro con foto,
+//   hora del próximo paso, estado y un botón grande (Marcar retirado → Marcar entregado), más
+//   "No sale", "Cambio" (pedido al coordinador en una hoja de abajo) y "Opciones" (nota, desmarcar,
+//   foto nueva). Los atrasados van primero; los listos quedan plegados. "Deshacer" dura 5 segundos
+//   y mientras dura las tarjetas no cambian de lugar. Arriba, una fila de botones cortos de alertas.
+// - Rutas: cada ruta con paseador, ayudante, checklist, WhatsApp y los perros en orden.
+// - Pedidos: mis pedidos de cambio y la respuesta del coordinador.
+// - Más: cerrar turno (resumen armado + Copiar + Cerrar), observaciones, avisos por barrio,
+//   seguridad, incidentes, modo paseador y ayuda.
 //
 // Datos compartidos (src/api/client.js, contrato en docs/datos-compartidos.md):
 // - Ruta efectiva = `rutas` del día si existe; si no, `plantillas` del día de la semana;
@@ -13,8 +19,9 @@
 // - paseos: el MISMO registro por perro, día y turno que marca el paseador.
 // - checklists e incidentes: los carga el equipo en la calle (acá se leen).
 // - avisos, solicitudes, observaciones y cierres: los carga el supervisor.
-// En localStorage quedan solo comodidades de este dispositivo: turno elegido, secciones
-// abiertas y borradores sin guardar.
+// - fotos: miniatura de cada perro (fotosPerros); la foto se saca con la cámara del celular.
+// En localStorage quedan solo comodidades de este dispositivo: turno y pestaña elegidos,
+// secciones abiertas, respuestas ya vistas y borradores sin guardar.
 import {
   REAL_DOGS,
   SHIFTS,
@@ -29,7 +36,7 @@ import {
 } from "../data/realData.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, registros, onDataChange, hoyAR } from "../api/client.js";
+import { session, registros, onDataChange, hoyAR, fotosPerros, archivos } from "../api/client.js";
 
 const TIME_ZONE = "America/Argentina/Buenos_Aires";
 const SHIFT_KEYS = ["manana", "tarde"];
@@ -40,12 +47,11 @@ const PHONE_LIKE = /(\d[\s.-]?){8,}/;
 const PICKUP_GRACE = 10;
 const DELIVERY_GRACE = 15;
 // Colecciones compartidas que usa esta página.
-const COLS = ["paseos", "checklists", "incidentes", "plantillas", "rutas", "avisos", "solicitudes", "observaciones", "cierres"];
+const COLS = ["paseos", "checklists", "incidentes", "plantillas", "rutas", "avisos", "solicitudes", "observaciones", "cierres", "fotos"];
 // Las observaciones se muestran de los últimos 7 días (pueden cargarse con fecha anterior).
 const OBS_DAYS = 7;
 // Pedidos de cambio: los de hoy en adelante y los de los 2 días anteriores.
 const REQUEST_DAYS_BACK = 2;
-const ROLE_LABELS = { admin: "Admin", supervisor: "Supervisor", coordinador: "Coordinación", paseador: "Paseador", ayudante: "Ayudante de paseador" };
 const AVISO_TYPES = ["obra o corte", "perro suelto", "clima", "seguridad", "cambio de horario", "otro"];
 const REQUEST_TYPES = ["no sale", "agregar perro", "cambiar hora", "cambiar paseador o ayudante", "otro"];
 const REQUEST_STATES = {
@@ -63,6 +69,8 @@ const KEYS = {
   observationDraft: "paseosJuanSupervisor_observacionBorrador",
   avisoDraft: "paseosJuanSupervisor_avisoBorrador",
   requestDraft: "paseosJuanSupervisor_pedidoBorrador",
+  nav: "paseosJuanSupervisor_pestana",
+  seen: "paseosJuanSupervisor_respuestasVistas",
 };
 
 // Claves de la versión anterior, que guardaba todo solo en el teléfono. Se suben una vez y se borran.
@@ -97,6 +105,9 @@ let liveRegistered = false;
 let liveTimer = null;
 let lastMinute = "";
 let migrationState = "idle";
+// Último toque en la pantalla (para no redibujar justo debajo del dedo).
+let lastPointer = 0;
+const TOUCH_CALM_MS = 900;
 
 // ---------- Utilidades ----------
 
@@ -141,6 +152,8 @@ const FLASH_MS = 8000;
 
 function setFlash(area, text, tone = "ok") {
   flash = { area, text, tone, at: Date.now() };
+  // Cuando vence, se redibuja para sacarlo de la pantalla.
+  setTimeout(scheduleLive, FLASH_MS + 60);
 }
 
 function flashFor(area) {
@@ -148,7 +161,11 @@ function flashFor(area) {
   return flash && flash.area === area ? flash : null;
 }
 
+// Zonas de mensaje dibujadas en esta pasada (lo demás va al aviso flotante de abajo).
+const renderedAreas = new Set();
+
 function statusRegion(area) {
+  renderedAreas.add(area);
   const message = flashFor(area);
   return `
     <p class="sv-status ${message ? `is-${message.tone}` : ""}" role="status" aria-live="polite">${message ? esc(message.text) : ""}</p>
@@ -279,6 +296,7 @@ function personName(usuario, record) {
   if (user.usuario === usuario && user.nombre) return user.nombre;
   const team = TEAM.find((person) => person.id === usuario);
   if (team) return team.name;
+  if (routeNames.has(usuario)) return routeNames.get(usuario);
   for (const col of ["checklists", "paseos", "incidentes"]) {
     for (const item of records(col)) {
       if (item.creadoPor === usuario && item.creadoPorNombre) return item.creadoPorNombre;
@@ -301,7 +319,7 @@ function lastMark(record, verb = "Marcó") {
 
 function watchOpts(col) {
   const today = hoyAR();
-  if (col === "plantillas" || col === "avisos") return {};
+  if (col === "plantillas" || col === "avisos" || col === "fotos") return {};
   if (col === "observaciones") return { desde: addDays(today, -(OBS_DAYS - 1)) };
   if (col === "solicitudes") return { desde: addDays(today, -REQUEST_DAYS_BACK) };
   return { desde: today };
@@ -410,6 +428,12 @@ function onSupervisorPage() {
 function liveRerender() {
   liveTimer = null;
   if (!onSupervisorPage() || !document.querySelector(".sv-shell")) return;
+  // Si el dedo acaba de tocar la pantalla se espera un poco: así una tarjeta no se mueve bajo el dedo.
+  const wait = TOUCH_CALM_MS - (Date.now() - lastPointer);
+  if (wait > 0) {
+    liveTimer = setTimeout(liveRerender, wait);
+    return;
+  }
   renderKeepingFocus();
 }
 
@@ -468,7 +492,7 @@ function minuteTick() {
   if (time === lastMinute) return;
   // Con un desplegable abierto se espera al próximo control (redibujar lo cerraría).
   if (document.activeElement?.tagName === "SELECT") return;
-  renderKeepingFocus();
+  scheduleLive();
 }
 
 // Guarda el estado conocido de los pedidos sin avisar (lo que ya estaba en este teléfono).
@@ -510,6 +534,9 @@ function registerLive() {
     if (col === "solicitudes") checkRequestAnswers();
     scheduleLive();
   });
+  document.addEventListener("pointerdown", () => {
+    lastPointer = Date.now();
+  }, true);
   window.addEventListener("online", scheduleLive);
   window.addEventListener("offline", scheduleLive);
   document.addEventListener("visibilitychange", () => {
@@ -680,6 +707,17 @@ function muzzleNote(dog) {
   return (dog?.safety || []).find((note) => /bozal/i.test(note)) || "";
 }
 
+// Con quién NO puede ir un perro, en los dos sentidos: la planilla a veces lo anota en uno solo
+// (Pistacho dice "no juntar con Cashi", pero la ficha de Cashi no dice nada).
+function noJuntarNames(dog) {
+  if (!dog) return [];
+  const names = new Set(dog.incompatibleWith || []);
+  REAL_DOGS.forEach((other) => {
+    if (other.id !== dog.id && (other.incompatibleWith || []).includes(dog.name)) names.add(other.name);
+  });
+  return [...names];
+}
+
 // ---------- Rutas efectivas (las arma el coordinador; acá solo se leen) ----------
 
 function sameDay(a, b) {
@@ -699,7 +737,12 @@ function normalizeStop(stop) {
   };
 }
 
+// Nombres que el coordinador guardó en la ruta (paseadorNombre / ayudanteNombre), si los guardó.
+const routeNames = new Map();
+
 function normalizeRoute(record, source) {
+  if (record.paseador && record.paseadorNombre) routeNames.set(record.paseador, String(record.paseadorNombre));
+  if (record.ayudante && record.ayudanteNombre) routeNames.set(record.ayudante, String(record.ayudanteNombre));
   // Registros de la versión anterior (lista de perros sin horario).
   const stops = Array.isArray(record.paradas)
     ? record.paradas
@@ -799,17 +842,17 @@ function stopStatus(stop, record, nowMinutes) {
   if (retirado) {
     const walked = start !== null ? nowMinutes - start : null;
     if (walked !== null && minutos && walked > minutos + DELIVERY_GRACE) {
-      return { ...base, kind: "demorada", label: `Entrega demorada ${walked - minutos} min`, tone: "danger", live: "atrasado", walked, late: true };
+      return { ...base, kind: "demorada", label: `Demora ${walked - minutos} min`, tone: "danger", live: "atrasado", walked, late: true };
     }
     const label = estado === "paseando" ? "Paseando" : `Retirado${record?.horaRetiro ? ` ${record.horaRetiro}` : ""}`;
     return { ...base, kind: "curso", label, tone: "info", live: "atiempo", walked, late: pickupLate };
   }
 
-  if (planned === null) return { ...base, kind: "sinhora", label: "Hora sin confirmar", tone: "neutral", live: "atiempo" };
+  if (planned === null) return { ...base, kind: "sinhora", label: "Sin hora", tone: "neutral", live: "atiempo" };
   const delay = nowMinutes - planned;
   if (delay > PICKUP_GRACE) return { ...base, kind: "atrasado", label: `Atrasado ${delay} min`, tone: "danger", live: "atrasado", delay, late: true };
-  if (delay >= 0) return { ...base, kind: "ahora", label: "Retirar ahora", tone: "warn", live: "atiempo", delay };
-  return { ...base, kind: "espera", label: `Retira ${stop.hora}`, tone: "neutral", live: "atiempo" };
+  if (delay >= 0) return { ...base, kind: "ahora", label: "Retirar ya", tone: "warn", live: "atiempo", delay };
+  return { ...base, kind: "espera", label: "Pendiente", tone: "neutral", live: "atiempo" };
 }
 
 function routeStatuses(view, route, byId = paseosById()) {
@@ -872,7 +915,8 @@ function activeAvisos(today) {
 }
 
 function requestTitle(item) {
-  return `${item.tipo || "Cambio"}${item.perroNombre ? ` · ${item.perroNombre}` : ""}${item.ruta ? ` · ${item.ruta}` : ""}`;
+  const tipo = item.tipo ? `${item.tipo[0].toUpperCase()}${item.tipo.slice(1)}` : "Cambio";
+  return `${tipo}${item.perroNombre ? ` · ${item.perroNombre}` : ""}${item.ruta ? ` · ${item.ruta}` : ""}`;
 }
 
 function requestsFor(fecha, shiftKey) {
@@ -886,7 +930,8 @@ function myRequests(today) {
     .sort((a, b) => String(b.creadoEn || "9").localeCompare(String(a.creadoEn || "9")));
 }
 
-function emptyRequest(view, ruta = "", perroId = "", open = false) {
+// Pedido de cambio a medio armar (hoja de abajo). from: desde dónde se abrió (perro, ruta o turno).
+function emptyRequest(view, ruta = "", perroId = "", open = false, from = "turno", tipo = "") {
   const dog = perroId ? dogById(perroId) : null;
   return {
     fecha: view.fecha,
@@ -894,9 +939,12 @@ function emptyRequest(view, ruta = "", perroId = "", open = false) {
     ruta,
     perroId: dog?.id || "",
     perroNombre: dog?.name || "",
-    tipo: dog ? "no sale" : "otro",
-    detalle: "",
+    from,
+    tipo: tipo || (dog ? "no sale" : "otro"),
     motivo: "",
+    texto: "",
+    hora: "",
+    extraDog: "",
     urgente: false,
     open,
   };
@@ -945,6 +993,9 @@ function shiftWarnings(routes) {
       tone: "danger",
       icon: "alertTriangle",
       title: pairs.length === 1 ? "Hay 2 perros que no pueden ir juntos" : `Hay ${pairs.length} parejas que no pueden ir juntas`,
+      short: `No juntar: ${plural(pairs.length, "pareja", "parejas")}`,
+      chip: "No juntar",
+      count: pairs.length,
       lines: pairs.map((pair) => `No juntar: ${pair.a} con ${pair.b}${pair.sameRoute ? ` (los dos en ${pair.route})` : ` (${pair.route} y ${pair.otherRoute}: que no se crucen)`}.`),
       action: pairs.some((pair) => pair.sameRoute)
         ? "Que no caminen juntos. Si la ruta los junta, pedile el cambio al coordinador."
@@ -958,6 +1009,9 @@ function shiftWarnings(routes) {
       tone: "warn",
       icon: "shieldCheck",
       title: `Confirmá el bozal de ${plural(muzzle.length, "perro", "perros")}`,
+      short: `Bozal: ${muzzle.map((dog) => dog.name).join(", ")}`,
+      chip: "Bozal",
+      count: muzzle.length,
       lines: muzzle.map((dog) => `${dog.name}: ${muzzleNote(dog)}.`),
       action: "Que salga con el bozal puesto y revisado.",
       source: "Fuente: indicaciones de seguridad de la planilla RPJ.",
@@ -969,6 +1023,9 @@ function shiftWarnings(routes) {
       tone: "warn",
       icon: "alertCircle",
       title: `Confirmá si ${inactive.length === 1 ? `sale ${inactive[0].name}` : `salen ${inactive.length} perros`}`,
+      short: `¿Sale? ${inactive.map((dog) => dog.name).join(", ")}`,
+      chip: "¿Sale?",
+      count: inactive.length,
       lines: inactive.map((dog) => `${dog.name} (${dog.status}): ${dog.review || PENDIENTE}`),
       action: "Preguntale a Juan antes de retirarlo.",
       source: "Fuente: Perros paseados (noviembre) y BASE RUTAS.",
@@ -980,6 +1037,9 @@ function shiftWarnings(routes) {
       tone: "warn",
       icon: "alertCircle",
       title: `${plural(noFile.length, "perro de la ruta no tiene", "perros de la ruta no tienen")} ficha`,
+      short: `Sin ficha: ${plural(noFile.length, "perro", "perros")}`,
+      chip: "Sin ficha",
+      count: noFile.length,
       lines: noFile.map((text) => `${text}: ${PENDIENTE}.`),
       action: "No se puede marcar el retiro desde acá. Pedile al coordinador que lo revise.",
       source: "Fuente: rutas del coordinador y registro de perros.",
@@ -1003,7 +1063,7 @@ function shiftWarnings(routes) {
       icon: "eye",
       title: `${unevaluated.length} perros salen en grupo SIN EVALUAR`,
       lines: [`${CATEGORIES["SIN EVALUAR"]} Observá cómo se comportan en grupo y registrá lo que veas.`],
-      action: "Usá «Registrar observación de conducta».",
+      action: "Usá «Observación» en Más.",
       source: "Fuente: Registro maestro de perros, 14/08/2026.",
     });
   }
@@ -1168,6 +1228,136 @@ function teamFor(view, routes) {
   return [...people.values()].map((person) => ({ ...person, checklist: checklistOf(view.fecha, view.shift, person.usuario) }));
 }
 
+// ---------- Navegación: pestañas fijas abajo ----------
+
+const TABS = [
+  { key: "ahora", label: "Ahora", icon: "clock" },
+  { key: "rutas", label: "Rutas", icon: "route" },
+  { key: "pedidos", label: "Pedidos", icon: "send" },
+  { key: "mas", label: "Más", icon: "sliders" },
+];
+
+// Secciones de "Más" (lo que se usa menos va acá).
+const SUBS = {
+  observacion: { label: "Observación", icon: "eye" },
+  avisos: { label: "Avisos", icon: "mapPin" },
+  seguridad: { label: "Seguridad", icon: "shieldCheck" },
+  incidentes: { label: "Incidentes", icon: "alertTriangle" },
+  ayuda: { label: "Ayuda", icon: "help" },
+};
+
+const REQUEST_CHIPS = [
+  { value: "no sale", label: "No sale" },
+  { value: "cambiar hora", label: "Cambiar hora" },
+  { value: "agregar perro", label: "Agregar perro" },
+  { value: "cambiar paseador o ayudante", label: "Cambiar paseador" },
+  { value: "otro", label: "Otro" },
+];
+const MOTIVO_CHIPS = ["Habló el tutor", "Perro enfermo", "Clima", "Problema en la calle", "Otro"];
+
+// Deshacer: las acciones que no borran se pueden revertir durante 5 segundos.
+const UNDO_MS = 5000;
+let undo = null;
+// Hoja de cierre abierta y botón que abrió la hoja actual (para devolverle el foco).
+let closureSheetOpen = false;
+let sheetOpener = "";
+// Fotos que se están subiendo (por perro).
+const photoBusy = new Set();
+
+function getNav() {
+  const stored = readJSON(KEYS.nav, {});
+  const tab = TABS.some((item) => item.key === stored.tab) ? stored.tab : "ahora";
+  const sub = tab === "mas" && SUBS[stored.sub] ? stored.sub : "";
+  return { tab, sub };
+}
+
+function saveNav(tab, sub = "") {
+  writeJSON(KEYS.nav, { tab, sub });
+}
+
+function offerUndo(text, run, focusId = "") {
+  const entry = { text, run, focusId, at: Date.now() };
+  undo = entry;
+  setTimeout(() => {
+    if (undo === entry) {
+      undo = null;
+      scheduleLive();
+    }
+  }, UNDO_MS + 60);
+}
+
+function activeUndo() {
+  if (undo && Date.now() - undo.at >= UNDO_MS) undo = null;
+  return undo;
+}
+
+// Orden de las tarjetas congelado mientras dura "Deshacer" (ver NowTab).
+let orderFreeze = null;
+
+function freezeOrder() {
+  const view = getView();
+  const ids = [...document.querySelectorAll(".sv-shell #sv-dogs-now > .sv-dog")].map((card) => card.id.replace(/^sv-dog-/, ""));
+  orderFreeze = ids.length ? { ids, fecha: view.fecha, shift: view.shift, until: Date.now() + UNDO_MS } : null;
+}
+
+function frozenOrder(view) {
+  if (!orderFreeze || Date.now() >= orderFreeze.until || orderFreeze.fecha !== view.fecha || orderFreeze.shift !== view.shift) {
+    orderFreeze = null;
+    return null;
+  }
+  return new Map(orderFreeze.ids.map((id, index) => [id, index]));
+}
+
+// Respuestas del coordinador que ya vi en este teléfono (para marcar las nuevas).
+function seenSet() {
+  return new Set(readJSON(KEYS.seen, []));
+}
+
+function markSeen(id) {
+  const list = readJSON(KEYS.seen, []).filter((item) => item !== id);
+  list.push(id);
+  writeJSON(KEYS.seen, list.slice(-200));
+}
+
+function isAnswered(item) {
+  return (item.estado || "pendiente") !== "pendiente";
+}
+
+function isFreshAnswer(item, seen = seenSet()) {
+  return isAnswered(item) && item.creadoPor === currentUser().usuario && !seen.has(item.id);
+}
+
+// Fotos de los perros (colección compartida "fotos"). Se leen una vez por dibujo: las miniaturas pesan.
+let photoCache = null;
+
+function photoRecord(perroId) {
+  if (!perroId) return null;
+  if (!photoCache) {
+    photoCache = new Map();
+    registros.cached("fotos").forEach((item) => {
+      if (item?.miniatura) photoCache.set(item.perroId || item.id, item);
+    });
+  }
+  return photoCache.get(perroId) || null;
+}
+
+function cardDomId(route, stop) {
+  return safeId(`${route.code}-${stop.perroId || stop.perroNombre}`);
+}
+
+function requestOpenerId(ruta, perroId, tipo = "") {
+  return safeId(`sv-req-open-${ruta || "turno"}-${perroId || "ruta"}${tipo ? `-${tipo}` : ""}`);
+}
+
+// Avisos cortos de seguridad para listas compactas.
+function shortSafety(dog) {
+  if (!dog) return "";
+  const chips = [];
+  if (noJuntarNames(dog).length) chips.push(`<span class="sv-mini is-danger">No juntar</span>`);
+  if (usesMuzzle(dog)) chips.push(`<span class="sv-mini is-warn">Bozal</span>`);
+  return chips.join("");
+}
+
 // ---------- Estructura ----------
 
 export function supervisorShell(content) {
@@ -1183,326 +1373,213 @@ function SupervisorHeader() {
   const user = currentUser();
   return `
     <header class="sv-header">
-      <a class="sv-brand" href="/supervisor" data-link aria-label="Paseos Juan, panel de supervisión">
+      <a class="sv-brand" href="/supervisor" data-link aria-label="Paseos Juan, supervisión. Ir a Ahora">
         <span class="sv-logo" aria-hidden="true">
           <img class="sv-logo-light" src="/paseos-juan-logo.png" alt="" />
           <img class="sv-logo-dark" src="/paseos-juan-logo-white.svg" alt="" />
         </span>
-        <span>
-          <strong>Paseos Juan</strong>
-          <small>Supervisión del turno</small>
+        <span class="sv-brand-text">
+          <strong>Supervisión</strong>
+          <small>${esc(user.nombre || PENDIENTE)}</small>
         </span>
       </a>
       <div class="sv-header-end">
-        <p class="sv-user">
-          <strong>${esc(user.nombre || PENDIENTE)}</strong>
-          <small>${esc(ROLE_LABELS[user.rol] || user.rol || "")}</small>
-        </p>
-        <button class="sv-button sv-button-quiet" type="button" id="sv-logout" data-sv-logout>
+        ${SyncPill()}
+        <span class="sv-a11y-slot" aria-hidden="true"></span>
+        <button class="sv-icon-btn" type="button" id="sv-logout" data-sv-logout aria-label="Salir">
           ${icon("logOut", "sv-icon")}
-          Salir
         </button>
       </div>
     </header>
   `;
 }
 
+function SyncPill() {
+  const pending = registros.pendingCount();
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const [tone, label] = offline
+    ? ["warn", "Sin señal"]
+    : pending
+      ? ["warn", `${pending} sin enviar`]
+      : loadErrors.size
+        ? ["danger", "Error"]
+        : ["ok", "Al día"];
+  return `
+    <button type="button" class="sv-sync is-${tone}" id="sv-refresh" data-sv-refresh aria-label="${esc(label)}. Tocá para actualizar">
+      <span class="sv-dot" aria-hidden="true"></span><span>${esc(label)}</span>
+    </button>
+  `;
+}
+
 export function supervisorDashboard() {
   startWatching();
+  renderedAreas.clear();
+  photoCache = null;
   const view = getView();
   lastMinute = view.now.time;
+  const nav = getNav();
   const routeInfo = routesFor(view);
+  const byId = paseosById();
+  const items = routeInfo.routes.flatMap((route) => routeStatuses(view, route, byId).map((item) => ({ ...item, route })));
+  const body =
+    nav.tab === "rutas"
+      ? RoutesTab(view, routeInfo, byId)
+      : nav.tab === "pedidos"
+        ? RequestsTab(view)
+        : nav.tab === "mas"
+          ? MoreTab(view, routeInfo, nav.sub)
+          : NowTab(view, routeInfo, items);
+  const sheets = `${RequestSheet(view, routeInfo)}${closureSheetOpen ? ClosureSheet(view) : ""}`;
   const content = `
-    <main class="sv-main" id="sv-main">
-      ${SyncBar()}
-      ${IncidentsPanel(view)}
-      ${NowPanel(view, routeInfo)}
-      ${AvisosPanel(view)}
-      ${SafetyPanel(view, routeInfo.routes)}
-      ${RoutesPanel(view, routeInfo)}
-      ${RequestsPanel(view)}
-      ${ObservationLog(view, routeDogs(routeInfo.routes))}
-      ${ShiftClosure(view)}
-      ${ReferencePanel()}
+    <main class="sv-main" id="sv-main" data-tab="${nav.tab}">
+      ${NetworkLine()}
+      ${body}
     </main>
+    ${BottomNav(view, nav.tab, items)}
+    ${sheets}
+    ${Toast()}
   `;
   if (migrationState === "idle" && legacyPending()) setTimeout(migrateLegacy, 0);
   return content;
 }
 
-// ---------- 0. Estado de los datos compartidos ----------
-
-function SyncBar() {
-  const pending = registros.pendingCount();
+// Una línea con el estado de la señal o de los errores de carga.
+function NetworkLine() {
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  const errors = [...new Set(loadErrors.values())];
-  const tone = offline || pending || errors.length ? "warn" : "ok";
-  const waiting = `${pending} cambio${pending === 1 ? " espera" : "s esperan"} señal para enviarse.`;
-  const text = offline
-    ? `Sin señal: ves lo último guardado en este teléfono.${pending ? ` ${waiting}` : ""}`
-    : pending
-      ? waiting
-      : errors.length
-        ? `No se pudieron traer algunos datos: ${errors.join(" ")}`
-        : "Datos compartidos con el equipo. Se actualizan solos.";
-  return `
-    <section class="sv-sync is-${tone}" aria-label="Estado de los datos">
-      <p class="sv-sync-text" aria-live="polite">${icon(tone === "ok" ? "radio" : "uploadCloud", "sv-icon")} <span>${esc(text)}</span></p>
-      <button type="button" class="sv-button sv-button-quiet" id="sv-refresh" data-sv-refresh>Actualizar ahora</button>
-      ${statusRegion("sync")}
-    </section>
-  `;
-}
-
-// ---------- Incidentes del día (destacados arriba) ----------
-
-function IncidentsPanel(view) {
-  const incidents = incidentsFor(view.fecha);
-  if (!incidents.length) return "";
-  return `
-    <section class="sv-card sv-incidents" aria-labelledby="sv-incidents-title">
-      <div class="sv-section-head">
-        <h2 id="sv-incidents-title" class="sv-title">${icon("alertTriangle", "sv-icon")} ${incidents.length === 1 ? "Hay 1 incidente cargado hoy" : `Hay ${incidents.length} incidentes cargados hoy`}</h2>
-        <p>${incidents.length === 1 ? "Revisalo" : "Revisalos"} antes de seguir con el turno.</p>
-      </div>
-      <ul class="sv-incident-list">
-        ${incidents.map((item) => `
-          <li class="sv-incident">
-            <div class="sv-saved-head">
-              <strong>${esc(item.titulo || "Incidente")}</strong>
-              <span>${item.hora ? `${esc(item.hora)} hs · ` : ""}${esc(incidentDogs(item))}${item.lugar ? ` · ${esc(item.lugar)}` : ""}${item.barrio ? ` · ${esc(item.barrio)}` : ""}</span>
-            </div>
-            ${item.riesgo || item.lesiones ? `
-              <p class="sv-chips">
-                ${item.riesgo ? `<span class="sv-tag is-danger">Riesgo: ${esc(item.riesgo)}</span>` : ""}
-                ${item.lesiones ? `<span class="sv-tag is-warn">Lesiones: ${esc(item.lesiones)}</span>` : ""}
-              </p>
-            ` : ""}
-            <dl class="sv-obs-detail">
-              ${[["Antes", item.antes], ["Conducta", item.conducta], ["Acción", item.accion], ["Después", item.despues], ["Protocolo", item.protocolo]]
-                .filter(([, value]) => value)
-                .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`)
-                .join("")}
-            </dl>
-            <p class="sv-source">${esc(lastMark(item, "Cargó"))}</p>
-          </li>
-        `).join("")}
-      </ul>
-    </section>
-  `;
-}
-
-// ---------- 1. Ahora ----------
-
-function TeamList(view, routes) {
-  const team = teamFor(view, routes);
-  const started = view.now.minutes >= toMinutes(SHIFTS[view.shift].from);
-  if (!team.length) {
-    return `<p class="sv-note is-info"><strong>Equipo del turno:</strong> ${PENDIENTE}. La ruta no tiene paseador asignado y nadie cargó el checklist.</p>`;
+  if (offline) {
+    return `<p class="sv-line is-warn">${icon("uploadCloud", "sv-icon")} <span>Sin señal: seguí marcando, se envía solo.</span></p>`;
   }
+  if (!loadErrors.size) return "";
   return `
-    <div class="sv-team">
-      <h2 class="sv-subtitle">Equipo del turno: checklist de salida</h2>
-      <ul class="sv-team-list">
-        ${team.map((person) => {
-          const info = person.checklist ? checklistInfo(person.checklist) : null;
-          const tone = !info ? (started ? "warn" : "info") : person.checklist.pendiente ? "info" : info.complete ? "ok" : "danger";
-          const text = !info
-            ? "Todavía no cargó el checklist."
-            : info.complete
-              ? "Salió con el equipo completo."
-              : `Equipo incompleto${info.missing.length ? `. Falta: ${info.missing.join(", ")}` : ""}.`;
-          return `
-            <li class="sv-note is-${tone}">
-              ${icon(info?.complete ? "checkCircle" : "alertTriangle", "sv-icon")}
-              <strong>${esc(person.name)}</strong> <small>(${esc(person.roles.join(", "))})</small>:
-              ${esc(text)} ${info?.at ? `<small>${esc(info.at)} hs</small>` : ""}
-            </li>
-          `;
-        }).join("")}
-      </ul>
+    <p class="sv-line is-danger">
+      ${icon("alertCircle", "sv-icon")}
+      <span>No se pudieron traer datos.</span>
+      <button type="button" class="sv-btn sv-btn-small" id="sv-retry" data-sv-refresh>Reintentar</button>
+    </p>
+  `;
+}
+
+function BottomNav(view, active, items) {
+  const late = items.filter((item) => item.status.live === "atrasado").length;
+  const fresh = myRequests(view.fecha).filter((item) => isFreshAnswer(item)).length;
+  const badges = { ahora: late, pedidos: fresh };
+  return `
+    <nav class="sv-nav" aria-label="Secciones">
+      ${TABS.map((tab) => {
+        const badge = badges[tab.key] || 0;
+        const badgeText = tab.key === "ahora" ? `${badge} ${badge === 1 ? "atrasado" : "atrasados"}` : `${badge} ${badge === 1 ? "respuesta nueva" : "respuestas nuevas"}`;
+        return `
+          <button type="button" class="sv-nav-item ${active === tab.key ? "is-active" : ""}" id="sv-tab-${tab.key}" data-sv-tab="${tab.key}" ${active === tab.key ? `aria-current="page"` : ""}>
+            <span class="sv-nav-icon">${icon(tab.icon, "sv-icon")}${badge ? `<span class="sv-badge" aria-hidden="true">${badge}</span>` : ""}</span>
+            <span>${tab.label}</span>
+            ${badge ? `<span class="visually-hidden">, ${badgeText}</span>` : ""}
+          </button>
+        `;
+      }).join("")}
+    </nav>
+  `;
+}
+
+function Toast() {
+  const pendingUndo = activeUndo();
+  let message = flash ? flashFor(flash.area) : null;
+  if (message && renderedAreas.has(message.area)) message = null;
+  return `
+    <div class="sv-toast-zone" role="status" aria-live="polite">
+      ${message ? `<p class="sv-toast is-${message.tone}">${esc(message.text)}</p>` : ""}
+      ${pendingUndo ? `
+        <p class="sv-toast is-undo">
+          <span>${esc(pendingUndo.text)}</span>
+          <button type="button" class="sv-toast-btn" id="sv-undo" data-sv-undo>Deshacer</button>
+        </p>
+      ` : ""}
     </div>
   `;
 }
 
-function NowPanel(view, routeInfo) {
+// ---------- Partes comunes ----------
+
+function ShiftBar(view) {
   const shift = SHIFTS[view.shift];
   const moment = shiftMoment(view.shift, view.now);
-  const user = currentUser();
-  const statuses = routeInfo.routes.flatMap((route) => routeStatuses(view, route));
-  const counts = countLive(statuses);
-  const planned = routeInfo.routes.map((route) => route.supervisor).filter(Boolean);
-  const plannedSupervisor = [...new Set(planned)].join(" y ") || shift.supervisor;
-
+  const current = SHIFTS[currentShiftKey(view.now)];
   return `
-    <section class="sv-hero sv-now" aria-labelledby="sv-now-title">
-      <div class="sv-hero-top">
-        <div class="sv-hero-copy">
-          <p class="sv-eyebrow">Ahora · ${esc(view.day)} ${view.now.label} · ${view.now.time} hs</p>
-          <h1 id="sv-now-title">Turno ${shift.label.toLowerCase()}</h1>
-          <p class="sv-hero-sub">
-            ${shift.from} a ${shift.to} hs
-            <span class="sv-moment is-${moment.tone}">${moment.label}</span>
-          </p>
-          <p class="sv-source">Supervisa ${esc(user.nombre || PENDIENTE)}${plannedSupervisor && plannedSupervisor !== user.nombre ? ` · Según la ruta: ${esc(plannedSupervisor)}` : ""}.</p>
-        </div>
-        <div class="sv-picker">
-          <div class="sv-segment" role="group" aria-label="Turno de hoy">
-            ${SHIFT_KEYS.map((key) => `
-              <button type="button" id="sv-shift-${key}" class="sv-segment-option ${view.shift === key ? "is-active" : ""}" data-sv-shift="${key}" aria-pressed="${view.shift === key}">
-                ${SHIFTS[key].label}
-                <small>${key === currentShiftKey(view.now) ? "Turno actual" : `${SHIFTS[key].from} a ${SHIFTS[key].to}`}</small>
-              </button>
-            `).join("")}
-          </div>
-        </div>
+    <section class="sv-shiftbar" aria-label="Turno">
+      <div class="sv-segment" role="group" aria-label="Turno de hoy, ${esc(view.day)} ${view.now.label}">
+        ${SHIFT_KEYS.map((key) => `
+          <button type="button" id="sv-shift-${key}" class="sv-segment-option ${view.shift === key ? "is-active" : ""}" data-sv-shift="${key}" aria-pressed="${view.shift === key}">${SHIFTS[key].label}</button>
+        `).join("")}
       </div>
-
-      ${view.isCurrent ? "" : `<p class="sv-note is-info">Estás mirando el turno ${shift.label.toLowerCase()} de hoy. El turno actual es el de la ${SHIFTS[currentShiftKey(view.now)].label.toLowerCase()}.</p>`}
-
-      <div class="sv-counter" role="status" aria-live="polite" aria-label="Cumplimiento del turno">
-        <p class="sv-counter-line">
-          <span class="sv-count is-ok"><b>${counts.atiempo}</b> a tiempo</span>
-          <span class="sv-count-sep" aria-hidden="true">·</span>
-          <span class="sv-count ${counts.atrasado ? "is-danger" : ""}"><b>${counts.atrasado}</b> ${counts.atrasado === 1 ? "atrasado" : "atrasados"}</span>
-          <span class="sv-count-sep" aria-hidden="true">·</span>
-          <span class="sv-count"><b>${counts.entregado}</b> ${counts.entregado === 1 ? "entregado" : "entregados"}</span>
-        </p>
-        <p class="sv-source">${plural(statuses.length, "perro previsto", "perros previstos")}${counts.nosale ? ` · ${counts.nosale} no ${counts.nosale === 1 ? "sale" : "salen"}` : ""} · Atrasado: pasó la hora de retiro + ${PICKUP_GRACE} min. Entrega demorada: el paseo superó lo previsto + ${DELIVERY_GRACE} min. Se recalcula cada minuto.</p>
-      </div>
-
-      ${routeInfo.fallback ? `
-        <p class="sv-note is-warn">${icon("alertCircle", "sv-icon")} <strong>Rutas tomadas de la planilla.</strong> ${routeInfo.loading ? "Cargando las rutas del coordinador…" : `El coordinador todavía no cargó en la app la ruta de ${esc(view.day.toLowerCase())} a la ${shift.label.toLowerCase()}.`} Paseador y ayudante: ${PENDIENTE}.</p>
-      ` : ""}
-
-      ${TeamList(view, routeInfo.routes)}
+      <p class="sv-shift-hours"><span>${shift.from}–${shift.to}</span>${moment.tone === "live" ? `<span class="visually-hidden">, en curso</span>` : ` <span class="sv-moment is-${moment.tone}">${esc(moment.label)}</span>`}</p>
     </section>
+    ${view.isCurrent ? "" : `<p class="sv-line is-info">${icon("clock", "sv-icon")} <span>Mirás la ${shift.label.toLowerCase()}. Ahora es la ${current.label.toLowerCase()}.</span></p>`}
   `;
 }
 
-// ---------- 2. Avisos por barrio ----------
-
-function getAvisoDraft(view) {
-  return { barrio: "", tipo: AVISO_TYPES[0], mensaje: "", vigenteHasta: view.fecha, ...readJSON(KEYS.avisoDraft, {}) };
-}
-
-function AvisosPanel(view) {
-  const avisos = activeAvisos(view.fecha);
-  const draft = getAvisoDraft(view);
-  const open = isFoldOpen("aviso-form");
+function FallbackLine(view, routeInfo) {
+  if (!routeInfo.fallback) return "";
   return `
-    <section class="sv-card sv-avisos" aria-labelledby="sv-avisos-title">
-      <div class="sv-section-head">
-        <h2 id="sv-avisos-title" class="sv-title">${icon("mapPin", "sv-icon")} Avisos por barrio vigentes</h2>
-        <p>${avisos.length ? "Lo que el equipo tiene que saber hoy en cada barrio." : loaded.has("avisos") ? "No hay avisos vigentes." : "Cargando avisos…"}</p>
-      </div>
-      ${avisos.length ? `
-        <ul class="sv-aviso-list">
-          ${avisos.map((item) => `
-            <li class="sv-aviso ${item.tipo === "seguridad" || item.tipo === "perro suelto" ? "is-danger" : ""}">
-              <div class="sv-saved-head">
-                <strong>${esc(item.barrio || PENDIENTE)}</strong>
-                <span class="sv-tag ${item.tipo === "seguridad" || item.tipo === "perro suelto" ? "is-danger" : "is-warn"}">${esc(item.tipo || "otro")}</span>
-              </div>
-              <p>${esc(item.mensaje || "")}</p>
-              <p class="sv-source">${item.vigenteHasta ? `Vigente hasta ${esc(isoToLabel(item.vigenteHasta))}` : "Vigente hoy"} · ${esc(lastMark(item, "Cargó"))}</p>
-            </li>
-          `).join("")}
-        </ul>
-      ` : ""}
-      <details class="sv-more" data-sv-fold="aviso-form" ${open ? "open" : ""}>
-        <summary>${icon("plus", "sv-icon")} Cargar un aviso nuevo</summary>
-        <form class="sv-form" data-sv-aviso-form novalidate>
-          <p class="sv-hint">Lo ve todo el equipo y marketing. Sin domicilios, teléfonos ni datos de tutores.</p>
-          <div class="sv-form-grid">
-            <label class="sv-field" for="sv-aviso-barrio">Barrio
-              <input type="text" id="sv-aviso-barrio" data-sv-aviso="barrio" list="sv-barrios" value="${esc(draft.barrio)}" autocomplete="off" required />
-              <datalist id="sv-barrios">${BARRIOS_BASE.map((name) => `<option value="${esc(name)}"></option>`).join("")}</datalist>
-            </label>
-            <label class="sv-field" for="sv-aviso-tipo">Tipo
-              <select id="sv-aviso-tipo" data-sv-aviso="tipo">
-                ${AVISO_TYPES.map((tipo) => `<option value="${tipo}" ${tipo === draft.tipo ? "selected" : ""}>${tipo[0].toUpperCase()}${tipo.slice(1)}</option>`).join("")}
-              </select>
-            </label>
-          </div>
-          <label class="sv-field" for="sv-aviso-mensaje">Qué pasa
-            <span class="sv-field-hint" id="sv-aviso-mensaje-hint">Ej.: corte de calle en la entrada sur hasta las 12. Entrar por la otra puerta.</span>
-            <textarea id="sv-aviso-mensaje" rows="2" data-sv-aviso="mensaje" aria-describedby="sv-aviso-mensaje-hint" required>${esc(draft.mensaje)}</textarea>
-          </label>
-          <label class="sv-field sv-field-short" for="sv-aviso-hasta">Vigente hasta
-            <input type="date" id="sv-aviso-hasta" data-sv-aviso="vigenteHasta" value="${esc(draft.vigenteHasta)}" min="${view.fecha}" required />
-          </label>
-          <div class="sv-actions">
-            <button type="submit" class="sv-button sv-button-primary" id="sv-aviso-save">${icon("send", "sv-icon")} Publicar aviso</button>
-          </div>
-        </form>
-      </details>
-      ${statusRegion("aviso")}
-    </section>
+    <p class="sv-line is-warn">
+      ${icon("alertCircle", "sv-icon")}
+      <span>${routeInfo.loading ? "Cargando rutas…" : "Ruta de la planilla: el coordinador no la cargó."}</span>
+    </p>
   `;
 }
 
-// ---------- 3. Seguridad ----------
-
-function SafetyPanel(view, routes) {
-  if (!routes.some((route) => route.stops.length)) return "";
-  const warnings = shiftWarnings(routes);
-  const top = warnings.slice(0, 3);
-  const rest = warnings.slice(3);
+// Miniatura del perro: foto, o círculo con la inicial y botón de cámara.
+function Avatar(stop, domId, small = false) {
+  const name = stop.perroNombre || "";
+  const initial = esc((String(name).trim()[0] || "?").toUpperCase());
+  const record = photoRecord(stop.perroId);
+  const src = record?.miniatura || null;
+  const cls = `sv-avatar${small ? " is-small" : ""}`;
+  if (src) {
+    if (small || !record?.archivoId) return `<span class="${cls}"><img src="${esc(src)}" alt="" /></span>`;
+    return `
+      <button type="button" class="${cls} is-button" id="sv-photo-open-${domId}" data-sv-photo-open="${esc(stop.perroId)}">
+        <img src="${esc(src)}" alt="" /><span class="visually-hidden">Ver foto grande de ${esc(name)}</span>
+      </button>
+    `;
+  }
+  if (small || !stop.perroId) return `<span class="${cls} is-empty" aria-hidden="true"><span class="sv-initial">${initial}</span></span>`;
+  const busy = photoBusy.has(stop.perroId);
   return `
-    <section class="sv-card sv-safety" aria-labelledby="sv-safety-title">
-      <div class="sv-section-head">
-        <h2 id="sv-safety-title" class="sv-title">${icon("shieldCheck", "sv-icon")} Seguridad del turno</h2>
-        <p>Bozales e incompatibles primero. Máximo 3 prioridades.</p>
-      </div>
-      ${top.length ? `
-        <ol class="sv-priorities">
-          ${top.map((warning, index) => WarningCard(warning, index + 1)).join("")}
-        </ol>
-      ` : `<p class="sv-note is-ok">Sin incompatibles, bozales ni datos a revisar en este turno.</p>`}
-      ${rest.length ? `
-        <details class="sv-more" data-sv-fold="avisos-detector" ${isFoldOpen("avisos-detector") ? "open" : ""}>
-          <summary>Más avisos del detector (${rest.length})</summary>
-          <ul class="sv-more-list">
-            ${rest.map((warning) => WarningCard(warning)).join("")}
-          </ul>
-        </details>
-      ` : ""}
-    </section>
+    <span class="${cls} is-empty ${busy ? "is-busy" : ""}">
+      <input type="file" class="sv-file" id="sv-photo-${domId}" accept="image/*" capture="environment" data-sv-photo="${esc(stop.perroId)}" data-name="${esc(name)}" ${busy ? "disabled" : ""} />
+      <label for="sv-photo-${domId}" class="sv-avatar-label">
+        <span class="sv-initial" aria-hidden="true">${initial}</span>
+        <span class="sv-avatar-cam" aria-hidden="true">${icon("camera", "sv-icon")}${busy ? "…" : "Foto"}</span>
+        <span class="visually-hidden">${busy ? `Subiendo foto de ${esc(name)}` : `Sacar foto de ${esc(name)}`}</span>
+      </label>
+    </span>
   `;
 }
 
-function WarningCard(warning, rank) {
-  return `
-    <li class="sv-warning is-${warning.tone}">
-      <div class="sv-warning-head">
-        ${rank ? `<span class="sv-rank" aria-label="Prioridad ${rank}">${rank}</span>` : `<span class="sv-warning-icon">${icon(warning.icon, "sv-icon")}</span>`}
-        <h3>${esc(warning.title)}</h3>
-      </div>
-      <ul class="sv-warning-lines">
-        ${warning.lines.map((line) => `<li>${esc(line)}</li>`).join("")}
-      </ul>
-      <p class="sv-warning-action"><strong>Qué hacer:</strong> ${esc(warning.action)}</p>
-      <p class="sv-source">${esc(warning.source)}</p>
-    </li>
-  `;
-}
-
-// ---------- 4. Rutas del turno: control en vivo ----------
-
+// Bozal y "no juntar" siempre a la vista en la tarjeta del perro.
 function safetyChips(stop) {
   const dog = stop.dog;
-  const chips = (dog?.safety || []).map((note) => {
+  const chips = [];
+  const add = (tone, html) => chips.push({ tone, html: `<li class="sv-chip is-${tone}">${html}</li>` });
+  if (!dog) add("danger", "<b>Sin ficha</b>");
+  if (dog && dog.status !== "Activo") add("danger", `<b>${esc(dog.status)}</b>`);
+  (dog?.safety || []).forEach((note) => {
     const tone = /no juntar/i.test(note) ? "danger" : /bozal/i.test(note) ? "warn" : "neutral";
-    return `<li class="sv-chip is-${tone}">${tone === "neutral" ? esc(note) : `<b>${esc(note)}</b>`}</li>`;
+    // "Sale con Sonia (misma familia)" → "Sale con Sonia": menos letras, mismo dato.
+    const text = note.replace(/^(Sale con .+?)\s*\(misma familia\)\s*$/i, "$1");
+    add(tone, tone === "neutral" ? esc(text) : `<b>${esc(text)}</b>`);
   });
+  // "No juntar" que la ficha de este perro no dice, pero sí la del otro perro.
+  const written = plain((dog?.safety || []).filter((note) => /no juntar/i.test(note)).join(" "));
+  const missing = noJuntarNames(dog).filter((name) => !written.includes(plain(name)));
+  if (missing.length) add("danger", `<b>No juntar con ${esc(listWithAnd(missing, "ni"))}</b>`);
   if (stop.nota && !(dog?.safety || []).some((note) => plain(note).includes(plain(stop.nota)))) {
     const tone = /no juntar/i.test(stop.nota) ? "danger" : /bozal/i.test(stop.nota) ? "warn" : "info";
-    chips.push(`<li class="sv-chip is-${tone}"><b>Ruta:</b> ${esc(stop.nota)}</li>`);
+    add(tone, `<b>Ruta:</b> ${esc(stop.nota)}`);
   }
-  if (dog && dog.status !== "Activo") chips.unshift(`<li class="sv-chip is-danger"><b>Estado:</b> ${esc(dog.status)}</li>`);
-  if (!dog) chips.unshift(`<li class="sv-chip is-danger"><b>Sin ficha:</b> ${PENDIENTE}</li>`);
-  return chips.length ? `<ul class="sv-chips" aria-label="Avisos de ${esc(stop.perroNombre)}">${chips.join("")}</ul>` : "";
+  // Lo más grave primero: no juntar y sin ficha (rojo), después bozal (amarillo).
+  const rank = { danger: 0, warn: 1, info: 2, neutral: 3 };
+  chips.sort((a, b) => rank[a.tone] - rank[b.tone]);
+  return chips.length ? `<ul class="sv-chips" aria-label="Avisos de ${esc(stop.perroNombre)}">${chips.map((chip) => chip.html).join("")}</ul>` : "";
 }
 
 function whatsappText(view, route, items) {
@@ -1524,39 +1601,355 @@ function whatsappText(view, route, items) {
   return lines.join("\n");
 }
 
-function RoutesPanel(view, routeInfo) {
-  const { routes } = routeInfo;
-  if (!routes.length) {
-    return `
-      <section class="sv-card" aria-labelledby="sv-routes-title">
-        <h2 id="sv-routes-title" class="sv-title">${icon("route", "sv-icon")} Rutas del turno</h2>
-        <p class="sv-empty">${routeInfo.loading ? "Cargando rutas…" : `No hay rutas cargadas para ${esc(view.day.toLowerCase())} a la ${SHIFTS[view.shift].label.toLowerCase()} (ni en la app ni en la planilla).`}</p>
-        ${RequestButton(view, "", "", "Pedir una ruta al coordinador")}
-        ${RequestForm(view, "", "")}
-      </section>
+// tipo: abre la hoja con ese pedido ya elegido (ahorra un toque).
+function RequestButton(ruta, perroId, label = "Cambio", name = "", tipo = "", iconName = "send") {
+  const aria = tipo
+    ? `${label}: pedir al coordinador`
+    : name ? `Cambio: pedir para ${name}` : ruta ? `Cambio: pedir en la ruta ${ruta}` : `${label}: pedir cambio al coordinador`;
+  return `
+    <button type="button" class="sv-btn" id="${requestOpenerId(ruta, perroId, tipo)}" data-sv-request-open data-ruta="${esc(ruta)}" data-dog="${esc(perroId)}" ${tipo ? `data-tipo="${esc(tipo)}"` : ""} aria-label="${esc(aria)}">
+      ${icon(iconName, "sv-icon")} <span>${esc(label)}</span>
+    </button>
+  `;
+}
+
+// Respuesta del coordinador como notificación en la tarjeta.
+function RequestNotice(requests) {
+  if (!requests.length) return "";
+  const item = requests[0];
+  const state = REQUEST_STATES[item.estado] || REQUEST_STATES.pendiente;
+  if (!isAnswered(item)) {
+    return `<p class="sv-notice is-warn">${icon("send", "sv-icon")} <span>Pedido «${esc(item.tipo || "cambio")}»: ${item.pendiente ? "sin señal, se envía solo" : "esperando"}</span></p>`;
+  }
+  const fresh = isFreshAnswer(item);
+  return `
+    <div class="sv-notice is-${state.tone} ${fresh ? "is-new" : ""}">
+      ${icon(item.estado === "aplicado" ? "checkCircle" : "alertCircle", "sv-icon")}
+      <p><b>Coordinador: ${esc(state.label.toLowerCase())}</b>${item.respuesta ? ` · ${esc(item.respuesta)}` : ""}</p>
+      ${fresh ? `<button type="button" class="sv-btn sv-btn-small" id="sv-seen-${safeId(item.id)}" data-sv-seen="${esc(item.id)}" aria-label="Entendido">OK</button>` : ""}
+    </div>
+  `;
+}
+
+function sortedRequests(list) {
+  return [...list].sort((a, b) => String(b.creadoEn || "9").localeCompare(String(a.creadoEn || "9")));
+}
+
+// ---------- Pestaña "Ahora": panel de pedidos ----------
+
+function NowTab(view, routeInfo, items) {
+  const counts = countLive(items);
+  // Justo después de marcar, las tarjetas que se veían quedan en su lugar (aunque el perro pase a
+  // "Listos" o deje de estar atrasado): así no aparece otro perro debajo del dedo.
+  const frozen = frozenOrder(view);
+  const keyOf = (item) => cardDomId(item.route, item.stop);
+  const kept = frozen ? items.filter((item) => frozen.has(keyOf(item))).sort((a, b) => frozen.get(keyOf(a)) - frozen.get(keyOf(b))) : [];
+  const rest = items.filter((item) => !kept.includes(item));
+  const late = rest.filter((item) => item.status.live === "atrasado");
+  const done = rest.filter((item) => item.status.kind === "entregado" || item.status.kind === "nosale");
+  const active = rest.filter((item) => !late.includes(item) && !done.includes(item));
+  const byTime = (a, b) => (a.status.planned ?? 9999) - (b.status.planned ?? 9999) || String(a.stop.perroNombre).localeCompare(String(b.stop.perroNombre));
+  const shiftRequests = requestsFor(view.fecha, view.shift);
+  // Con una sola ruta en el turno, la ruta y el paseador son los mismos en todas las tarjetas: no se repiten.
+  const showRoute = routeInfo.routes.length > 1;
+  const card = (item) =>
+    DogCard(view, item, sortedRequests(shiftRequests.filter((req) => req.perroId && req.perroId === item.stop.perroId)), showRoute);
+  const closure = getClosure(view);
+  const moment = shiftMoment(view.shift, view.now);
+
+  let list = "";
+  if (!routeInfo.routes.length) {
+    list = `
+      <div class="sv-empty-box">
+        <p>${routeInfo.loading ? "Cargando rutas…" : "Sin rutas para este turno."}</p>
+        ${routeInfo.loading ? "" : RequestButton("", "", "Pedir ruta")}
+      </div>
+    `;
+  } else {
+    list = `
+      ${kept.length || late.length || active.length ? `
+        <ol class="sv-dogs" id="sv-dogs-now" aria-label="Perros por atender">
+          ${[...kept, ...late.sort(byTime), ...active.sort(byTime)].map(card).join("")}
+        </ol>
+      ` : `<p class="sv-line is-ok">${icon("checkCircle", "sv-icon")} <span>Todo listo en este turno.</span></p>`}
+      ${done.length ? `
+        <details class="sv-fold" data-sv-fold="listos" ${isFoldOpen("listos") ? "open" : ""}>
+          <summary><span class="sv-fold-title">${icon("checkCircle", "sv-icon")} Listos</span><span class="sv-pill">${done.length}</span></summary>
+          <ol class="sv-dogs">${done.sort(byTime).map(card).join("")}</ol>
+        </details>
+      ` : ""}
     `;
   }
-  const byId = paseosById();
+
+  return `
+    ${ShiftBar(view)}
+    ${Counter(counts, items.length)}
+    ${FallbackLine(view, routeInfo)}
+    ${AlertChips(view, routeInfo.routes)}
+    ${moment.tone === "done" && !closure?.cerrado && routeInfo.routes.length ? `
+      <button type="button" class="sv-btn sv-btn-primary sv-btn-main sv-wide" id="sv-close-open-now" data-sv-close-open>${icon("flag", "sv-icon")} Cerrar turno</button>
+    ` : ""}
+    <h1 class="visually-hidden">Ahora: turno ${esc(SHIFTS[view.shift].label.toLowerCase())}</h1>
+    ${list}
+  `;
+}
+
+function Counter(counts, total) {
+  return `
+    <section class="sv-counter" aria-label="Cumplimiento del turno">
+      <div class="sv-tiles" role="status" aria-live="polite">
+        <p class="sv-tile is-info"><b>${counts.atiempo}</b><span>A tiempo</span></p>
+        <p class="sv-tile ${counts.atrasado ? "is-danger" : "is-neutral"}"><b>${counts.atrasado}</b><span>${counts.atrasado === 1 ? "Atrasado" : "Atrasados"}</span></p>
+        <p class="sv-tile is-ok"><b>${counts.entregado}</b><span>${counts.entregado === 1 ? "Entregado" : "Entregados"}</span></p>
+      </div>
+      <details class="sv-help" data-sv-fold="ayuda-contador" ${isFoldOpen("ayuda-contador") ? "open" : ""}>
+        <summary>
+          ${counts.nosale ? `<span>${counts.nosale} no ${counts.nosale === 1 ? "sale" : "salen"}</span>` : ""}
+          <span class="sv-help-q" aria-hidden="true">?</span><span class="visually-hidden">${plural(total, "perro", "perros")} en el turno. Cómo se cuenta</span>
+        </summary>
+        <p>Atrasado: pasó la hora de retiro + ${PICKUP_GRACE} min, o el paseo pasó lo previsto + ${DELIVERY_GRACE} min. Se recalcula cada minuto.</p>
+      </details>
+    </section>
+  `;
+}
+
+// Una fila de botones cortos: incidentes, seguridad y avisos por barrio. Cada uno lleva a su sección.
+// El texto largo va en aria-label; en pantalla, ícono + 1 o 2 palabras + número.
+function AlertChips(view, routes) {
+  const chips = [];
+  const incidents = incidentsFor(view.fecha);
+  if (incidents.length) {
+    const last = incidents[incidents.length - 1];
+    chips.push({
+      id: "sv-goto-incidentes",
+      goto: "mas:incidentes",
+      tone: "danger",
+      icon: "alertTriangle",
+      label: incidents.length === 1 ? "Incidente" : "Incidentes",
+      count: incidents.length,
+      aria: `${plural(incidents.length, "incidente", "incidentes")} hoy. Último: ${last.titulo || incidentDogs(last)}. Ver`,
+    });
+  }
+  if (routes.some((route) => route.stops.length)) {
+    shiftWarnings(routes)
+      .filter((warning) => warning.tone !== "info" && warning.chip)
+      .forEach((warning, index) => {
+        chips.push({
+          id: `sv-goto-seguridad${index ? `-${index}` : ""}`,
+          goto: "mas:seguridad",
+          tone: warning.tone,
+          icon: warning.icon,
+          label: warning.chip,
+          count: warning.count,
+          aria: `${warning.short || warning.title}. Ver seguridad`,
+        });
+      });
+  }
+  const avisos = activeAvisos(view.fecha);
+  if (avisos.length) {
+    const danger = avisos.some((item) => item.tipo === "seguridad" || item.tipo === "perro suelto");
+    const first = avisos[0];
+    chips.push({
+      id: "sv-goto-avisos",
+      goto: "mas:avisos",
+      tone: danger ? "danger" : "warn",
+      icon: "mapPin",
+      label: avisos.length === 1 ? first.barrio || "Aviso" : "Avisos",
+      count: avisos.length > 1 ? avisos.length : 0,
+      aria: avisos.length === 1
+        ? `Aviso en ${first.barrio || PENDIENTE}: ${first.mensaje || first.tipo || ""}. Ver avisos`
+        : `${avisos.length} avisos por barrio. Ver avisos`,
+    });
+  }
+  if (!chips.length) return "";
+  return `
+    <ul class="sv-alerts" aria-label="Alertas del turno">
+      ${chips.map((chip) => `
+        <li>
+          <button type="button" class="sv-alert-chip is-${chip.tone}" id="${chip.id}" data-sv-goto="${chip.goto}" aria-label="${esc(`${chip.label}${chip.count ? ` ${chip.count}` : ""}. ${chip.aria}`)}">
+            ${icon(chip.icon, "sv-icon")}
+            <b>${esc(chip.label)}</b>
+            ${chip.count ? `<span class="sv-alert-n">${chip.count}</span>` : ""}
+          </button>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+}
+
+// La hora grande es el próximo compromiso: el retiro y, ya retirado, la entrega prevista.
+function cardTime(stop, status) {
+  if (status.retirado && status.kind !== "entregado") {
+    const start = toMinutes(status.record?.horaRetiro) ?? status.planned;
+    if (start !== null && status.minutos) {
+      const end = start + status.minutos;
+      return { time: `${String(Math.floor(end / 60) % 24).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`, label: "entrega" };
+    }
+  }
+  return { time: stop.hora || "--:--", label: "" };
+}
+
+function DogCard(view, item, requests, showRoute = true) {
+  const { stop, id, status, route } = item;
+  const when = cardTime(stop, status);
+  const domId = cardDomId(route, stop);
+  const record = status.record;
+  const walker = personLabel(route.paseador);
+  const optionsOpen = Boolean(id) && (openStops.has(id) || (noteDrafts.has(id) && noteDrafts.get(id) !== (record?.nota || "")));
+  const extraLate =
+    status.kind === "entregado" && status.late
+      ? `<span class="sv-state is-warn">Con atraso</span>`
+      : status.kind === "curso" && status.pickupLate
+        ? `<span class="sv-state is-warn">Retiro +${status.pickupDelay} min</span>`
+        : "";
+  return `
+    <li class="sv-dog is-${status.tone}" id="sv-dog-${domId}" tabindex="-1" aria-labelledby="sv-dog-name-${domId}">
+      <div class="sv-dog-top">
+        ${Avatar(stop, domId)}
+        <div class="sv-dog-main">
+          <h3 class="sv-dog-name" id="sv-dog-name-${domId}">${esc(stop.perroNombre)}</h3>
+          ${showRoute ? `<p class="sv-dog-sub">${esc(route.code)}${walker ? ` · ${esc(walker)}` : ""}</p>` : ""}
+          <p class="sv-dog-state"><span class="sv-state is-${status.tone}">${esc(status.label)}</span>${extraLate}</p>
+        </div>
+        <p class="sv-dog-time">
+          <strong>${esc(when.time)}</strong>
+          ${when.label ? `<small>${when.label}<span class="visually-hidden"> prevista</span></small>` : `<span class="visually-hidden">Retiro previsto</span>`}
+        </p>
+      </div>
+      ${safetyChips(stop)}
+      ${RequestNotice(requests)}
+      ${record?.nota ? `<p class="sv-dog-note">${icon("message", "sv-icon")} <span>${esc(record.nota)}</span></p>` : ""}
+      ${stop.perroId ? DogActions(item, domId, optionsOpen) : `
+        <p class="sv-line is-warn">${icon("alertCircle", "sv-icon")} <span>Sin ficha: no se marca desde acá.</span></p>
+        <div class="sv-row">${RequestButton(route.code, "", "Cambio")}</div>
+      `}
+      ${optionsOpen ? DogOptions(item, domId) : ""}
+    </li>
+  `;
+}
+
+function DogActions(item, domId, optionsOpen) {
+  const { stop, status, route, id } = item;
+  const busy = inFlight.has(id);
+  const ruta = esc(route.code);
+  const dog = esc(stop.perroId);
+  const name = esc(stop.perroNombre);
+  const disabled = busy ? "disabled" : "";
+  let main = "";
+  if (status.kind === "nosale") {
+    main = `<button type="button" class="sv-btn sv-btn-main" id="sv-main-${domId}" data-sv-absent="${dog}" data-ruta="${ruta}" aria-label="${name} sí sale" ${disabled}>${icon("play", "sv-icon")} Sí sale</button>`;
+  } else if (status.kind === "entregado") {
+    main = "";
+  } else if (status.retirado) {
+    main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-deliver="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como entregado" ${disabled}>${icon("packageCheck", "sv-icon")} Marcar entregado</button>`;
+  } else {
+    main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-pickup="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como retirado" ${disabled}>${icon("checkCircle", "sv-icon")} Marcar retirado</button>`;
+  }
+  const secondary = [
+    !status.retirado && status.kind !== "nosale"
+      ? `<button type="button" class="sv-btn" id="sv-absent-${domId}" data-sv-absent="${dog}" data-ruta="${ruta}" aria-label="${name} no sale" ${disabled}>${icon("x", "sv-icon")} <span>No sale</span></button>`
+      : "",
+    RequestButton(route.code, stop.perroId, "Cambio", stop.perroNombre),
+    `<button type="button" class="sv-btn" id="sv-opt-${domId}" data-sv-options="${esc(id)}" aria-expanded="${optionsOpen}" aria-controls="sv-optbox-${domId}" aria-label="Opciones de ${name}">${icon("sliders", "sv-icon")} <span>Opciones</span></button>`,
+  ].filter(Boolean);
+  return `
+    <div class="sv-dog-actions" ${busy ? `aria-busy="true"` : ""}>
+      ${main}
+      <div class="sv-row cols-${secondary.length}">${secondary.join("")}</div>
+    </div>
+  `;
+}
+
+function DogOptions(item, domId) {
+  const { stop, status, route, id } = item;
+  const record = status.record;
+  const noteValue = noteDrafts.has(id) ? noteDrafts.get(id) : record?.nota || "";
+  const unmark = status.kind === "entregado" ? ["entrega", "Desmarcar entrega"] : status.retirado ? ["retiro", "Desmarcar retiro"] : null;
+  const hasPhoto = Boolean(photoRecord(stop.perroId));
+  const marks = [
+    record?.horaRetiro && status.retirado ? `Retiro ${record.horaRetiro}` : "",
+    record?.horaPaseo && status.retirado ? `Paseo ${record.horaPaseo}` : "",
+    record?.horaEntrega && status.kind === "entregado" ? `Entrega ${record.horaEntrega}` : "",
+  ].filter(Boolean);
+  const busyPhoto = photoBusy.has(stop.perroId);
+  return `
+    <div class="sv-optbox" id="sv-optbox-${domId}">
+      <div class="sv-note-row">
+        <label class="sv-field" for="sv-note-${domId}">Nota al paseador
+          <input type="text" id="sv-note-${domId}" data-sv-note="${esc(id)}" value="${esc(noteValue)}" maxlength="200" placeholder="Sin datos de tutores" autocomplete="off" enterkeyhint="send" />
+        </label>
+        <button type="button" class="sv-btn sv-btn-primary" id="sv-note-save-${domId}" data-sv-note-save="${esc(stop.perroId)}" data-ruta="${esc(route.code)}">Guardar</button>
+      </div>
+      <div class="sv-row cols-${unmark ? 2 : 1}">
+        ${unmark ? `<button type="button" class="sv-btn" id="sv-unmark-${domId}" data-sv-unmark="${esc(stop.perroId)}" data-step="${unmark[0]}" data-ruta="${esc(route.code)}">${icon("x", "sv-icon")} <span>${unmark[1]}</span></button>` : ""}
+        ${hasPhoto ? `
+          <span class="sv-file-btn">
+            <input type="file" class="sv-file" id="sv-photo-new-${domId}" accept="image/*" capture="environment" data-sv-photo="${esc(stop.perroId)}" data-name="${esc(stop.perroNombre)}" ${busyPhoto ? "disabled" : ""} />
+            <label for="sv-photo-new-${domId}" class="sv-btn">${icon("camera", "sv-icon")} <span>${busyPhoto ? "Subiendo…" : "Foto nueva"}</span></label>
+          </span>
+        ` : ""}
+      </div>
+      ${marks.length || record ? `<p class="sv-source">${esc([marks.join(" · "), lastMark(record)].filter(Boolean).join(" · "))}</p>` : ""}
+    </div>
+  `;
+}
+
+// ---------- Pestaña "Rutas" ----------
+
+function RoutesTab(view, routeInfo, byId) {
+  const { routes } = routeInfo;
   const inRoutes = new Set(routes.flatMap((route) => route.stops.map((stop) => stop.perroId)).filter(Boolean));
   const extras = records("paseos").filter(
     (record) => record.fecha === view.fecha && String(record.id).endsWith(`_${view.shift}`) && record.perroId && !inRoutes.has(record.perroId),
   );
+  const loose = teamFor(view, routes).filter((person) => person.roles.includes("Sin ruta asignada"));
   return `
-    <section class="sv-routes" aria-labelledby="sv-routes-title">
-      <div class="sv-section-head sv-routes-head">
-        <h2 id="sv-routes-title" class="sv-title">${icon("route", "sv-icon")} Rutas del turno: retiro y entrega</h2>
-        <p>Las arma el coordinador. Vos controlás que se cumplan. Si hay que cambiar algo, pedíselo con «Pedir cambio al coordinador».</p>
+    ${ShiftBar(view)}
+    ${FallbackLine(view, routeInfo)}
+    <h1 class="sv-h1">Rutas</h1>
+    ${!routes.length ? `
+      <div class="sv-empty-box">
+        <p>${routeInfo.loading ? "Cargando rutas…" : "Sin rutas para este turno."}</p>
+        ${routeInfo.loading ? "" : RequestButton("", "", "Pedir ruta")}
       </div>
-      ${routes.map((route) => RouteCard(view, route, byId)).join("")}
-      ${extras.length ? `
-        <div class="sv-card">
-          <h3 class="sv-subtitle">Marcados fuera de la ruta</h3>
-          <ul class="sv-extra-list">
-            ${extras.map((record) => `<li class="sv-note is-info"><strong>${esc(record.perroNombre || record.perroId)}</strong>: ${esc(record.estado || "pendiente")}. ${esc(lastMark(record))}</li>`).join("")}
-          </ul>
-        </div>
-      ` : ""}
-    </section>
+    ` : routes.map((route) => RouteCard(view, route, byId)).join("")}
+    ${loose.length ? `
+      <section class="sv-card" aria-labelledby="sv-loose-title">
+        <h2 class="sv-h2" id="sv-loose-title">Sin ruta</h2>
+        <ul class="sv-people">${loose.map((person) => `<li>${PersonChip("Equipo", person.usuario, view)}</li>`).join("")}</ul>
+      </section>
+    ` : ""}
+    ${extras.length ? `
+      <section class="sv-card" aria-labelledby="sv-extras-title">
+        <h2 class="sv-h2" id="sv-extras-title">Fuera de ruta</h2>
+        <ul class="sv-plain-list">
+          ${extras.map((record) => `<li><b>${esc(record.perroNombre || record.perroId)}</b> · ${esc(record.estado || "pendiente")} <small>${esc(lastMark(record))}</small></li>`).join("")}
+        </ul>
+      </section>
+    ` : ""}
+  `;
+}
+
+// Persona del turno con el estado de su checklist de salida.
+function PersonChip(role, usuario, view) {
+  if (!usuario) return `<span class="sv-person"><small>${esc(role)}</small><b>${role === "Ayudante" ? "Sin ayudante" : PENDIENTE}</b></span>`;
+  const started = view.now.minutes >= toMinutes(SHIFTS[view.shift].from);
+  const record = checklistOf(view.fecha, view.shift, usuario);
+  const info = record ? checklistInfo(record) : null;
+  const [tone, label] = !info
+    ? [started ? "warn" : "neutral", "Sin checklist"]
+    : record.pendiente
+      ? ["info", "Checklist sin enviar"]
+      : info.complete
+        ? ["ok", "Checklist ✓"]
+        : ["danger", "Checklist incompleto"];
+  return `
+    <span class="sv-person">
+      <small>${esc(role)}</small>
+      <b>${esc(personName(usuario) || PENDIENTE)}</b>
+      <span class="sv-state is-${tone}">${esc(label)}</span>
+      ${info && !info.complete && info.missing.length ? `<small class="sv-person-miss">Falta: ${esc(info.missing.join(", "))}</small>` : ""}
+    </span>
   `;
 }
 
@@ -1564,355 +1957,502 @@ function RouteCard(view, route, byId) {
   const items = routeStatuses(view, route, byId);
   const counts = countLive(items);
   const walker = personLabel(route.paseador);
-  const helper = personLabel(route.ayudante);
-  const requests = requestsFor(view.fecha, view.shift).filter((item) => item.ruta === route.code && !item.perroId);
-  const area = `control-${route.code}`;
+  const requests = sortedRequests(requestsFor(view.fecha, view.shift).filter((item) => item.ruta === route.code && !item.perroId));
+  const titleId = `sv-route-${safeId(route.code)}`;
   return `
-    <article class="sv-card sv-route-card" aria-labelledby="sv-route-${safeId(route.code)}">
-      <div class="sv-route-head">
-        <div>
-          <h3 id="sv-route-${safeId(route.code)}" class="sv-route-title"><span class="sv-route-code">${esc(route.code)}</span> ${plural(route.stops.length, "perro", "perros")}</h3>
-          <p class="sv-route-people">
-            <span>${icon("userCheck", "sv-icon")} Paseador: <strong>${esc(walker || PENDIENTE)}</strong></span>
-            <span>${icon("users", "sv-icon")} Ayudante: <strong>${esc(helper || (route.source === "planilla" ? PENDIENTE : "sin ayudante"))}</strong></span>
-          </p>
-          <p class="sv-source">${esc(routeSourceLabel(route))}${route.record.actualizadoEn && route.source !== "planilla" ? ` · ${esc(lastMark(route.record, "Último cambio de"))}` : ""}</p>
-          ${route.notas ? `<p class="sv-hint">Notas de la ruta: ${esc(route.notas)}</p>` : ""}
-        </div>
+    <article class="sv-card sv-route" aria-labelledby="${titleId}">
+      <header class="sv-route-head">
+        <h2 class="sv-h2" id="${titleId}">${esc(route.code)}</h2>
         <p class="sv-route-counts">
-          <span class="sv-tag is-ok">${counts.atiempo} a tiempo</span>
-          <span class="sv-tag ${counts.atrasado ? "is-danger" : "is-neutral"}">${plural(counts.atrasado, "atrasado", "atrasados")}</span>
-          <span class="sv-tag is-neutral">${plural(counts.entregado, "entregado", "entregados")}</span>
+          <span class="sv-state is-neutral">${plural(route.stops.length, "perro", "perros")}</span>
+          ${counts.atrasado ? `<span class="sv-state is-danger">${plural(counts.atrasado, "atrasado", "atrasados")}</span>` : ""}
+          <span class="sv-state is-ok">${plural(counts.entregado, "listo", "listos")}</span>
         </p>
-      </div>
-      <div class="sv-actions">
-        <a class="sv-button" id="sv-wa-${safeId(route.code)}" href="https://wa.me/?text=${encodeURIComponent(whatsappText(view, route, items))}" target="_blank" rel="noopener noreferrer">
-          ${icon("message", "sv-icon")} ${walker ? `Escribirle a ${esc(walker)} por WhatsApp` : "Escribir al paseador por WhatsApp"}
+      </header>
+      <ul class="sv-people">
+        <li>${PersonChip("Paseador", route.paseador, view)}</li>
+        <li>${PersonChip("Ayudante", route.ayudante, view)}</li>
+      </ul>
+      ${route.notas ? `<p class="sv-dog-note">${icon("message", "sv-icon")} <span>${esc(route.notas)}</span></p>` : ""}
+      ${RequestNotice(requests)}
+      <div class="sv-row cols-2">
+        <a class="sv-btn" id="sv-wa-${safeId(route.code)}" href="https://wa.me/?text=${encodeURIComponent(whatsappText(view, route, items))}" target="_blank" rel="noopener noreferrer" aria-label="${walker ? `Escribirle a ${esc(walker)} por WhatsApp` : "Escribir al paseador por WhatsApp"}">
+          ${icon("message", "sv-icon")} <span>WhatsApp</span>
         </a>
-        ${RequestButton(view, route.code, "", "Pedir cambio al coordinador")}
+        ${RequestButton(route.code, "", "Cambio")}
       </div>
-      ${RequestBadges(requests)}
-      ${RequestForm(view, route.code, "")}
-      ${statusRegion(area)}
-      <ol class="sv-stop-list">
-        ${items.map((item) => StopRow(view, route, item)).join("")}
+      <ol class="sv-stops" aria-label="Perros de ${esc(route.code)} en orden">
+        ${items.map((item) => StopRow(route, item)).join("")}
       </ol>
+      <p class="sv-source">${esc(routeSourceLabel(route))}${route.record.actualizadoEn && route.source !== "planilla" ? ` · ${esc(lastMark(route.record, "Último cambio de"))}` : ""}</p>
     </article>
   `;
 }
 
-function StopRow(view, route, item) {
-  const { stop, id, status } = item;
-  const busy = id && inFlight.has(id);
-  const record = status.record;
-  const domId = safeId(`${route.code}-${stop.perroId || stop.perroNombre}`);
-  const marks = [
-    record?.horaRetiro && status.retirado ? `Retiro ${record.horaRetiro}` : "",
-    record?.horaPaseo && status.retirado ? `Paseo ${record.horaPaseo}` : "",
-    record?.horaEntrega && status.kind === "entregado" ? `Entrega ${record.horaEntrega}` : "",
-  ].filter(Boolean);
-  const requests = requestsFor(view.fecha, view.shift).filter((req) => req.perroId && req.perroId === stop.perroId);
-  const noteValue = noteDrafts.has(id) ? noteDrafts.get(id) : record?.nota || "";
-  const moreOpen = openStops.has(id) || (noteDrafts.has(id) && noteDrafts.get(id) !== (record?.nota || ""));
-  const extraLate = status.kind === "entregado" && status.late ? `<span class="sv-tag is-warn">Con atraso</span>` : status.kind === "curso" && status.pickupLate ? `<span class="sv-tag is-warn">Retiro +${status.pickupDelay} min</span>` : "";
-
+function StopRow(route, item) {
+  const { stop, status } = item;
+  const domId = cardDomId(route, stop);
+  const done = status.kind === "entregado" || status.kind === "nosale";
   return `
-    <li class="sv-stop is-${status.kind}">
-      <div class="sv-stop-time">
-        <strong>${esc(stop.hora || "--:--")}</strong>
-        <small>${stop.minutos ? `${stop.minutos} min` : "min sin confirmar"}</small>
-      </div>
-      <div class="sv-stop-body">
-        <div class="sv-stop-head">
-          <h4>${esc(stop.perroNombre)}</h4>
-          <span class="sv-state is-${status.tone}">${esc(status.label)}</span>
-          ${extraLate}
-        </div>
-        ${safetyChips(stop)}
-        ${marks.length || record ? `
-          <p class="sv-source">${esc(marks.join(" · "))}${marks.length ? " · " : ""}${esc(lastMark(record))}</p>
-        ` : ""}
-        ${record?.nota ? `<p class="sv-stop-note"><b>Nota para el paseador:</b> ${esc(record.nota)}</p>` : ""}
-        ${RequestBadges(requests)}
-        ${stop.perroId ? `
-          <div class="sv-stop-actions" ${busy ? `aria-busy="true"` : ""}>
-            ${status.kind === "nosale" ? `
-              <button type="button" class="sv-button sv-button-quiet" id="sv-absent-${domId}" data-sv-absent="${stop.perroId}" data-ruta="${esc(route.code)}" aria-label="Deshacer: ${esc(stop.perroNombre)} sí sale">Deshacer «no sale»</button>
-            ` : `
-              <button type="button" class="sv-button ${status.retirado ? "is-checked" : "sv-button-primary"}" id="sv-pickup-${domId}" data-sv-pickup="${stop.perroId}" data-ruta="${esc(route.code)}" aria-pressed="${status.retirado}" aria-label="${status.retirado ? `Desmarcar retiro de ${esc(stop.perroNombre)}` : `Marcar a ${esc(stop.perroNombre)} como retirado`}">
-                ${status.retirado ? `${icon("checkCircle", "sv-icon")} Retirado` : "Retirado"}
-              </button>
-              <button type="button" class="sv-button ${status.kind === "entregado" ? "is-checked" : ""}" id="sv-deliver-${domId}" data-sv-deliver="${stop.perroId}" data-ruta="${esc(route.code)}" aria-pressed="${status.kind === "entregado"}" ${status.retirado ? "" : "disabled"} aria-label="${status.kind === "entregado" ? `Desmarcar entrega de ${esc(stop.perroNombre)}` : `Marcar a ${esc(stop.perroNombre)} como entregado`}">
-                ${status.kind === "entregado" ? `${icon("checkCircle", "sv-icon")} Entregado` : "Entregado"}
-              </button>
-              ${status.retirado ? "" : `<button type="button" class="sv-button sv-button-quiet" id="sv-absent-${domId}" data-sv-absent="${stop.perroId}" data-ruta="${esc(route.code)}" aria-label="${esc(stop.perroNombre)} no sale">No sale</button>`}
-            `}
-          </div>
-          <details class="sv-stop-more" data-sv-stop-more="${id}" ${moreOpen ? "open" : ""}>
-            <summary>Nota para el paseador y pedido de cambio</summary>
-            <div class="sv-stop-more-body">
-              <label class="sv-field" for="sv-note-${domId}">Nota para el paseador
-                <span class="sv-field-hint" id="sv-note-${domId}-hint">La ve en su ruta. Sin datos de tutores.</span>
-                <input type="text" id="sv-note-${domId}" data-sv-note="${id}" value="${esc(noteValue)}" maxlength="200" aria-describedby="sv-note-${domId}-hint" autocomplete="off" />
-              </label>
-              <div class="sv-actions">
-                <button type="button" class="sv-button" id="sv-note-save-${domId}" data-sv-note-save="${stop.perroId}" data-ruta="${esc(route.code)}">Guardar nota</button>
-                ${RequestButton(view, route.code, stop.perroId, "Pedir cambio al coordinador")}
-              </div>
-            </div>
-          </details>
-          ${RequestForm(view, route.code, stop.perroId)}
-        ` : `<p class="sv-hint">Sin ficha en el registro de perros: no se puede marcar desde acá.</p>`}
-      </div>
+    <li>
+      <button type="button" class="sv-stop is-${status.tone}" id="sv-stop-${domId}" data-sv-goto-dog="${domId}" data-done="${done ? "1" : ""}">
+        <span class="sv-stop-time">${esc(stop.hora || "--:--")}</span>
+        ${Avatar(stop, domId, true)}
+        <span class="sv-stop-name"><b>${esc(stop.perroNombre)}</b>${shortSafety(stop.dog)}</span>
+        <span class="sv-state is-${status.tone}">${esc(status.label)}</span>
+      </button>
     </li>
   `;
 }
 
-// ---------- 5. Pedidos de cambio al coordinador ----------
+// ---------- Pestaña "Pedidos" ----------
 
-function RequestButton(view, ruta, perroId, label) {
-  const domId = safeId(`sv-req-open-${ruta || "turno"}-${perroId || "ruta"}`);
-  return `<button type="button" class="sv-button sv-button-quiet" id="${domId}" data-sv-request-open data-ruta="${esc(ruta)}" data-dog="${esc(perroId)}">${icon("send", "sv-icon")} ${esc(label)}</button>`;
+function RequestsTab(view) {
+  const list = myRequests(view.fecha);
+  const seen = seenSet();
+  const pending = list.filter((item) => !isAnswered(item)).length;
+  return `
+    <h1 class="sv-h1">Pedidos</h1>
+    <p class="sv-lead">El coordinador cambia la ruta y te responde.</p>
+    <div class="sv-row cols-3 sv-quick" role="group" aria-label="Nuevo pedido">
+      ${RequestButton("", "", "Sumar perro", "", "agregar perro", "plus")}
+      ${RequestButton("", "", "Paseador", "", "cambiar paseador o ayudante", "users")}
+      ${RequestButton("", "", "Otro", "", "otro", "message")}
+    </div>
+    ${list.length ? `
+      <p class="sv-route-counts"><span class="sv-state is-warn">${pending} esperando</span><span class="sv-state is-neutral">${list.length} en total</span></p>
+      <ul class="sv-requests">${list.map((item) => RequestCard(item, seen)).join("")}</ul>
+    ` : `<div class="sv-empty-box"><p>${loaded.has("solicitudes") ? "Sin pedidos." : "Cargando…"}</p></div>`}
+  `;
 }
 
-function RequestBadges(requests) {
-  if (!requests.length) return "";
+function RequestCard(item, seen) {
+  const state = REQUEST_STATES[item.estado] || REQUEST_STATES.pendiente;
+  const fresh = isFreshAnswer(item, seen);
+  const when = item.pendiente ? "Sin señal: se envía solo" : `${isoToLabel(item.fecha)} · ${String(item.turno || "").toLowerCase()} · ${timeOf(item.creadoEn)} hs`;
   return `
-    <ul class="sv-request-badges">
-      ${requests.map((item) => {
-        const state = REQUEST_STATES[item.estado] || REQUEST_STATES.pendiente;
-        return `<li class="sv-tag is-${state.tone}">Pedido «${esc(item.tipo || "cambio")}»: ${state.label}${item.pendiente ? " (sin enviar)" : ""}</li>`;
-      }).join("")}
+    <li class="sv-request is-${state.tone} ${fresh ? "is-new" : ""}">
+      <p class="sv-request-head">
+        <span class="sv-state is-${state.tone}">${esc(state.label)}</span>
+        ${item.urgente ? `<span class="sv-state is-danger">Urgente</span>` : ""}
+        ${fresh ? `<span class="sv-state is-info">Nuevo</span>` : ""}
+      </p>
+      <h2 class="sv-h3">${esc(requestTitle(item))}</h2>
+      ${item.detalle ? `<p>${esc(item.detalle)}</p>` : ""}
+      <p class="sv-muted">Motivo: ${esc(item.motivo || PENDIENTE)}</p>
+      <p class="sv-answer">${icon("message", "sv-icon")} <span>${esc(item.respuesta || (isAnswered(item) ? "Sin comentario." : "Todavía no respondió."))}</span></p>
+      <p class="sv-source">${esc(when)}</p>
+      ${fresh ? `<button type="button" class="sv-btn sv-btn-small" id="sv-seen-${safeId(item.id)}" data-sv-seen="${esc(item.id)}">OK, visto</button>` : ""}
+    </li>
+  `;
+}
+
+// ---------- Pestaña "Más" ----------
+
+function MoreTab(view, routeInfo, sub) {
+  if (sub) {
+    const section = {
+      observacion: () => ObservationSection(view, routeDogs(routeInfo.routes)),
+      avisos: () => AvisosSection(view),
+      seguridad: () => SafetySection(routeInfo.routes),
+      incidentes: () => IncidentsSection(view),
+      ayuda: () => HelpSection(),
+    }[sub]();
+    return `
+      <div class="sv-subhead">
+        <button type="button" class="sv-btn sv-btn-back" id="sv-back" data-sv-sub="" aria-label="Volver a Más">${icon("arrowRight", "sv-icon sv-flip")} Más</button>
+        <h1 class="sv-h1">${esc(SUBS[sub].label)}</h1>
+      </div>
+      ${section}
+    `;
+  }
+  const closure = getClosure(view);
+  const closedAt = closure?.cerrado ? closure.horaCierre || timeOf(closure.actualizadoEn) : "";
+  const avisos = activeAvisos(view.fecha).length;
+  const warnings = routeInfo.routes.some((route) => route.stops.length) ? shiftWarnings(routeInfo.routes).length : 0;
+  const incidents = incidentsFor(view.fecha).length;
+  const observations = getObservations().length;
+  const tile = (attrs, iconName, title, meta, tone = "") => `
+    <li>
+      <button type="button" class="sv-menu-tile ${tone}" ${attrs}>
+        ${icon(iconName, "sv-icon")}
+        <b>${title}</b>
+        ${meta ? `<small>${meta}</small>` : ""}
+      </button>
+    </li>
+  `;
+  return `
+    <h1 class="sv-h1">Más</h1>
+    <ul class="sv-menu">
+      ${tile(`id="sv-close-open" data-sv-close-open`, "flag", "Cerrar turno", closure?.cerrado ? `Cerrado ${esc(closedAt)}` : `${esc(SHIFTS[view.shift].label)} abierto`, closure?.cerrado ? "is-ok" : "is-primary")}
+      ${tile(`id="sv-sub-observacion" data-sv-sub="observacion"`, "eye", "Observación", observations ? `${observations} en ${OBS_DAYS} días` : "Conducta")}
+      ${tile(`id="sv-sub-avisos" data-sv-sub="avisos"`, "mapPin", "Avisos", avisos ? plural(avisos, "vigente", "vigentes") : "Por barrio", avisos ? "is-warn" : "")}
+      ${tile(`id="sv-sub-seguridad" data-sv-sub="seguridad"`, "shieldCheck", "Seguridad", warnings ? plural(warnings, "aviso", "avisos") : "Sin avisos")}
+      ${tile(`id="sv-sub-incidentes" data-sv-sub="incidentes"`, "alertTriangle", "Incidentes", incidents ? `${incidents} hoy` : "Ninguno hoy", incidents ? "is-danger" : "")}
+      <li>
+        <a class="sv-menu-tile" id="sv-go-paseador" href="/paseador" data-link>
+          ${icon("pawPrint", "sv-icon")}<b>Modo paseador</b><small>Ver su ruta</small>
+        </a>
+      </li>
+      ${tile(`id="sv-sub-ayuda" data-sv-sub="ayuda"`, "help", "Ayuda", "Colores y fuentes")}
+      ${tile(`id="sv-refresh-more" data-sv-refresh`, "radio", "Actualizar", "Traer lo nuevo")}
+      ${tile(`id="sv-logout-more" data-sv-logout`, "logOut", "Salir", "")}
     </ul>
   `;
 }
 
-function RequestForm(view, ruta, perroId) {
-  const draft = getRequestDraft(view);
-  if (!draft.open || draft.ruta !== ruta || (draft.perroId || "") !== (perroId || "")) return "";
-  const target = `${ruta ? `Ruta ${ruta}` : `Turno ${SHIFTS[view.shift].label.toLowerCase()}`}${draft.perroNombre ? ` · ${draft.perroNombre}` : ""}`;
+function SafetySection(routes) {
+  if (!routes.some((route) => route.stops.length)) return `<div class="sv-empty-box"><p>Sin perros en este turno.</p></div>`;
+  const warnings = shiftWarnings(routes);
+  if (!warnings.length) return `<p class="sv-line is-ok">${icon("checkCircle", "sv-icon")} <span>Sin incompatibles, bozales ni datos a revisar.</span></p>`;
+  // Lo que frena o cuida el paseo, a la vista; los datos a revisar (no frenan), plegados.
+  const urgent = warnings.filter((warning) => warning.tone !== "info");
+  const info = warnings.filter((warning) => warning.tone === "info");
   return `
-    <form class="sv-form sv-request-form" data-sv-request-form novalidate aria-labelledby="sv-req-title">
-      <h4 id="sv-req-title">Pedir cambio al coordinador · ${esc(target)}</h4>
-      <p class="sv-hint">El coordinador lo aplica en la ruta y te responde. Hoy, ${esc(view.fechaLabel)}.</p>
-      <label class="sv-field" for="sv-req-tipo">Qué hay que cambiar
-        <select id="sv-req-tipo" data-sv-req="tipo">
-          ${REQUEST_TYPES.map((tipo) => `<option value="${tipo}" ${tipo === draft.tipo ? "selected" : ""}>${tipo[0].toUpperCase()}${tipo.slice(1)}</option>`).join("")}
-        </select>
-      </label>
-      <label class="sv-field" for="sv-req-detalle">Detalle${draft.tipo === "no sale" ? " (opcional)" : ""}
-        <span class="sv-field-hint" id="sv-req-detalle-hint">Ej.: retirarlo 10:30 en vez de 10:00. O: sumar a Paco a la ruta.</span>
-        <textarea id="sv-req-detalle" rows="2" data-sv-req="detalle" aria-describedby="sv-req-detalle-hint">${esc(draft.detalle)}</textarea>
-      </label>
-      <label class="sv-field" for="sv-req-motivo">Qué pasó o con quién hablaste
-        <span class="sv-field-hint" id="sv-req-motivo-hint">Ej.: hablé con la familia, hoy no está. Sin teléfonos ni domicilios.</span>
-        <textarea id="sv-req-motivo" rows="2" data-sv-req="motivo" aria-describedby="sv-req-motivo-hint" required>${esc(draft.motivo)}</textarea>
-      </label>
-      <label class="sv-check" for="sv-req-urgente">
-        <input type="checkbox" id="sv-req-urgente" data-sv-req="urgente" ${draft.urgente ? "checked" : ""} />
-        <span>Urgente: afecta al turno de ahora</span>
-      </label>
-      <div class="sv-actions">
-        <button type="submit" class="sv-button sv-button-primary" id="sv-req-save">${icon("send", "sv-icon")} Enviar pedido</button>
-        <button type="button" class="sv-button" id="sv-req-cancel" data-sv-request-cancel>Cancelar</button>
-      </div>
-      ${statusRegion("request-form")}
-    </form>
+    ${urgent.length ? `<ol class="sv-warnings">${urgent.map((warning) => WarningCard(warning)).join("")}</ol>` : `<p class="sv-line is-ok">${icon("checkCircle", "sv-icon")} <span>Sin incompatibles ni bozales.</span></p>`}
+    ${info.length ? `
+      <details class="sv-fold" data-sv-fold="seguridad-info" ${isFoldOpen("seguridad-info") ? "open" : ""}>
+        <summary><span class="sv-fold-title">${icon("fileText", "sv-icon")} A revisar</span><span class="sv-pill">${info.reduce((sum, warning) => sum + warning.lines.length, 0)}</span></summary>
+        <ol class="sv-warnings sv-fold-body">${info.map((warning) => WarningCard(warning)).join("")}</ol>
+      </details>
+    ` : ""}
   `;
 }
 
-function RequestsPanel(view) {
-  const list = myRequests(view.fecha);
-  const pending = list.filter((item) => (item.estado || "pendiente") === "pendiente").length;
-  const open = isFoldOpen("pedidos", true);
+function WarningCard(warning) {
   return `
-    <details class="sv-fold" data-sv-fold="pedidos" ${open ? "open" : ""}>
-      <summary>
-        <span class="sv-fold-title">${icon("send", "sv-icon")} Mis pedidos de cambio</span>
-        <span class="sv-fold-meta">${list.length ? `${pending} pendiente${pending === 1 ? "" : "s"} de ${list.length}` : loaded.has("solicitudes") ? "Sin pedidos" : "Cargando…"}</span>
-      </summary>
-      <div class="sv-fold-body">
-        ${statusRegion("requests")}
-        ${list.length ? `
-          <ul class="sv-request-list">
-            ${list.map((item) => {
-              const state = REQUEST_STATES[item.estado] || REQUEST_STATES.pendiente;
-              const answeredBy = item.actualizadoPor && item.actualizadoPor !== item.creadoPor ? lastMark(item, "Respondió") : "";
-              return `
-                <li class="sv-request is-${state.tone}">
-                  <div class="sv-saved-head">
-                    <strong>${item.urgente ? `<span class="sv-tag is-danger">Urgente</span> ` : ""}${esc(requestTitle(item))}</strong>
-                    <span class="sv-state is-${state.tone}">${state.label}</span>
-                  </div>
-                  <p class="sv-source">${esc(isoToLabel(item.fecha))} · Turno ${esc(String(item.turno || "").toLowerCase() || PENDIENTE)} · ${item.pendiente ? "Se enviará cuando haya señal." : `Pedido a las ${esc(timeOf(item.creadoEn))} hs`}</p>
-                  <dl class="sv-obs-detail">
-                    ${item.detalle ? `<div><dt>Detalle</dt><dd>${esc(item.detalle)}</dd></div>` : ""}
-                    <div><dt>Motivo</dt><dd>${esc(item.motivo || PENDIENTE)}</dd></div>
-                    <div><dt>Respuesta del coordinador</dt><dd>${esc(item.respuesta || ((item.estado || "pendiente") === "pendiente" ? "Todavía no respondió." : "Sin comentario."))}</dd></div>
-                  </dl>
-                  ${answeredBy ? `<p class="sv-source">${esc(answeredBy)}</p>` : ""}
-                </li>
-              `;
-            }).join("")}
-          </ul>
-        ` : `<p class="sv-empty">Todavía no pediste cambios. Usá «Pedir cambio al coordinador» en una ruta o en un perro.</p>`}
-      </div>
-    </details>
-  `;
-}
-
-// ---------- 6. Observaciones de conducta ----------
-
-function ObservationLog(view, dogs) {
-  const open = isFoldOpen("observaciones");
-  const draft = getObservationDraft(view);
-  const saved = getObservations();
-  const shiftIds = new Set(dogs.map((dog) => dog.id));
-  const others = REAL_DOGS.filter((dog) => !shiftIds.has(dog.id));
-
-  return `
-    <details class="sv-fold" data-sv-fold="observaciones" ${open ? "open" : ""}>
-      <summary>
-        <span class="sv-fold-title">${icon("eye", "sv-icon")} Registrar observación de conducta</span>
-        <span class="sv-fold-meta">${saved.length ? `${saved.length} en ${OBS_DAYS} días` : "Sin registros"}</span>
-      </summary>
-      <div class="sv-fold-body">
-        <p class="sv-note is-info">Describí lo que se vio y se oyó, no lo que creés que siente el perro. No uses etiquetas como «agresivo», «malo» o «dominante». Sin datos de tutores.</p>
-        <form class="sv-obs-form" data-sv-obs-form novalidate>
-          <div class="sv-form-grid sv-form-grid-3">
-            <label class="sv-field" for="sv-obs-dog">Perro
-              <select id="sv-obs-dog" data-sv-obs="dogId" required>
-                <option value="">Elegí un perro</option>
-                ${dogs.length ? `<optgroup label="De este turno">${dogs.map((dog) => `<option value="${dog.id}" ${draft.dogId === dog.id ? "selected" : ""}>${esc(dog.name)}</option>`).join("")}</optgroup>` : ""}
-                <optgroup label="Otros perros">${others.map((dog) => `<option value="${dog.id}" ${draft.dogId === dog.id ? "selected" : ""}>${esc(dog.name)}</option>`).join("")}</optgroup>
-              </select>
-            </label>
-            <label class="sv-field" for="sv-obs-fecha">Fecha (DD/MM/AAAA)
-              <input type="text" id="sv-obs-fecha" data-sv-obs="fecha" value="${esc(draft.fecha)}" inputmode="numeric" placeholder="${view.now.label}" maxlength="10" autocomplete="off" required />
-            </label>
-            <label class="sv-field" for="sv-obs-hora">Hora (opcional)
-              <input type="time" id="sv-obs-hora" data-sv-obs="hora" value="${esc(draft.hora)}" />
-            </label>
-          </div>
-          ${OBSERVATION_FIELDS.map((field) => `
-            <label class="sv-field" for="sv-obs-${field.key}">${field.label}
-              <span class="sv-field-hint" id="sv-obs-${field.key}-hint">${field.hint}</span>
-              ${field.type === "input"
-                ? `<input type="text" id="sv-obs-${field.key}" data-sv-obs="${field.key}" value="${esc(draft[field.key])}" aria-describedby="sv-obs-${field.key}-hint" required />`
-                : `<textarea id="sv-obs-${field.key}" rows="2" data-sv-obs="${field.key}" aria-describedby="sv-obs-${field.key}-hint" required>${esc(draft[field.key])}</textarea>`}
-            </label>
-          `).join("")}
-          <label class="sv-check" for="sv-obs-seguimiento">
-            <input type="checkbox" id="sv-obs-seguimiento" data-sv-obs="seguimiento" ${draft.seguimiento ? "checked" : ""} />
-            <span>Requiere seguimiento (avisar a Juan)</span>
-          </label>
-          <div class="sv-actions">
-            <button type="submit" class="sv-button sv-button-primary" id="sv-obs-save">${icon("checkCircle", "sv-icon")} Guardar observación</button>
-          </div>
-          ${statusRegion("observation")}
-        </form>
-
-        ${saved.length ? `
-          <h3 class="sv-subtitle">Registradas por el equipo · últimos ${OBS_DAYS} días</h3>
-          <ul class="sv-obs-list">
-            ${saved.map((obs) => ObservationCard(obs)).join("")}
-          </ul>
-        ` : ""}
-      </div>
-    </details>
-  `;
-}
-
-function ObservationCard(obs) {
-  const confirming = pendingObservationDelete === obs.id;
-  const name = obs.perroNombre || dogById(obs.perroId)?.name || PENDIENTE;
-  return `
-    <li class="sv-obs ${obs.seguimiento ? "needs-follow" : ""}">
-      <div class="sv-saved-head">
-        <strong>${esc(name)}</strong>
-        <span>${esc(isoToLabel(obs.fecha))}${obs.hora ? ` · ${esc(obs.hora)} hs` : ""}${obs.lugar ? ` · ${esc(obs.lugar)}` : ""}</span>
-      </div>
-      ${obs.seguimiento ? `<p class="sv-tag is-warn">Requiere seguimiento</p>` : ""}
-      <dl class="sv-obs-detail">
-        <div><dt>Estímulo</dt><dd>${esc(obs.estimulo || PENDIENTE)}</dd></div>
-        <div><dt>Reacción</dt><dd>${esc(obs.reaccion || PENDIENTE)}</dd></div>
-        <div><dt>Acción</dt><dd>${esc(obs.accion || PENDIENTE)}</dd></div>
-        <div><dt>Resultado</dt><dd>${esc(obs.resultado || PENDIENTE)}</dd></div>
-      </dl>
-      <p class="sv-source">Registró: ${esc(observationAuthor(obs))}</p>
-      <div class="sv-actions">
-        ${confirming ? `
-          <button type="button" class="sv-button sv-button-danger" id="sv-obs-del-ok-${obs.id}" data-sv-obs-delete-ok="${obs.id}">Sí, borrar</button>
-          <button type="button" class="sv-button" id="sv-obs-del-no-${obs.id}" data-sv-obs-delete-cancel>No borrar</button>
-        ` : `
-          <button type="button" class="sv-button" id="sv-obs-copy-${obs.id}" data-sv-obs-copy="${obs.id}">${icon("copy", "sv-icon")} Copiar texto</button>
-          ${canDelete(obs) ? `<button type="button" class="sv-button" id="sv-obs-del-${obs.id}" data-sv-obs-delete="${obs.id}">Borrar</button>` : ""}
-        `}
-      </div>
+    <li class="sv-warning is-${warning.tone}">
+      <h2 class="sv-h3">${icon(warning.icon, "sv-icon")} ${esc(warning.title)}</h2>
+      <ul class="sv-plain-list">
+        ${warning.lines.map((line) => `<li>${esc(line)}</li>`).join("")}
+      </ul>
+      <p class="sv-warning-action"><b>Qué hacer:</b> ${esc(warning.action)}</p>
+      <p class="sv-source">${esc(warning.source)}</p>
     </li>
   `;
 }
 
-// ---------- 7. Cierre del turno ----------
-
-function ShiftClosure(view) {
-  const open = isFoldOpen("cierre");
-  const closure = getClosure(view);
-  const summary = closureSummary(view);
-  const closedAt = closure?.cerrado ? closure.horaCierre || timeOf(closure.actualizadoEn) : "";
+function IncidentsSection(view) {
+  const incidents = incidentsFor(view.fecha);
+  if (!incidents.length) return `<div class="sv-empty-box"><p>${loaded.has("incidentes") ? "Sin incidentes hoy." : "Cargando…"}</p></div>`;
   return `
-    <details class="sv-fold" data-sv-fold="cierre" ${open ? "open" : ""}>
-      <summary>
-        <span class="sv-fold-title">${icon("flag", "sv-icon")} Cerrar el turno ${SHIFTS[view.shift].label.toLowerCase()}</span>
-        <span class="sv-fold-meta">${closure?.cerrado ? `Cerrado ${esc(closedAt)} hs` : "Abierto"}</span>
-      </summary>
-      <div class="sv-fold-body">
-        ${closure ? `<p class="sv-source">${esc(closure.cerrado ? lastMark(closure, "Lo cerró") : lastMark(closure, "Última nota de"))}</p>` : ""}
-        <label class="sv-field" for="sv-close-notes">Notas del supervisor (opcional)
-          <span class="sv-field-hint" id="sv-close-notes-hint">Novedades del turno, sin datos de tutores. Se guardan al salir del campo y se suman al resumen.</span>
-          <textarea id="sv-close-notes" rows="3" data-sv-close-notes aria-describedby="sv-close-notes-hint">${esc(closureNotes(view))}</textarea>
-        </label>
-        <label class="sv-field" for="sv-close-summary">Resumen para copiar (incluye el cumplimiento del horario)
-          <textarea id="sv-close-summary" class="sv-summary" rows="16" readonly>${esc(summary)}</textarea>
-        </label>
-        <div class="sv-actions">
-          <button type="button" class="sv-button sv-button-primary" id="sv-close-copy" data-sv-close-copy>${icon("copy", "sv-icon")} Copiar resumen</button>
-          ${closure?.cerrado
-            ? `<button type="button" class="sv-button" id="sv-close-reopen" data-sv-close-reopen>Reabrir turno</button>`
-            : `<button type="button" class="sv-button" id="sv-close-done" data-sv-close-done>${icon("flag", "sv-icon")} Marcar turno cerrado</button>`}
-        </div>
-        ${statusRegion("closure")}
-      </div>
-    </details>
+    <ul class="sv-requests">
+      ${incidents.map((item) => `
+        <li class="sv-request is-danger">
+          <p class="sv-request-head">
+            ${item.riesgo ? `<span class="sv-state is-danger">Riesgo: ${esc(item.riesgo)}</span>` : ""}
+            ${item.lesiones ? `<span class="sv-state is-warn">Lesiones: ${esc(item.lesiones)}</span>` : ""}
+          </p>
+          <h2 class="sv-h3">${esc(item.titulo || "Incidente")}</h2>
+          <p class="sv-muted">${item.hora ? `${esc(item.hora)} hs · ` : ""}${esc(incidentDogs(item))}${item.lugar ? ` · ${esc(item.lugar)}` : ""}${item.barrio ? ` · ${esc(item.barrio)}` : ""}</p>
+          <dl class="sv-detail">
+            ${[["Antes", item.antes], ["Conducta", item.conducta], ["Acción", item.accion], ["Después", item.despues], ["Protocolo", item.protocolo]]
+              .filter(([, value]) => value)
+              .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`)
+              .join("")}
+          </dl>
+          <p class="sv-source">${esc(lastMark(item, "Cargó"))}</p>
+        </li>
+      `).join("")}
+    </ul>
   `;
 }
 
-// ---------- 8. Referencias ----------
-
-function ReferencePanel() {
-  const open = isFoldOpen("referencias");
+function HelpSection() {
+  const legend = [
+    ["neutral", "Pendiente", "Todavía no es la hora."],
+    ["warn", "Retirar ya", "Es la hora de retiro."],
+    ["info", "Retirado", "En la calle."],
+    ["ok", "Entregado", "Volvió a casa."],
+    ["danger", "Atrasado", `Retiro + ${PICKUP_GRACE} min o paseo + ${DELIVERY_GRACE} min.`],
+  ];
   return `
-    <details class="sv-fold" data-sv-fold="referencias" ${open ? "open" : ""}>
-      <summary>
-        <span class="sv-fold-title">${icon("help", "sv-icon")} Categorías y fuentes</span>
-        <span class="sv-fold-meta">Referencia</span>
-      </summary>
+    <section class="sv-card" aria-labelledby="sv-legend-title">
+      <h2 class="sv-h2" id="sv-legend-title">Colores</h2>
+      <ul class="sv-legend">
+        ${legend.map(([tone, label, text]) => `<li><span class="sv-state is-${tone}">${label}</span> ${text}</li>`).join("")}
+        <li><span class="sv-chip is-danger"><b>No juntar</b></span> Esos perros no caminan juntos.</li>
+        <li><span class="sv-chip is-warn"><b>Bozal</b></span> Sale con bozal puesto y revisado.</li>
+      </ul>
+    </section>
+    <section class="sv-card" aria-labelledby="sv-how-title">
+      <h2 class="sv-h2" id="sv-how-title">Cómo se usa</h2>
+      <ul class="sv-plain-list">
+        <li><b>Marcar retirado / entregado:</b> un toque. Si te equivocás, «Deshacer» abajo.</li>
+        <li><b>Cambio:</b> se lo pedís al coordinador. Vos no cambiás la ruta.</li>
+        <li><b>Sin señal:</b> seguí marcando, se envía solo. Las fotos necesitan señal.</li>
+      </ul>
+    </section>
+    <details class="sv-fold" data-sv-fold="referencias" ${isFoldOpen("referencias") ? "open" : ""}>
+      <summary><span class="sv-fold-title">${icon("fileText", "sv-icon")} Categorías y fuentes</span></summary>
       <div class="sv-fold-body">
         <dl class="sv-categories">
           ${Object.entries(CATEGORIES).map(([name, text]) => `
             <div class="is-${name === "SIN EVALUAR" ? "none" : name.toLowerCase()}"><dt>${name}</dt><dd>${text}</dd></div>
           `).join("")}
         </dl>
-        <p class="sv-hint">Las categorías son operativas, no diagnósticos. Hoy todos los perros figuran SIN EVALUAR (Registro maestro de perros, 14/08/2026).</p>
-        <ul class="sv-sources">
-          <li>Rutas y horarios: los arma el coordinador (plantilla semanal y cambios del día). Respaldo: ${BUSINESS_INFO.officialSources.routes}, leída el ${DATA_UPDATED}.</li>
+        <p class="sv-source">Las categorías son operativas, no diagnósticos. Hoy todos los perros figuran SIN EVALUAR (Registro maestro de perros, 14/08/2026).</p>
+        <ul class="sv-plain-list sv-source">
+          <li>Rutas y horarios: los arma el coordinador. Respaldo: ${BUSINESS_INFO.officialSources.routes}, leída el ${DATA_UPDATED}.</li>
           <li>Perros: ${BUSINESS_INFO.officialSources.dogs}.</li>
-          <li>Retiros y entregas son el mismo registro que marca el paseador. Incidentes y checklist los carga el equipo en la calle.</li>
-          <li>Avisos por barrio, pedidos de cambio, observaciones y cierres se comparten con el equipo según permisos.</li>
+          <li>Retiros y entregas son el mismo registro que marca el paseador.</li>
         </ul>
       </div>
     </details>
   `;
+}
+
+// ---------- Avisos por barrio ----------
+
+function getAvisoDraft(view) {
+  return { barrio: "", tipo: AVISO_TYPES[0], mensaje: "", vigenteHasta: view.fecha, ...readJSON(KEYS.avisoDraft, {}) };
+}
+
+function AvisosSection(view) {
+  const avisos = activeAvisos(view.fecha);
+  const draft = getAvisoDraft(view);
+  const open = isFoldOpen("aviso-form", !avisos.length);
+  return `
+    ${avisos.length ? `
+      <ul class="sv-requests">
+        ${avisos.map((item) => {
+          const danger = item.tipo === "seguridad" || item.tipo === "perro suelto";
+          return `
+            <li class="sv-request is-${danger ? "danger" : "warn"}">
+              <p class="sv-request-head"><span class="sv-state is-${danger ? "danger" : "warn"}">${esc(item.tipo || "otro")}</span></p>
+              <h2 class="sv-h3">${esc(item.barrio || PENDIENTE)}</h2>
+              <p>${esc(item.mensaje || "")}</p>
+              <p class="sv-source">${item.vigenteHasta ? `Hasta ${esc(isoToLabel(item.vigenteHasta))}` : "Hoy"} · ${esc(lastMark(item, "Cargó"))}</p>
+            </li>
+          `;
+        }).join("")}
+      </ul>
+    ` : `<div class="sv-empty-box"><p>${loaded.has("avisos") ? "Sin avisos vigentes." : "Cargando…"}</p></div>`}
+    <details class="sv-fold" data-sv-fold="aviso-form" ${open ? "open" : ""}>
+      <summary><span class="sv-fold-title">${icon("plus", "sv-icon")} Nuevo aviso</span></summary>
+      <form class="sv-form sv-fold-body" data-sv-aviso-form novalidate>
+        <label class="sv-field" for="sv-aviso-barrio">Barrio
+          <input type="text" id="sv-aviso-barrio" data-sv-aviso="barrio" list="sv-barrios" value="${esc(draft.barrio)}" autocomplete="off" required />
+          <datalist id="sv-barrios">${BARRIOS_BASE.map((name) => `<option value="${esc(name)}"></option>`).join("")}</datalist>
+        </label>
+        <fieldset class="sv-chipset">
+          <legend>Tipo</legend>
+          ${AVISO_TYPES.map((tipo, index) => `
+            <label class="sv-chip-opt" for="sv-aviso-tipo-${index}">
+              <input type="radio" name="sv-aviso-tipo" id="sv-aviso-tipo-${index}" value="${tipo}" data-sv-aviso="tipo" ${tipo === draft.tipo ? "checked" : ""} />
+              <span>${tipo[0].toUpperCase()}${tipo.slice(1)}</span>
+            </label>
+          `).join("")}
+        </fieldset>
+        <label class="sv-field" for="sv-aviso-mensaje">Qué pasa
+          <textarea id="sv-aviso-mensaje" rows="2" data-sv-aviso="mensaje" placeholder="Ej.: corte en la entrada sur hasta las 12" required>${esc(draft.mensaje)}</textarea>
+        </label>
+        <label class="sv-field sv-field-short" for="sv-aviso-hasta">Vale hasta
+          <input type="date" id="sv-aviso-hasta" data-sv-aviso="vigenteHasta" value="${esc(draft.vigenteHasta)}" min="${view.fecha}" required />
+        </label>
+        <p class="sv-source">Lo ve el equipo y marketing. Sin domicilios ni teléfonos.</p>
+        ${statusRegion("aviso")}
+        <button type="submit" class="sv-btn sv-btn-primary sv-btn-main" id="sv-aviso-save">${icon("send", "sv-icon")} Publicar</button>
+      </form>
+    </details>
+  `;
+}
+
+// ---------- Observaciones de conducta ----------
+
+function ObservationSection(view, dogs) {
+  const draft = getObservationDraft(view);
+  const saved = getObservations();
+  const shiftIds = new Set(dogs.map((dog) => dog.id));
+  const others = REAL_DOGS.filter((dog) => !shiftIds.has(dog.id));
+  return `
+    <p class="sv-lead">Contá lo que se vio y se oyó, sin etiquetas.</p>
+    <form class="sv-form sv-card" data-sv-obs-form novalidate>
+      <label class="sv-field" for="sv-obs-dog">Perro
+        <select id="sv-obs-dog" data-sv-obs="dogId" required>
+          <option value="">Elegí</option>
+          ${dogs.length ? `<optgroup label="De este turno">${dogs.map((dog) => `<option value="${dog.id}" ${draft.dogId === dog.id ? "selected" : ""}>${esc(dog.name)}</option>`).join("")}</optgroup>` : ""}
+          <optgroup label="Otros">${others.map((dog) => `<option value="${dog.id}" ${draft.dogId === dog.id ? "selected" : ""}>${esc(dog.name)}</option>`).join("")}</optgroup>
+        </select>
+      </label>
+      <div class="sv-grid-2">
+        <label class="sv-field" for="sv-obs-fecha">Fecha
+          <input type="text" id="sv-obs-fecha" data-sv-obs="fecha" value="${esc(draft.fecha)}" inputmode="numeric" placeholder="${view.now.label}" maxlength="10" autocomplete="off" required />
+        </label>
+        <label class="sv-field" for="sv-obs-hora">Hora
+          <input type="time" id="sv-obs-hora" data-sv-obs="hora" value="${esc(draft.hora)}" />
+        </label>
+      </div>
+      ${OBSERVATION_FIELDS.map((field) => `
+        <label class="sv-field" for="sv-obs-${field.key}">${OBS_SHORT[field.key]}
+          ${field.type === "input"
+            ? `<input type="text" id="sv-obs-${field.key}" data-sv-obs="${field.key}" value="${esc(draft[field.key])}" placeholder="${esc(OBS_PLACEHOLDER[field.key])}" required />`
+            : `<textarea id="sv-obs-${field.key}" rows="2" data-sv-obs="${field.key}" placeholder="${esc(OBS_PLACEHOLDER[field.key])}" required>${esc(draft[field.key])}</textarea>`}
+        </label>
+      `).join("")}
+      <label class="sv-switch" for="sv-obs-seguimiento">
+        <input type="checkbox" role="switch" id="sv-obs-seguimiento" data-sv-obs="seguimiento" ${draft.seguimiento ? "checked" : ""} />
+        <span class="sv-switch-track" aria-hidden="true"></span>
+        <span>Avisar a Juan (seguimiento)</span>
+      </label>
+      ${statusRegion("observation")}
+      <button type="submit" class="sv-btn sv-btn-primary sv-btn-main" id="sv-obs-save">${icon("checkCircle", "sv-icon")} Guardar</button>
+    </form>
+    ${saved.length ? `
+      <details class="sv-fold" data-sv-fold="obs-lista" ${isFoldOpen("obs-lista") ? "open" : ""}>
+        <summary><span class="sv-fold-title">${icon("eye", "sv-icon")} Registradas</span><span class="sv-pill">${saved.length}</span></summary>
+        <ul class="sv-requests sv-fold-body">${saved.map((obs) => ObservationCard(obs)).join("")}</ul>
+      </details>
+    ` : ""}
+  `;
+}
+
+const OBS_SHORT = { lugar: "Lugar", estimulo: "Qué pasó antes", reaccion: "Qué hizo el perro", accion: "Qué hiciste vos", resultado: "Cómo terminó" };
+const OBS_PLACEHOLDER = {
+  lugar: "Calle o plaza. Sin domicilios.",
+  estimulo: "Ej.: pasó un perro suelto a 5 m",
+  reaccion: "Ej.: ladró y tiró de la correa",
+  accion: "Ej.: crucé de vereda",
+  resultado: "Ej.: a los 30 s se calmó",
+};
+
+function ObservationCard(obs) {
+  const confirming = pendingObservationDelete === obs.id;
+  const name = obs.perroNombre || dogById(obs.perroId)?.name || PENDIENTE;
+  const domId = safeId(obs.id);
+  return `
+    <li class="sv-request ${obs.seguimiento ? "is-warn" : "is-neutral"}">
+      <p class="sv-request-head">${obs.seguimiento ? `<span class="sv-state is-warn">Seguimiento</span>` : ""}<span class="sv-muted">${esc(isoToLabel(obs.fecha))}${obs.hora ? ` · ${esc(obs.hora)} hs` : ""}</span></p>
+      <h2 class="sv-h3">${esc(name)}${obs.lugar ? ` · ${esc(obs.lugar)}` : ""}</h2>
+      <dl class="sv-detail">
+        <div><dt>Antes</dt><dd>${esc(obs.estimulo || PENDIENTE)}</dd></div>
+        <div><dt>Perro</dt><dd>${esc(obs.reaccion || PENDIENTE)}</dd></div>
+        <div><dt>Acción</dt><dd>${esc(obs.accion || PENDIENTE)}</dd></div>
+        <div><dt>Final</dt><dd>${esc(obs.resultado || PENDIENTE)}</dd></div>
+      </dl>
+      <p class="sv-source">Registró: ${esc(observationAuthor(obs))}</p>
+      <div class="sv-row cols-2">
+        ${confirming ? `
+          <button type="button" class="sv-btn sv-btn-danger" id="sv-obs-del-ok-${domId}" data-sv-obs-delete-ok="${esc(obs.id)}">Sí, borrar</button>
+          <button type="button" class="sv-btn" id="sv-obs-del-no-${domId}" data-sv-obs-delete-cancel>No</button>
+        ` : `
+          <button type="button" class="sv-btn" id="sv-obs-copy-${domId}" data-sv-obs-copy="${esc(obs.id)}">${icon("copy", "sv-icon")} <span>Copiar</span></button>
+          ${canDelete(obs) ? `<button type="button" class="sv-btn" id="sv-obs-del-${domId}" data-sv-obs-delete="${esc(obs.id)}">${icon("x", "sv-icon")} <span>Borrar</span></button>` : ""}
+        `}
+      </div>
+    </li>
+  `;
+}
+
+// ---------- Hojas de abajo (pedido de cambio y cierre) ----------
+
+function Sheet(titleId, title, sub, body, closeLabel) {
+  return `
+    <div class="sv-sheet-wrap">
+      <div class="sv-backdrop" data-sv-sheet-close aria-hidden="true"></div>
+      <section class="sv-sheet" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+        <header class="sv-sheet-head">
+          <div>
+            <h2 class="sv-h2" id="${titleId}">${title}</h2>
+            ${sub ? `<p class="sv-muted">${sub}</p>` : ""}
+          </div>
+          <button type="button" class="sv-icon-btn" id="sv-sheet-x" data-sv-sheet-close aria-label="${esc(closeLabel)}">${icon("x", "sv-icon")}</button>
+        </header>
+        ${body}
+      </section>
+    </div>
+  `;
+}
+
+function RequestSheet(view, routeInfo) {
+  const draft = getRequestDraft(view);
+  if (!draft.open) return "";
+  const routes = routeInfo.routes;
+  const target = [draft.perroNombre, draft.ruta ? draft.ruta : `Turno ${SHIFTS[view.shift].label.toLowerCase()}`].filter(Boolean).join(" · ");
+  const showRoutes = draft.from === "turno" && routes.length > 1;
+  const inShift = new Set(routes.flatMap((route) => route.stops.map((stop) => stop.perroId)).filter(Boolean));
+  const extraDogs = REAL_DOGS.filter((dog) => !inShift.has(dog.id) && dog.status === "Activo").sort((a, b) => a.name.localeCompare(b.name));
+  const stop = draft.perroId ? routes.find((route) => route.code === draft.ruta)?.stops.find((item) => item.perroId === draft.perroId) : null;
+  const radios = (name, options, current, prefix) =>
+    options
+      .map(({ value, label }, index) => `
+        <label class="sv-chip-opt" for="${prefix}-${index}">
+          <input type="radio" name="${name}" id="${prefix}-${index}" value="${esc(value)}" data-sv-req="${name.replace("sv-req-", "")}" ${value === current ? "checked" : ""} />
+          <span>${esc(label)}</span>
+        </label>
+      `)
+      .join("");
+  const body = `
+    <form class="sv-form" data-sv-request-form novalidate>
+      <fieldset class="sv-chipset">
+        <legend>Qué</legend>
+        ${radios("sv-req-tipo", REQUEST_CHIPS, draft.tipo, "sv-req-tipo")}
+      </fieldset>
+      ${showRoutes ? `
+        <fieldset class="sv-chipset">
+          <legend>Ruta</legend>
+          ${radios("sv-req-ruta", [...routes.map((route) => ({ value: route.code, label: route.code })), { value: "", label: "Todas" }], draft.ruta, "sv-req-ruta")}
+        </fieldset>
+      ` : ""}
+      ${draft.tipo === "cambiar hora" ? `
+        <label class="sv-field sv-field-short" for="sv-req-hora">Hora nueva${stop?.hora ? ` (era ${esc(stop.hora)})` : ""}
+          <input type="time" id="sv-req-hora" data-sv-req="hora" value="${esc(draft.hora)}" step="300" />
+        </label>
+      ` : ""}
+      ${draft.tipo === "agregar perro" ? `
+        <label class="sv-field" for="sv-req-extra">Perro a sumar
+          <select id="sv-req-extra" data-sv-req="extraDog">
+            <option value="">Elegí</option>
+            ${extraDogs.map((dog) => `<option value="${dog.id}" ${draft.extraDog === dog.id ? "selected" : ""}>${esc(dog.name)}</option>`).join("")}
+          </select>
+        </label>
+      ` : ""}
+      <fieldset class="sv-chipset">
+        <legend>Por qué</legend>
+        ${radios("sv-req-motivo", MOTIVO_CHIPS.map((value) => ({ value, label: value })), draft.motivo, "sv-req-motivo")}
+      </fieldset>
+      <label class="sv-field" for="sv-req-texto">Detalle
+        <input type="text" id="sv-req-texto" data-sv-req="texto" value="${esc(draft.texto)}" maxlength="140" placeholder="Opcional. Sin teléfonos." autocomplete="off" />
+      </label>
+      <label class="sv-switch" for="sv-req-urgente">
+        <input type="checkbox" role="switch" id="sv-req-urgente" data-sv-req="urgente" ${draft.urgente ? "checked" : ""} />
+        <span class="sv-switch-track" aria-hidden="true"></span>
+        <span>Urgente</span>
+      </label>
+      ${statusRegion("request-form")}
+      <button type="submit" class="sv-btn sv-btn-primary sv-btn-main" id="sv-req-save">${icon("send", "sv-icon")} Enviar</button>
+    </form>
+  `;
+  return Sheet("sv-req-title", "Pedir cambio", esc(target), body, "Volver sin enviar");
+}
+
+function ClosureSheet(view) {
+  const closure = getClosure(view);
+  const notes = closureNotes(view);
+  const closedAt = closure?.cerrado ? closure.horaCierre || timeOf(closure.actualizadoEn) : "";
+  const body = `
+    <p class="sv-line ${closure?.cerrado ? "is-ok" : "is-info"}">
+      ${icon(closure?.cerrado ? "checkCircle" : "fileText", "sv-icon")}
+      <span>${closure?.cerrado ? esc(`Cerrado ${closedAt} hs. ${lastMark(closure, "Lo cerró")}`) : "Resumen listo. Copialo y cerrá."}</span>
+    </p>
+    <label class="sv-field" for="sv-close-summary"><span class="visually-hidden">Resumen del turno</span>
+      <textarea id="sv-close-summary" class="sv-summary" rows="9" readonly>${esc(closureSummary(view))}</textarea>
+    </label>
+    <details class="sv-fold sv-fold-flat" data-sv-fold="cierre-nota" ${isFoldOpen("cierre-nota") || notes ? "open" : ""}>
+      <summary><span class="sv-fold-title">${icon("plus", "sv-icon")} Nota</span></summary>
+      <label class="sv-field sv-fold-body" for="sv-close-notes">Nota del turno (opcional)
+        <textarea id="sv-close-notes" rows="2" data-sv-close-notes placeholder="Novedades. Sin datos de tutores.">${esc(notes)}</textarea>
+      </label>
+    </details>
+    ${statusRegion("closure")}
+    <div class="sv-row cols-2">
+      <button type="button" class="sv-btn sv-btn-main" id="sv-close-copy" data-sv-close-copy>${icon("copy", "sv-icon")} Copiar</button>
+      ${closure?.cerrado
+        ? `<button type="button" class="sv-btn sv-btn-main" id="sv-close-reopen" data-sv-close-reopen>Reabrir</button>`
+        : `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-close-done" data-sv-close-done>${icon("flag", "sv-icon")} Cerrar</button>`}
+    </div>
+  `;
+  return Sheet("sv-close-title", `Cerrar turno ${esc(SHIFTS[view.shift].label.toLowerCase())}`, esc(`${view.day} ${view.fechaLabel}`), body, "Volver");
 }
 
 // ---------- Eventos ----------
@@ -1921,7 +2461,18 @@ function rerender(focusId) {
   if (!focusId) return renderKeepingFocus();
   syncFolds();
   render();
-  if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
+  focusById(focusId);
+}
+
+// Pone el foco y, si quedó fuera de la pantalla, lo trae a la vista (sin animación).
+function focusById(focusId) {
+  const element = focusId && document.getElementById(focusId);
+  if (!element || !element.getClientRects().length) return false;
+  element.focus({ preventScroll: true });
+  const rect = element.getBoundingClientRect();
+  const bottomLimit = window.innerHeight - 150;
+  if (rect.top < 70 || rect.bottom > bottomLimit) element.scrollIntoView({ block: "center" });
+  return true;
 }
 
 function timeNow() {
@@ -1965,6 +2516,7 @@ function paseoPayload(view, route, stop, changes) {
 }
 
 // Retiro, entrega y "no sale": actualiza el MISMO registro de paseos que usa el paseador.
+// Después del cambio queda "Deshacer" 5 segundos.
 async function markWalk(code, dogId, action, focusId) {
   const view = getView();
   const found = findStop(view, code, dogId);
@@ -1977,46 +2529,70 @@ async function markWalk(code, dogId, action, focusId) {
   const hora = timeNow();
   const clearTimes = { horaRetiro: "", horaPaseo: "", horaEntrega: "" };
   const name = stop.perroNombre;
+  const prev = {
+    estado: record?.estado || "pendiente",
+    horaRetiro: record?.horaRetiro || "",
+    horaPaseo: record?.horaPaseo || "",
+    horaEntrega: record?.horaEntrega || "",
+  };
   let changes = null;
   let text = "";
-  let tone = "ok";
 
   if (action === "retiro") {
     if (status.retirado) {
       changes = { estado: "pendiente", ...clearTimes };
       text = `${name}: retiro desmarcado.`;
-      tone = "info";
     } else {
       changes = { estado: "retirado", horaRetiro: hora };
       const delay = status.planned !== null ? view.now.minutes - status.planned : 0;
-      text = `${name}: retirado a las ${hora} hs${delay > PICKUP_GRACE ? ` (${delay} min después de lo previsto)` : ""}.`;
+      text = `${name} retirado ${hora}${delay > PICKUP_GRACE ? ` (+${delay} min)` : ""}.`;
     }
   } else if (action === "entrega") {
     if (!status.retirado) return;
     if (status.kind === "entregado") {
       changes = { estado: record?.horaPaseo ? "paseando" : "retirado", horaEntrega: "" };
       text = `${name}: entrega desmarcada.`;
-      tone = "info";
     } else {
       changes = { estado: "entregado", horaEntrega: hora };
-      text = `${name}: entregado a las ${hora} hs.`;
+      text = `${name} entregado ${hora}.`;
     }
   } else if (action === "no-sale") {
     if (status.kind === "nosale") {
       changes = { estado: "pendiente" };
-      text = `${name}: vuelve a la lista.`;
+      text = `${name} vuelve a la lista.`;
     } else {
       if (status.retirado) return;
       changes = { estado: "no-sale", ...clearTimes };
-      text = `${name}: no sale hoy. Si cambia la ruta, pedíselo al coordinador.`;
+      text = `${name} no sale hoy.`;
     }
   }
   if (!changes) return;
 
   inFlight.add(id);
-  await persist("paseos", paseoPayload(view, route, stop, changes), `control-${route.code}`, text, tone);
+  // Se congela el orden antes de guardar: si llegan datos mientras viaja, la lista no se mueve.
+  freezeOrder();
+  const result = await persist("paseos", paseoPayload(view, route, stop, changes), "toast", text);
   inFlight.delete(id);
-  rerender(focusId);
+  const mainId = `sv-main-${cardDomId(route, stop)}`;
+  if (!result) orderFreeze = null;
+  if (result) {
+    flash = null;
+    offerUndo(`${text}${result.pendiente ? " Sin señal: se envía solo." : ""}`, () => restoreWalk(code, dogId, prev, name), mainId);
+  }
+  syncFolds();
+  render();
+  // Si la tarjeta pasó a "Listos" (plegado), el foco va a "Deshacer".
+  if (!focusById(focusId) && !focusById(mainId)) focusById("sv-undo");
+}
+
+async function restoreWalk(code, dogId, prev, name) {
+  const view = getView();
+  const found = findStop(view, code, dogId);
+  if (!found) return;
+  const id = paseoId(view.fecha, dogId, view.shift);
+  inFlight.add(id);
+  await persist("paseos", paseoPayload(view, found.route, found.stop, prev), "toast", `${name}: deshecho.`, "info");
+  inFlight.delete(id);
 }
 
 async function saveNote(code, dogId, focusId) {
@@ -2027,38 +2603,51 @@ async function saveNote(code, dogId, focusId) {
   const id = paseoId(view.fecha, dogId, view.shift);
   const nota = String(noteDrafts.has(id) ? noteDrafts.get(id) : document.querySelector(`[data-sv-note="${id}"]`)?.value || "").trim();
   if (PHONE_LIKE.test(nota)) {
-    setFlash(`control-${route.code}`, "La nota parece tener un teléfono. Sacalo: acá no van datos de tutores.", "error");
+    setFlash("toast", "La nota parece tener un teléfono. Sacalo.", "error");
     return rerender(focusId);
   }
   const result = await persist(
     "paseos",
     paseoPayload(view, route, stop, { nota }),
-    `control-${route.code}`,
-    nota ? `Nota para el paseador guardada en ${stop.perroNombre}.` : `Nota de ${stop.perroNombre} borrada.`,
+    "toast",
+    nota ? `Nota guardada: ${stop.perroNombre}.` : `Nota borrada: ${stop.perroNombre}.`,
   );
-  if (result) noteDrafts.delete(id);
-  rerender(focusId);
+  if (result) {
+    noteDrafts.delete(id);
+    openStops.delete(id);
+  }
+  rerender(result ? `sv-opt-${cardDomId(route, stop)}` : focusId);
+}
+
+// Lee los campos de un formulario (los radios, solo el elegido).
+function readFields(form, attr, draft) {
+  form.querySelectorAll(`[${attr}]`).forEach((field) => {
+    const key = field.getAttribute(attr);
+    if (field.type === "radio") {
+      if (field.checked) draft[key] = field.value;
+    } else {
+      draft[key] = field.type === "checkbox" ? field.checked : field.value;
+    }
+  });
+  return draft;
 }
 
 async function saveAviso(form) {
   const view = getView();
-  const draft = getAvisoDraft(view);
-  form.querySelectorAll("[data-sv-aviso]").forEach((field) => {
-    draft[field.dataset.svAviso] = field.value;
-  });
+  const draft = readFields(form, "data-sv-aviso", getAvisoDraft(view));
   writeJSON(KEYS.avisoDraft, draft);
-  const barrio = draft.barrio.trim();
-  const mensaje = draft.mensaje.trim();
+  const barrio = String(draft.barrio || "").trim();
+  const mensaje = String(draft.mensaje || "").trim();
   if (!barrio || !mensaje) {
-    setFlash("aviso", `Falta completar: ${listWithAnd([!barrio && "barrio", !mensaje && "qué pasa"].filter(Boolean))}.`, "error");
+    setFlash("aviso", `Falta: ${listWithAnd([!barrio && "barrio", !mensaje && "qué pasa"].filter(Boolean))}.`, "error");
     return rerender(!barrio ? "sv-aviso-barrio" : "sv-aviso-mensaje");
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.vigenteHasta) || draft.vigenteHasta < view.fecha) {
-    setFlash("aviso", `Elegí hasta cuándo vale el aviso (hoy, ${view.fechaLabel}, o después).`, "error");
+    setFlash("aviso", `Elegí hasta cuándo vale (desde hoy, ${view.fechaLabel}).`, "error");
     return rerender("sv-aviso-hasta");
   }
   if (PHONE_LIKE.test(mensaje) || PHONE_LIKE.test(barrio)) {
-    setFlash("aviso", "El aviso parece tener un teléfono. Sacalo: los avisos no llevan datos de contacto.", "error");
+    setFlash("aviso", "Parece tener un teléfono. Sacalo: los avisos no llevan contactos.", "error");
     return rerender("sv-aviso-mensaje");
   }
   const tipo = AVISO_TYPES.includes(draft.tipo) ? draft.tipo : "otro";
@@ -2066,7 +2655,7 @@ async function saveAviso(form) {
     "avisos",
     { fecha: view.fecha, barrio, tipo, mensaje, vigenteHasta: draft.vigenteHasta, titulo: `${tipo[0].toUpperCase()}${tipo.slice(1)} · ${barrio}` },
     "aviso",
-    `Aviso de ${barrio} publicado. Lo ve el equipo.`,
+    `Aviso de ${barrio} publicado.`,
   );
   if (result) writeJSON(KEYS.avisoDraft, { barrio: "", tipo: AVISO_TYPES[0], mensaje: "", vigenteHasta: view.fecha });
   return rerender("sv-aviso-save");
@@ -2074,70 +2663,78 @@ async function saveAviso(form) {
 
 async function saveRequest(form) {
   const view = getView();
-  const draft = getRequestDraft(view);
-  form.querySelectorAll("[data-sv-req]").forEach((field) => {
-    draft[field.dataset.svReq] = field.type === "checkbox" ? field.checked : field.value;
-  });
+  const draft = readFields(form, "data-sv-req", getRequestDraft(view));
   writeJSON(KEYS.requestDraft, draft);
-  const detalle = String(draft.detalle || "").trim();
-  const motivo = String(draft.motivo || "").trim();
-  const missing = [];
-  if (!detalle && draft.tipo !== "no sale") missing.push("detalle");
-  if (!motivo) missing.push("qué pasó o con quién hablaste");
-  if (missing.length) {
-    setFlash("request-form", `Falta completar: ${listWithAnd(missing)}.`, "error");
-    return rerender(!detalle && draft.tipo !== "no sale" ? "sv-req-detalle" : "sv-req-motivo");
-  }
-  if (PHONE_LIKE.test(detalle) || PHONE_LIKE.test(motivo)) {
-    setFlash("request-form", "El pedido parece tener un teléfono. Sacalo: acá no van datos de tutores.", "error");
-    return rerender("sv-req-motivo");
-  }
+  const texto = String(draft.texto || "").trim();
   const tipo = REQUEST_TYPES.includes(draft.tipo) ? draft.tipo : "otro";
+  const extraDog = tipo === "agregar perro" ? dogById(draft.extraDog) : null;
+  const fail = (text, focusId) => {
+    setFlash("request-form", text, "error");
+    return rerender(focusId);
+  };
+  if (!MOTIVO_CHIPS.includes(draft.motivo)) return fail("Elegí por qué.", "sv-req-motivo-0");
+  if (draft.motivo === "Otro" && !texto) return fail("Escribí el motivo en Detalle.", "sv-req-texto");
+  if (tipo === "cambiar hora" && !draft.hora && !texto) return fail("Poné la hora nueva.", "sv-req-hora");
+  if (tipo === "agregar perro" && !extraDog && !texto) return fail("Elegí el perro a sumar.", "sv-req-extra");
+  if (tipo === "otro" && !texto) return fail("Contá qué cambiar en Detalle.", "sv-req-texto");
+  if (PHONE_LIKE.test(texto)) return fail("Parece tener un teléfono. Sacalo.", "sv-req-texto");
+
+  const ruta = draft.ruta || "";
+  const stop = draft.perroId ? findStop(view, ruta, draft.perroId)?.stop : null;
+  const name = draft.perroNombre || "";
+  const autoDetail = {
+    "no sale": `${name || "El perro"} no sale hoy.`,
+    "cambiar hora": draft.hora ? `Retirar${name ? ` a ${name}` : ""} a las ${draft.hora}${stop?.hora ? ` (en vez de ${stop.hora})` : ""}.` : "",
+    "agregar perro": extraDog ? `Sumar a ${extraDog.name}${ruta ? ` a ${ruta}` : ""}.` : "",
+    "cambiar paseador o ayudante": "Cambiar paseador o ayudante.",
+    otro: "",
+  }[tipo];
+  const motivo = draft.motivo === "Otro" ? texto : draft.motivo;
+  const detalle = [autoDetail, draft.motivo === "Otro" ? "" : texto].filter(Boolean).join(" ");
+  const perroId = extraDog ? extraDog.id : draft.perroId || "";
+  const perroNombre = extraDog ? extraDog.name : name;
   const turno = SHIFTS[view.shift].label;
   const record = {
     fecha: view.fecha,
     turno,
-    ruta: draft.ruta || "",
+    ruta,
     tipo,
-    perroId: draft.perroId || "",
-    perroNombre: draft.perroNombre || "",
-    detalle: detalle || (tipo === "no sale" ? `${draft.perroNombre || "El perro"} no sale hoy.` : ""),
+    perroId,
+    perroNombre,
+    detalle,
     motivo,
     urgente: Boolean(draft.urgente),
     estado: "pendiente",
     respuesta: "",
-    titulo: `${draft.urgente ? "URGENTE · " : ""}${tipo[0].toUpperCase()}${tipo.slice(1)}${draft.perroNombre ? ` · ${draft.perroNombre}` : ""}${draft.ruta ? ` · ${draft.ruta}` : ""} · ${turno} ${view.fechaLabel}`,
+    titulo: `${draft.urgente ? "URGENTE · " : ""}${tipo[0].toUpperCase()}${tipo.slice(1)}${perroNombre ? ` · ${perroNombre}` : ""}${ruta ? ` · ${ruta}` : ""} · ${turno} ${view.fechaLabel}`,
   };
-  const area = draft.ruta ? `control-${draft.ruta}` : "requests";
-  const result = await persist("solicitudes", record, area, `Pedido enviado al coordinador: ${requestTitle(record)}. Lo vas a ver en «Mis pedidos de cambio».`);
-  if (!result) {
-    // El error se muestra en el mismo formulario y lo escrito queda.
-    if (flash) flash.area = "request-form";
-    return rerender("sv-req-save");
-  }
+  const result = await persist("solicitudes", record, "request-form", "Pedido enviado al coordinador.");
+  if (!result) return rerender("sv-req-save");
   if (!result.pendiente) requestStates.set(result.id, "pendiente");
+  // Se cierra la hoja: el mensaje pasa al aviso de abajo.
+  if (flash) flash.area = "toast";
   writeJSON(KEYS.requestDraft, emptyRequest(view));
-  const opener = safeId(`sv-req-open-${draft.ruta || "turno"}-${draft.perroId || "ruta"}`);
-  return rerender(opener);
+  const opener = sheetOpener;
+  sheetOpener = "";
+  syncFolds();
+  render();
+  if (!focusById(opener)) focusById("sv-main");
 }
 
 async function saveObservation(form) {
   const view = getView();
-  const draft = getObservationDraft(view);
-  form.querySelectorAll("[data-sv-obs]").forEach((field) => {
-    draft[field.dataset.svObs] = field.type === "checkbox" ? field.checked : field.value;
-  });
+  const draft = readFields(form, "data-sv-obs", getObservationDraft(view));
   writeJSON(KEYS.observationDraft, draft);
 
   const missing = [];
   if (!draft.dogId) missing.push("perro");
   if (!draft.fecha) missing.push("fecha");
   OBSERVATION_FIELDS.forEach((field) => {
-    if (!String(draft[field.key]).trim()) missing.push(field.label.split(":")[0].toLowerCase());
+    if (!String(draft[field.key]).trim()) missing.push(OBS_SHORT[field.key].toLowerCase());
   });
   const fechaIso = labelToIso(draft.fecha);
   if (!missing.length && !fechaIso) {
-    setFlash("observation", `Escribí una fecha real como DD/MM/AAAA, por ejemplo ${view.now.label}.`, "error");
+    setFlash("observation", `Fecha como DD/MM/AAAA, por ejemplo ${view.now.label}.`, "error");
     return rerender("sv-obs-fecha");
   }
   if (!missing.length && fechaIso > view.now.iso) {
@@ -2145,7 +2742,7 @@ async function saveObservation(form) {
     return rerender("sv-obs-fecha");
   }
   if (missing.length) {
-    setFlash("observation", `Falta completar: ${listWithAnd(missing)}.`, "error");
+    setFlash("observation", `Falta: ${listWithAnd(missing)}.`, "error");
     const first = !draft.dogId ? "sv-obs-dog" : !draft.fecha ? "sv-obs-fecha" : `sv-obs-${OBSERVATION_FIELDS.find((field) => !String(draft[field.key]).trim()).key}`;
     return rerender(first);
   }
@@ -2153,7 +2750,7 @@ async function saveObservation(form) {
   const labelled = OBSERVATION_FIELDS.find((field) => FORBIDDEN_LABELS.test(draft[field.key]));
   if (labelled) {
     const word = draft[labelled.key].match(FORBIDDEN_LABELS)[2];
-    setFlash("observation", `En «${labelled.label.split(":")[0]}» aparece «${word}». Cambialo por lo que se vio: por ejemplo «ladró y tiró de la correa hacia el otro perro».`, "error");
+    setFlash("observation", `En «${OBS_SHORT[labelled.key]}» dice «${word}». Contá lo que se vio: «ladró y tiró de la correa».`, "error");
     return rerender(`sv-obs-${labelled.key}`);
   }
 
@@ -2175,7 +2772,7 @@ async function saveObservation(form) {
       titulo: `Observación: ${dog?.name || PENDIENTE}${draft.seguimiento ? " (requiere seguimiento)" : ""}`,
     },
     "observation",
-    `Observación de ${dog?.name || PENDIENTE} guardada. La ve el equipo.`,
+    `Observación de ${dog?.name || PENDIENTE} guardada.`,
   );
   if (result) writeJSON(KEYS.observationDraft, emptyObservation(view));
   return rerender("sv-obs-save");
@@ -2191,12 +2788,57 @@ async function saveClosure(view, changes, text, focusId) {
   const result = await persist(
     "cierres",
     { id, fecha: view.fecha, turno: SHIFTS[view.shift].label, notas, resumen, ...changes },
-    "closure",
+    closureSheetOpen ? "closure" : "toast",
     text,
     changes.cerrado === false ? "info" : "ok",
   );
   if (result && closureDraft?.id === id && closureDraft.notas === notas) closureDraft = null;
+  if (focusId !== false) rerender(focusId);
+  return result;
+}
+
+function closeSheets() {
+  const view = getView();
+  const draft = getRequestDraft(view);
+  if (draft.open) writeJSON(KEYS.requestDraft, emptyRequest(view));
+  closureSheetOpen = false;
+  const opener = sheetOpener;
+  sheetOpener = "";
+  syncFolds();
+  render();
+  if (!focusById(opener)) focusById("sv-main");
+}
+
+function anySheetOpen() {
+  return Boolean(document.querySelector(".sv-shell .sv-sheet"));
+}
+
+async function uploadPhoto(input) {
+  const file = input.files?.[0];
+  const perroId = input.dataset.svPhoto;
+  const name = input.dataset.name || "";
+  if (!file || !perroId) return;
+  const focusId = input.id;
+  if (navigator.onLine === false) {
+    input.value = "";
+    setFlash("toast", "Sin señal: la foto necesita conexión.", "error");
+    return rerender(focusId);
+  }
+  photoBusy.add(perroId);
+  setFlash("toast", `Subiendo foto de ${name}…`, "info");
   rerender(focusId);
+  try {
+    await fotosPerros.subir(perroId, name, file);
+    setFlash("toast", `Foto de ${name} lista. La ve el equipo.`);
+  } catch (error) {
+    // Los errores del servidor vienen en castellano; los del navegador (foto que no se puede leer) no.
+    const text = typeof error?.status === "number" && error.message
+      ? error.message
+      : "No se pudo leer la foto. Probá sacarla de nuevo.";
+    setFlash("toast", text, "error");
+  }
+  photoBusy.delete(perroId);
+  rerender();
 }
 
 function handleSupervisorClick(event) {
@@ -2210,6 +2852,75 @@ function handleSupervisorClick(event) {
 
   if (target.closest("[data-sv-refresh]")) {
     refreshAll(true);
+    return true;
+  }
+
+  if (target.closest("[data-sv-sheet-close]")) {
+    closeSheets();
+    return true;
+  }
+
+  const undoButton = target.closest("[data-sv-undo]");
+  if (undoButton) {
+    const pending = activeUndo();
+    undo = null;
+    if (pending) {
+      Promise.resolve(pending.run()).then(() => rerender(pending.focusId || "sv-main"));
+    } else {
+      rerender();
+    }
+    return true;
+  }
+
+  const tabButton = target.closest("[data-sv-tab]");
+  if (tabButton) {
+    const tab = tabButton.dataset.svTab;
+    const nav = getNav();
+    saveNav(tab, "");
+    syncFolds();
+    render();
+    if (nav.tab !== tab || nav.sub) window.scrollTo(0, 0);
+    document.getElementById(tabButton.id)?.focus({ preventScroll: true });
+    return true;
+  }
+
+  const subButton = target.closest("[data-sv-sub]");
+  if (subButton) {
+    const sub = subButton.dataset.svSub;
+    const previous = getNav().sub;
+    saveNav("mas", sub);
+    syncFolds();
+    render();
+    window.scrollTo(0, 0);
+    focusById(sub ? "sv-back" : `sv-sub-${previous}`);
+    return true;
+  }
+
+  const gotoButton = target.closest("[data-sv-goto]");
+  if (gotoButton) {
+    const [tab, sub] = gotoButton.dataset.svGoto.split(":");
+    saveNav(tab, sub || "");
+    syncFolds();
+    render();
+    window.scrollTo(0, 0);
+    focusById(sub ? "sv-back" : `sv-tab-${tab}`);
+    return true;
+  }
+
+  const gotoDog = target.closest("[data-sv-goto-dog]");
+  if (gotoDog) {
+    if (gotoDog.dataset.done) {
+      const folds = readJSON(KEYS.folds, {});
+      folds.listos = true;
+      writeJSON(KEYS.folds, folds);
+    }
+    saveNav("ahora", "");
+    render();
+    const card = document.getElementById(`sv-dog-${gotoDog.dataset.svGotoDog}`);
+    if (card) {
+      card.scrollIntoView({ block: "center" });
+      card.focus({ preventScroll: true });
+    }
     return true;
   }
 
@@ -2234,10 +2945,26 @@ function handleSupervisorClick(event) {
 
   const absent = target.closest("[data-sv-absent]");
   if (absent) {
-    const domId = safeId(`${absent.dataset.ruta}-${absent.dataset.svAbsent}`);
-    const view = getView();
-    const wasAbsent = paseosById().get(paseoId(view.fecha, absent.dataset.svAbsent, view.shift))?.estado === "no-sale";
-    markWalk(absent.dataset.ruta, absent.dataset.svAbsent, "no-sale", wasAbsent ? `sv-pickup-${domId}` : `sv-absent-${domId}`);
+    markWalk(absent.dataset.ruta, absent.dataset.svAbsent, "no-sale", absent.id);
+    return true;
+  }
+
+  const unmark = target.closest("[data-sv-unmark]");
+  if (unmark) {
+    markWalk(unmark.dataset.ruta, unmark.dataset.svUnmark, unmark.dataset.step === "entrega" ? "entrega" : "retiro", unmark.id);
+    return true;
+  }
+
+  const options = target.closest("[data-sv-options]");
+  if (options) {
+    const id = options.dataset.svOptions;
+    if (openStops.has(id)) {
+      openStops.delete(id);
+      noteDrafts.delete(id);
+    } else {
+      openStops.add(id);
+    }
+    rerender(options.id);
     return true;
   }
 
@@ -2247,24 +2974,87 @@ function handleSupervisorClick(event) {
     return true;
   }
 
-  const requestOpen = target.closest("[data-sv-request-open]");
-  if (requestOpen) {
-    const view = getView();
-    const current = getRequestDraft(view);
-    const ruta = requestOpen.dataset.ruta || "";
-    const perroId = requestOpen.dataset.dog || "";
-    // Si ya había un pedido a medio escribir para lo mismo, se retoma; si no, empieza uno nuevo.
-    const same = current.open && current.ruta === ruta && (current.perroId || "") === perroId;
-    writeJSON(KEYS.requestDraft, same ? current : emptyRequest(view, ruta, perroId, true));
-    rerender("sv-req-tipo");
+  const photoOpen = target.closest("[data-sv-photo-open]");
+  if (photoOpen) {
+    const record = photoRecord(photoOpen.dataset.svPhotoOpen);
+    if (record?.archivoId) {
+      if (navigator.onLine === false) {
+        setFlash("toast", "Sin señal: la foto grande necesita conexión.", "error");
+        rerender(photoOpen.id);
+      } else {
+        archivos.abrir(record.archivoId).catch((error) => {
+          setFlash("toast", error?.message || "No se pudo abrir la foto.", "error");
+          rerender(photoOpen.id);
+        });
+      }
+    }
     return true;
   }
 
-  if (target.closest("[data-sv-request-cancel]")) {
+  const seenButton = target.closest("[data-sv-seen]");
+  if (seenButton) {
+    markSeen(seenButton.dataset.svSeen);
+    rerender();
+    return true;
+  }
+
+  const requestOpen = target.closest("[data-sv-request-open]");
+  if (requestOpen) {
     const view = getView();
-    const draft = getRequestDraft(view);
-    writeJSON(KEYS.requestDraft, emptyRequest(view));
-    rerender(safeId(`sv-req-open-${draft.ruta || "turno"}-${draft.perroId || "ruta"}`));
+    let ruta = requestOpen.dataset.ruta || "";
+    const perroId = requestOpen.dataset.dog || "";
+    const from = perroId ? "perro" : ruta ? "ruta" : "turno";
+    const routes = routesFor(view).routes;
+    if (from === "turno" && routes.length === 1) ruta = routes[0].code;
+    const record = perroId ? paseosById().get(paseoId(view.fecha, perroId, view.shift)) : null;
+    const retirado = ["retirado", "paseando", "entregado"].includes(record?.estado);
+    const tipo = REQUEST_TYPES.includes(requestOpen.dataset.tipo) ? requestOpen.dataset.tipo : perroId ? (retirado ? "otro" : "no sale") : "otro";
+    closureSheetOpen = false;
+    sheetOpener = requestOpen.id;
+    writeJSON(KEYS.requestDraft, emptyRequest(view, ruta, perroId, true, from, tipo));
+    const index = REQUEST_CHIPS.findIndex((chip) => chip.value === tipo);
+    rerender(`sv-req-tipo-${Math.max(index, 0)}`);
+    return true;
+  }
+
+  if (target.closest("[data-sv-close-open]")) {
+    const opener = target.closest("[data-sv-close-open]");
+    const view = getView();
+    if (getRequestDraft(view).open) writeJSON(KEYS.requestDraft, emptyRequest(view));
+    closureSheetOpen = true;
+    sheetOpener = opener.id;
+    rerender(getClosure(view)?.cerrado ? "sv-close-copy" : "sv-close-done");
+    return true;
+  }
+
+  if (target.closest("[data-sv-close-copy]")) {
+    const view = getView();
+    copyText(closureSummary(view), "sv-close-summary").then((ok) => {
+      setFlash("closure", ok ? "Copiado. Pegalo en el grupo del equipo." : "No se pudo copiar: seleccioná el texto y copialo a mano.", ok ? "ok" : "error");
+      rerender("sv-close-copy");
+    });
+    return true;
+  }
+
+  if (target.closest("[data-sv-close-done]")) {
+    const view = getView();
+    const hora = timeNow();
+    saveClosure(view, { cerrado: true, horaCierre: hora }, "Turno cerrado.", false).then((result) => {
+      if (!result) return rerender("sv-close-done");
+      closureSheetOpen = false;
+      flash = null;
+      offerUndo(`Turno cerrado ${hora}.${result.pendiente ? " Sin señal: se envía solo." : ""}`, () => saveClosure(getView(), { cerrado: false, horaCierre: "" }, "Turno reabierto.", false), sheetOpener);
+      const opener = sheetOpener;
+      sheetOpener = "";
+      syncFolds();
+      render();
+      if (!focusById(opener)) focusById("sv-undo");
+    });
+    return true;
+  }
+
+  if (target.closest("[data-sv-close-reopen]")) {
+    saveClosure(getView(), { cerrado: false, horaCierre: "" }, "Turno reabierto.", "sv-close-done");
     return true;
   }
 
@@ -2273,7 +3063,7 @@ function handleSupervisorClick(event) {
     const obs = getObservations().find((item) => item.id === obsCopy.dataset.svObsCopy);
     if (obs) {
       copyText(observationText(obs)).then((ok) => {
-        setFlash("observation", ok ? "Texto copiado. Pegalo en el registro o en WhatsApp." : "No se pudo copiar automáticamente en este navegador.", ok ? "ok" : "error");
+        setFlash("observation", ok ? "Copiado. Pegalo en el registro o en WhatsApp." : "No se pudo copiar en este navegador.", ok ? "ok" : "error");
         rerender(obsCopy.id);
       });
     }
@@ -2283,7 +3073,7 @@ function handleSupervisorClick(event) {
   const obsDelete = target.closest("[data-sv-obs-delete]");
   if (obsDelete) {
     pendingObservationDelete = obsDelete.dataset.svObsDelete;
-    rerender(`sv-obs-del-no-${pendingObservationDelete}`);
+    rerender(`sv-obs-del-no-${safeId(pendingObservationDelete)}`);
     return true;
   }
 
@@ -2297,26 +3087,7 @@ function handleSupervisorClick(event) {
   if (target.closest("[data-sv-obs-delete-cancel]")) {
     const id = pendingObservationDelete;
     pendingObservationDelete = null;
-    rerender(`sv-obs-del-${id}`);
-    return true;
-  }
-
-  if (target.closest("[data-sv-close-copy]")) {
-    const view = getView();
-    copyText(closureSummary(view), "sv-close-summary").then((ok) => {
-      setFlash("closure", ok ? "Resumen copiado. Pegalo en el grupo del equipo." : "No se pudo copiar: seleccioná el texto del resumen y copialo a mano.", ok ? "ok" : "error");
-      rerender("sv-close-copy");
-    });
-    return true;
-  }
-
-  if (target.closest("[data-sv-close-done]")) {
-    saveClosure(getView(), { cerrado: true, horaCierre: timeNow() }, "Turno marcado como cerrado. No te olvides de copiar el resumen.", "sv-close-copy");
-    return true;
-  }
-
-  if (target.closest("[data-sv-close-reopen]")) {
-    saveClosure(getView(), { cerrado: false, horaCierre: "" }, "Turno reabierto.", "sv-close-done");
+    rerender(`sv-obs-del-${safeId(id)}`);
     return true;
   }
 
@@ -2328,6 +3099,11 @@ function handleSupervisorChange(event) {
   if (!target.closest?.(".sv-shell")) return false;
   const view = getView();
 
+  if (target.matches("[data-sv-photo]")) {
+    uploadPhoto(target);
+    return true;
+  }
+
   if (target.matches("[data-sv-obs]")) {
     const draft = getObservationDraft(view);
     draft[target.dataset.svObs] = target.type === "checkbox" ? target.checked : target.value;
@@ -2336,6 +3112,7 @@ function handleSupervisorChange(event) {
   }
 
   if (target.matches("[data-sv-aviso]")) {
+    if (target.type === "radio" && !target.checked) return true;
     const draft = getAvisoDraft(view);
     draft[target.dataset.svAviso] = target.value;
     writeJSON(KEYS.avisoDraft, draft);
@@ -2343,11 +3120,12 @@ function handleSupervisorChange(event) {
   }
 
   if (target.matches("[data-sv-req]")) {
+    if (target.type === "radio" && !target.checked) return true;
     const draft = getRequestDraft(view);
     draft[target.dataset.svReq] = target.type === "checkbox" ? target.checked : target.value;
     writeJSON(KEYS.requestDraft, draft);
-    // El tipo cambia si el detalle es obligatorio.
-    if (target.tagName === "SELECT") rerender(target.id);
+    // El tipo cambia los campos de la hoja (hora nueva o perro a sumar).
+    if (target.dataset.svReq === "tipo") rerender(target.id);
     return true;
   }
 
@@ -2358,7 +3136,7 @@ function handleSupervisorChange(event) {
       closureDraft = null;
       return true;
     }
-    saveClosure(view, {}, "Notas del cierre guardadas.");
+    saveClosure(view, {}, "Nota guardada.", document.activeElement?.id || "sv-close-notes");
     return true;
   }
 
@@ -2375,11 +3153,11 @@ function handleSupervisorInput(event) {
     const draft = getObservationDraft(view);
     draft[target.dataset.svObs] = target.value;
     writeJSON(KEYS.observationDraft, draft);
-  } else if (target.matches("[data-sv-aviso]")) {
+  } else if (target.matches("[data-sv-aviso]") && target.type !== "radio") {
     const draft = getAvisoDraft(view);
     draft[target.dataset.svAviso] = target.value;
     writeJSON(KEYS.avisoDraft, draft);
-  } else if (target.matches("[data-sv-req]") && target.type !== "checkbox") {
+  } else if (target.matches("[data-sv-req]") && target.type !== "checkbox" && target.type !== "radio") {
     const draft = getRequestDraft(view);
     draft[target.dataset.svReq] = target.value;
     writeJSON(KEYS.requestDraft, draft);
@@ -2408,23 +3186,43 @@ function handleSupervisorSubmit(event) {
   }
 }
 
-// Enter en la nota para el paseador la guarda (sin enviar ningún formulario).
+// Enter en la nota la guarda; Escape cierra la hoja; Tab no se escapa de la hoja abierta.
 function handleSupervisorKeydown(event) {
   const target = event.target;
+  if (event.key === "Escape" && anySheetOpen()) {
+    event.preventDefault();
+    closeSheets();
+    return;
+  }
+  if (event.key === "Tab" && anySheetOpen()) {
+    const sheet = document.querySelector(".sv-shell .sv-sheet");
+    const focusables = [...sheet.querySelectorAll("button, input, select, textarea, summary, a[href]")].filter(
+      (element) => !element.disabled && element.getClientRects().length && !(element.type === "radio" && !element.checked && sheet.querySelector(`input[name="${element.name}"]:checked`)),
+    );
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (!sheet.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
   if (event.key !== "Enter" || !target.matches?.(".sv-shell [data-sv-note]")) return;
   event.preventDefault();
-  const button = target.closest(".sv-stop-more-body")?.querySelector("[data-sv-note-save]");
+  const button = target.closest(".sv-note-row")?.querySelector("[data-sv-note-save]");
   if (button) saveNote(button.dataset.ruta, button.dataset.svNoteSave, target.id);
 }
 
 // El evento toggle de <details> no burbujea: se escucha en captura para recordar qué está abierto.
 function handleSupervisorToggle(event) {
   const details = event.target;
-  if (details.matches?.("[data-sv-stop-more]")) {
-    if (details.open) openStops.add(details.dataset.svStopMore);
-    else openStops.delete(details.dataset.svStopMore);
-    return;
-  }
   if (!details.matches?.("[data-sv-fold]")) return;
   const folds = readJSON(KEYS.folds, {});
   if (folds[details.dataset.svFold] === details.open) return;
