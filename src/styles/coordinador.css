@@ -8,8 +8,8 @@
   --c-card-2: #f2efe5;
   --c-ink: #0f1311;
   --c-text: #4a514c;
-  --c-line: rgba(15, 31, 19, 0.14);
-  --c-line-strong: rgba(15, 31, 19, 0.28);
+  --c-line: rgba(15, 31, 19, 0.1);
+  --c-line-strong: rgba(15, 31, 19, 0.22);
   --c-green: #025f40;
   --c-green-soft: rgba(2, 95, 64, 0.1);
   --c-on-green: #ffffff;
@@ -31,10 +31,10 @@
   --c-ok-ink: #025f40;
   --c-wa: #1a7f45;
   --c-focus: #025f40;
-  --c-shadow: 0 6px 20px rgba(15, 31, 19, 0.07);
+  --c-shadow: 0 2px 6px rgba(15, 31, 19, 0.05), 0 12px 30px rgba(15, 31, 19, 0.08);
   --c-bar-shadow: 0 -6px 24px rgba(15, 31, 19, 0.1);
   --tap: 52px;
-  --radius: 18px;
+  --radius: var(--radius-blob-a, 28px 22px 32px 24px);
   --safe-b: env(safe-area-inset-bottom, 0px);
 
   min-height: 100svh;
@@ -42,7 +42,7 @@
   color: var(--c-ink);
   isolation: isolate;
   font-size: 1rem;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 html[data-theme="dark"] .coord-shell {
@@ -51,8 +51,8 @@ html[data-theme="dark"] .coord-shell {
   --c-card-2: #1c2621;
   --c-ink: #eef3ef;
   --c-text: #b6c2ba;
-  --c-line: rgba(234, 244, 239, 0.13);
-  --c-line-strong: rgba(234, 244, 239, 0.28);
+  --c-line: rgba(234, 244, 239, 0.11);
+  --c-line-strong: rgba(234, 244, 239, 0.22);
   --c-green: #5cc497;
   --c-green-soft: rgba(92, 196, 151, 0.14);
   --c-on-green: #0b120e;
@@ -74,8 +74,8 @@ html[data-theme="dark"] .coord-shell {
   --c-ok-ink: #7fd6ae;
   --c-wa: #3fbf78;
   --c-focus: #8fe0bb;
-  --c-shadow: 0 6px 20px rgba(0, 0, 0, 0.32);
-  --c-bar-shadow: 0 -6px 24px rgba(0, 0, 0, 0.4);
+  --c-shadow: 0 4px 10px rgba(0, 0, 0, 0.28), 0 14px 32px rgba(0, 0, 0, 0.4);
+  --c-bar-shadow: 0 -6px 24px rgba(0, 0, 0, 0.42);
 }
 
 /* En esta página la barra fija ya reserva su lugar abajo, y accesibilidad se abre desde
@@ -181,7 +181,8 @@ body:has(.coord-shell) #a11y-root {
   gap: 8px;
   border-bottom: 1px solid var(--c-line);
   background: var(--c-card);
-  padding: 8px 16px;
+  box-shadow: 0 2px 12px rgba(15, 31, 19, 0.05);
+  padding: 8px var(--gutter-mobile, 20px);
 }
 
 .coord-brand {
@@ -227,7 +228,7 @@ html[data-theme="dark"] .coord-logo-dark {
 
 .coord-header-actions {
   display: flex;
-  gap: 4px;
+  gap: 8px;
 }
 
 .cd-show-xs {
@@ -240,8 +241,8 @@ html[data-theme="dark"] .coord-logo-dark {
   display: grid;
   width: min(100%, 1100px);
   margin: 0 auto;
-  gap: 14px;
-  padding: 14px 16px calc(110px + var(--safe-b));
+  gap: 18px;
+  padding: 16px var(--gutter-mobile, 20px) calc(116px + var(--safe-b));
   outline: none;
 }
 
@@ -261,15 +262,15 @@ html[data-theme="dark"] .coord-logo-dark {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 2px solid transparent;
-  border-radius: 14px;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: var(--c-card-2);
   color: var(--c-ink);
   cursor: pointer;
   font-size: 1rem;
   font-weight: 800;
   line-height: 1.15;
-  padding: 10px 16px;
+  padding: 10px 18px;
   text-align: center;
   text-decoration: none;
   transition: transform 140ms ease, background 160ms ease;
@@ -282,6 +283,7 @@ html[data-theme="dark"] .coord-logo-dark {
 .coord-btn.is-primary {
   background: var(--c-green);
   color: var(--c-on-green);
+  box-shadow: 0 6px 16px rgba(15, 31, 19, 0.12);
 }
 
 .coord-btn.is-secondary {
@@ -338,11 +340,12 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   height: var(--tap);
   flex: 0 0 auto;
   place-items: center;
-  border: 2px solid var(--c-line-strong);
-  border-radius: 14px;
+  border: 1.5px solid var(--c-line-strong);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: var(--c-card);
   color: var(--c-ink);
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(15, 31, 19, 0.05);
 }
 
 .cd-icon-btn.is-danger {
@@ -373,7 +376,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .cd-chip {
@@ -387,8 +390,8 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   color: var(--c-neutral-ink);
   font-size: 0.82rem;
   font-weight: 800;
-  line-height: 1.2;
-  padding: 3px 9px;
+  line-height: 1.35;
+  padding: 4px 11px;
 }
 
 .cd-chip > span {
@@ -503,7 +506,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   flex: 0 0 auto;
   place-items: center;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-green-soft);
   color: var(--c-green);
   font-weight: 900;
@@ -517,7 +520,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-ava.is-sm {
   width: 38px;
   height: 38px;
-  border-radius: 11px;
+  border-radius: 14px 10px 16px 12px;
   font-size: 1rem;
 }
 
@@ -534,7 +537,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-ava.is-lg {
   width: 84px;
   height: 84px;
-  border-radius: 20px;
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
   font-size: 2rem;
 }
 
@@ -578,7 +581,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-thumbs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* ---------- Tarjetas y listas ---------- */
@@ -586,12 +589,12 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-card {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: 14px;
   border: 1px solid var(--c-line);
   border-radius: var(--radius);
   background: var(--c-card);
   box-shadow: var(--c-shadow);
-  padding: 14px;
+  padding: 18px;
 }
 
 .cd-card.is-alert,
@@ -609,7 +612,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 
 .cd-list {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .cd-row {
@@ -656,22 +659,24 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-empty {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: 2px dashed var(--c-line);
   border-radius: var(--radius);
   color: var(--c-text);
   font-weight: 700;
-  padding: 16px;
+  line-height: 1.54;
+  padding: 22px var(--gutter-mobile, 20px);
 }
 
 .cd-note,
 .cd-done {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  border-radius: 12px;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
   font-weight: 700;
-  padding: 10px 12px;
+  line-height: 1.52;
+  padding: 12px 16px;
 }
 
 .cd-note {
@@ -693,29 +698,31 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 
 .cd-confirm {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   border: 2px solid var(--c-alert-line);
   border-radius: var(--radius);
   background: var(--c-alert-bg);
   color: var(--c-alert-ink);
-  padding: 14px;
+  line-height: 1.52;
+  padding: 18px;
 }
 
 .cd-warns {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .cd-warns li {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  border-radius: 10px;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
   background: var(--c-alert-bg);
   color: var(--c-alert-ink);
   font-size: 0.92rem;
   font-weight: 700;
-  padding: 8px 10px;
+  line-height: 1.52;
+  padding: 10px 14px;
 }
 
 .cd-warns .coord-icon {
@@ -730,10 +737,11 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   border-radius: var(--radius);
   background: var(--c-card);
   padding: 0;
+  box-shadow: 0 2px 10px rgba(15, 31, 19, 0.04);
 }
 
 .coord-shell .cd-fold.is-card {
-  border-radius: 14px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card-2);
 }
 
@@ -741,11 +749,11 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   display: flex;
   min-height: var(--tap);
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   font-weight: 800;
   list-style: none;
-  padding: 8px 14px;
+  padding: 10px 18px;
 }
 
 .cd-fold > summary::-webkit-details-marker {
@@ -772,8 +780,8 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 
 .cd-fold-body {
   display: grid;
-  gap: 12px;
-  padding: 0 14px 14px;
+  gap: 14px;
+  padding: 0 18px 18px;
 }
 
 /* ---------- Barra fija de abajo ---------- */
@@ -786,7 +794,10 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   z-index: 60;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
   border-top: 1px solid var(--c-line);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
   background: var(--c-card);
   box-shadow: var(--c-bar-shadow);
   padding: 6px 8px calc(6px + var(--safe-b));
@@ -800,7 +811,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   align-content: center;
   gap: 2px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: transparent;
   color: var(--c-text);
   cursor: pointer;
@@ -841,11 +852,13 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   left: 0;
   z-index: 60;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border-top: 1px solid var(--c-line);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
   background: var(--c-card);
   box-shadow: var(--c-bar-shadow);
-  padding: 10px 16px calc(10px + var(--safe-b));
+  padding: 12px var(--gutter-mobile, 20px) calc(12px + var(--safe-b));
 }
 
 .cd-savebar.is-row {
@@ -867,16 +880,16 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-switch {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  border-radius: 16px;
+  gap: 8px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card-2);
-  padding: 4px;
+  padding: 5px;
 }
 
 .cd-switch-btn {
   min-height: 48px;
   border: 2px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: transparent;
   color: var(--c-text);
   cursor: pointer;
@@ -894,21 +907,21 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 /* Aviso flotante con «Deshacer» */
 .cd-toast {
   position: fixed;
-  right: 12px;
+  right: var(--gutter-mobile, 20px);
   bottom: calc(84px + var(--safe-b));
-  left: 12px;
+  left: var(--gutter-mobile, 20px);
   z-index: 70;
   display: flex;
   max-width: 560px;
   align-items: center;
   gap: 10px;
   margin: 0 auto;
-  border-radius: 16px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: #16201b;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   color: #f2f6f3;
   font-weight: 700;
-  padding: 8px 8px 8px 14px;
+  padding: 10px 10px 10px 18px;
   animation: cd-toast-in 200ms ease-out;
 }
 
@@ -935,7 +948,7 @@ html[data-theme="dark"] .cd-toast {
   min-width: 48px;
   min-height: 48px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -944,7 +957,7 @@ html[data-theme="dark"] .cd-toast {
 
 .cd-toast-undo {
   background: rgba(255, 255, 255, 0.16);
-  padding: 0 14px;
+  padding: 0 16px;
   text-decoration: underline;
 }
 
@@ -954,7 +967,8 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-toast-x {
   display: grid;
-  width: 44px;
+  width: 48px;
+  height: 48px;
   place-items: center;
 }
 
@@ -971,10 +985,11 @@ html[data-theme="dark"] .cd-toast-undo {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  border-radius: 14px;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
   font-weight: 750;
-  padding: 10px 12px;
+  line-height: 1.5;
+  padding: 12px 16px;
 }
 
 .cd-sync > span {
@@ -1055,18 +1070,18 @@ html[data-theme="dark"] .cd-toast-undo {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  border: 2px solid var(--c-line-strong);
-  border-radius: 14px;
+  border: 1.5px solid var(--c-line-strong);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: var(--c-card);
   color: var(--c-ink);
   cursor: pointer;
   font-weight: 800;
-  padding: 0 12px 0 8px;
+  padding: 0 14px 0 10px;
 }
 
 .cd-sec {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
 .cd-h2 {
@@ -1098,21 +1113,21 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-tiles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .cd-tile {
   display: grid;
   min-height: 128px;
   align-content: start;
-  gap: 4px;
-  border: 2px solid var(--c-line);
+  gap: 6px;
+  border: 1.5px solid var(--c-line);
   border-radius: var(--radius);
   background: var(--c-card);
   box-shadow: var(--c-shadow);
   color: var(--c-ink);
   cursor: pointer;
-  padding: 12px 10px;
+  padding: 16px 12px;
   text-align: left;
 }
 
@@ -1204,16 +1219,16 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-minis {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .cd-mini {
   display: grid;
   grid-template-columns: auto auto 1fr;
   align-items: center;
-  gap: 4px 10px;
-  border-radius: 12px;
-  padding: 4px;
+  gap: 8px 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 8px;
 }
 
 .cd-mini.is-alert {
@@ -1238,10 +1253,10 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-seg {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  border-radius: 16px;
+  gap: 8px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card-2);
-  padding: 4px;
+  padding: 5px;
 }
 
 .cd-seg.is-3 {
@@ -1255,13 +1270,13 @@ html[data-theme="dark"] .cd-toast-undo {
   justify-content: center;
   gap: 6px;
   border: 2px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: transparent;
   color: var(--c-text);
   cursor: pointer;
   font-size: 0.98rem;
   font-weight: 850;
-  padding: 4px 6px;
+  padding: 4px 8px;
 }
 
 .cd-seg-btn b {
@@ -1285,7 +1300,7 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-week {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .cd-wday.is-today {
@@ -1320,19 +1335,20 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-wroutes {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .cd-wroute {
   display: grid;
   width: 100%;
-  gap: 6px;
-  border: 2px solid var(--c-line);
-  border-radius: 14px;
+  gap: 8px;
+  border: 1.5px solid var(--c-line);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card-2);
   color: var(--c-ink);
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 14px 16px;
+  line-height: 1.5;
   text-align: left;
 }
 
@@ -1365,7 +1381,7 @@ html[data-theme="dark"] .cd-toast-undo {
   justify-content: center;
   gap: 6px;
   border: 2px dashed var(--c-line-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: transparent;
   color: var(--c-ink);
   cursor: pointer;
@@ -1373,7 +1389,7 @@ html[data-theme="dark"] .cd-toast-undo {
 }
 
 .cd-carga {
-  gap: 12px;
+  gap: 14px;
 }
 
 /* ---------- Editor de ruta ---------- */
@@ -1381,17 +1397,18 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-editor,
 .cd-picker {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
 
 .cd-sol-box {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   border: 2px solid var(--c-warn-line);
   border-radius: var(--radius);
   background: var(--c-warn-bg);
   color: var(--c-warn-ink);
-  padding: 12px;
+  line-height: 1.52;
+  padding: 16px;
 }
 
 .cd-sol-box > p {
@@ -1402,17 +1419,17 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-stops {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .cd-stop {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   border: 1px solid var(--c-line);
   border-radius: var(--radius);
   background: var(--c-card);
   box-shadow: var(--c-shadow);
-  padding: 12px;
+  padding: 16px;
 }
 
 .cd-stop.is-alert {
@@ -1473,14 +1490,14 @@ html[data-theme="dark"] .cd-toast-undo {
   max-width: 8.5em;
   min-height: var(--tap);
   border: 2px solid var(--c-green);
-  border-radius: 14px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: var(--c-green-soft);
   color: var(--c-ink);
   cursor: pointer;
   font-size: 1.35rem;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
-  padding: 6px 8px;
+  padding: 6px 10px;
   text-align: center;
 }
 
@@ -1541,9 +1558,9 @@ html[data-theme="dark"] .cd-toast-undo {
   z-index: 20;
   display: flex;
   gap: 10px;
-  margin: 0 -16px;
+  margin: 0 calc(var(--gutter-mobile, 20px) * -1);
   background: var(--c-bg);
-  padding: 6px 16px 8px;
+  padding: 8px var(--gutter-mobile, 20px) 10px;
 }
 
 .cd-search {
@@ -1576,14 +1593,14 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-dog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .cd-dog-tile {
   display: grid;
   grid-template-rows: 1fr auto;
   justify-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .cd-dog-tile .cd-foto-btn {
@@ -1599,12 +1616,13 @@ html[data-theme="dark"] .cd-toast-undo {
   align-content: start;
   justify-items: center;
   gap: 6px;
-  border: 2px solid var(--c-line);
+  border: 1.5px solid var(--c-line);
   border-radius: var(--radius);
   background: var(--c-card);
   color: var(--c-ink);
   cursor: pointer;
-  padding: 10px 6px;
+  padding: 12px 8px;
+  box-shadow: var(--c-shadow);
 }
 
 .cd-dog-add b {
@@ -1650,10 +1668,10 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-reject {
   display: grid;
-  gap: 10px;
-  border-radius: 14px;
+  gap: 12px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card-2);
-  padding: 12px;
+  padding: 16px;
 }
 
 .cd-reject-title {
@@ -1705,11 +1723,13 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-form {
   display: grid;
-  gap: 14px;
+  gap: 18px;
+  max-width: var(--measure, 64ch);
 }
 
 .cd-form.is-inline {
-  gap: 12px;
+  gap: 14px;
+  max-width: none;
 }
 
 .cd-form fieldset {
@@ -1730,26 +1750,27 @@ html[data-theme="dark"] .cd-toast-undo {
   display: grid;
   max-height: 46vh;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 8px;
+  gap: 10px;
   overflow: auto;
   border: 1px solid var(--c-line);
   border-radius: var(--radius);
-  padding: 8px;
+  padding: 12px;
 }
 
 .coord-shell .cd-pick-dog {
   position: relative;
   display: grid;
   justify-items: center;
-  gap: 4px;
-  border: 2px solid var(--c-line);
-  border-radius: 14px;
+  gap: 6px;
+  border: 1.5px solid var(--c-line);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card);
   color: var(--c-ink);
   cursor: pointer;
   font-weight: 800;
-  padding: 8px 4px;
+  padding: 10px 6px;
   text-align: center;
+  box-shadow: var(--c-shadow);
 }
 
 .cd-pick-dog > span:not(.cd-pick-check) {
@@ -1788,7 +1809,7 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-pasos {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1797,17 +1818,18 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-paso {
   display: flex;
   width: 100%;
-  min-height: 72px;
+  min-height: 76px;
   align-items: center;
-  gap: 12px;
-  border: 2px solid var(--c-line);
+  gap: 14px;
+  border: 1.5px solid var(--c-line);
   border-radius: var(--radius);
   background: var(--c-card);
   box-shadow: var(--c-shadow);
   color: var(--c-ink);
   cursor: pointer;
   font: inherit;
-  padding: 12px 14px;
+  line-height: 1.5;
+  padding: 16px 18px;
   text-align: left;
 }
 
@@ -1854,17 +1876,17 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-menu {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .cd-menu-btn {
   position: relative;
   display: grid;
-  min-height: 96px;
+  min-height: 100px;
   align-content: center;
   justify-items: start;
   gap: 8px;
-  border: 2px solid var(--c-line);
+  border: 1.5px solid var(--c-line);
   border-radius: var(--radius);
   background: var(--c-card);
   box-shadow: var(--c-shadow);
@@ -1872,7 +1894,7 @@ html[data-theme="dark"] .cd-toast-undo {
   cursor: pointer;
   font-size: 1.02rem;
   font-weight: 850;
-  padding: 12px 14px;
+  padding: 16px 18px;
   text-align: left;
 }
 
@@ -1914,6 +1936,7 @@ html[data-theme="dark"] .cd-toast-undo {
 .cd-aviso-msg {
   font-size: 1.05rem;
   font-weight: 700;
+  line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
@@ -1955,12 +1978,13 @@ html[data-theme="dark"] .cd-toast-undo {
 .coord-shell :where(input:not([type="checkbox"], [type="radio"], [type="file"]), select, textarea) {
   width: 100%;
   min-height: var(--tap);
-  border: 2px solid var(--c-line-strong);
-  border-radius: 14px;
+  border: 1.5px solid var(--c-line-strong);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: var(--c-field);
   color: var(--c-ink);
   font-size: 1.02rem;
-  padding: 10px 12px;
+  line-height: 1.5;
+  padding: 12px 16px;
   box-shadow: none;
 }
 
@@ -2045,21 +2069,23 @@ html[data-theme="dark"] .coord-shell textarea {
 .coord-inline-alert {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  border-radius: 12px;
+  gap: 8px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
   background: var(--c-alert-bg);
   color: var(--c-alert-ink);
   font-weight: 750;
-  padding: 8px 10px;
+  line-height: 1.52;
+  padding: 12px 16px;
 }
 
 .coord-flash {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  border-radius: 12px;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
   font-weight: 750;
-  padding: 10px 12px;
+  line-height: 1.52;
+  padding: 12px 16px;
 }
 
 .coord-flash.is-ok {
@@ -2098,9 +2124,9 @@ html[data-theme="dark"] .coord-shell textarea {
   align-items: center;
   gap: 10px;
   border: 1px solid var(--c-line);
-  border-radius: 14px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--c-card);
-  padding: 8px 10px;
+  padding: 12px 14px;
 }
 
 .coord-file-icon {
@@ -2131,11 +2157,12 @@ html[data-theme="dark"] .coord-shell textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
-  border-radius: 12px;
+  gap: 8px 12px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
   background: var(--c-ok-bg);
   color: var(--c-ok-ink);
-  padding: 8px 10px;
+  line-height: 1.5;
+  padding: 10px 14px;
 }
 
 .coord-attach-row > span {
@@ -2155,11 +2182,12 @@ html[data-theme="dark"] .coord-shell textarea {
 
 .coord-upload {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   border: 2px solid var(--c-green);
   border-radius: var(--radius);
   background: var(--c-card);
-  padding: 12px;
+  padding: 18px;
+  box-shadow: var(--c-shadow);
 }
 
 .coord-upload-title {
@@ -2233,8 +2261,8 @@ html[data-motion="calm"] .coord-shell *::after {
 
 @media (min-width: 720px) {
   .coord-main {
-    gap: 18px;
-    padding: 22px 24px calc(120px + var(--safe-b));
+    gap: 22px;
+    padding: 26px 28px calc(124px + var(--safe-b));
   }
 
   .cd-list.is-grid {
@@ -2258,7 +2286,7 @@ html[data-motion="calm"] .coord-shell *::after {
     left: auto;
     width: 520px;
     border: 1px solid var(--c-line);
-    border-radius: 22px;
+    border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
     transform: translateX(50%);
   }
 
@@ -2272,7 +2300,7 @@ html[data-motion="calm"] .coord-shell *::after {
     left: auto;
     width: 640px;
     border: 1px solid var(--c-line);
-    border-radius: 22px;
+    border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
     transform: translateX(50%);
   }
 
@@ -2294,7 +2322,7 @@ html[data-motion="calm"] .coord-shell *::after {
   .cd-picker-tools {
     top: 60px;
     margin: 0;
-    padding: 6px 0 8px;
+    padding: 8px 0 10px;
   }
 }
 

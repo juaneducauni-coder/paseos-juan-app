@@ -104,14 +104,25 @@ export function publicFooter() {
 
 function waveDivider(variant = "top", extraClass = "") {
   const paths = {
-    top: "M0,36 C240,86 480,-12 720,38 C960,88 1200,8 1440,44 L1440,96 L0,96 Z",
-    sea: "M0,52 C320,4 620,96 960,42 C1180,8 1320,64 1440,32 L1440,96 L0,96 Z",
-    soft: "M0,24 C360,90 720,-18 1080,48 C1260,80 1360,36 1440,20 L1440,96 L0,96 Z",
+    top: {
+      back: "M0,48 C280,108 520,-18 820,44 C1080,98 1280,12 1440,52 L1440,110 L0,110 Z",
+      front: "M0,64 C240,18 540,104 860,52 C1120,10 1310,78 1440,42 L1440,110 L0,110 Z",
+    },
+    sea: {
+      back: "M0,32 C340,102 660,-10 980,58 C1200,102 1340,24 1440,38 L1440,110 L0,110 Z",
+      front: "M0,58 C320,6 640,98 960,44 C1180,8 1320,70 1440,34 L1440,110 L0,110 Z",
+    },
+    soft: {
+      back: "M0,42 C360,-12 720,98 1080,36 C1260,6 1360,64 1440,48 L1440,110 L0,110 Z",
+      front: "M0,28 C360,96 720,-14 1080,52 C1260,84 1360,38 1440,22 L1440,110 L0,110 Z",
+    },
   };
+  const chosen = paths[variant] || paths.top;
   return `
     <div class="organic-wave ${extraClass}" aria-hidden="true">
-      <svg viewBox="0 0 1440 96" preserveAspectRatio="none" focusable="false">
-        <path d="${paths[variant] || paths.top}"></path>
+      <svg viewBox="0 0 1440 110" preserveAspectRatio="none" focusable="false">
+        <path class="wave-layer-back" d="${chosen.back}"></path>
+        <path class="wave-layer-front" d="${chosen.front}"></path>
       </svg>
     </div>
   `;
@@ -249,7 +260,7 @@ function SummerShowcaseSection() {
       title: "Grupos armados por energía",
       tag: "Ahora Verano · Bienestar en grupo",
       desc: "Cada grupo se organiza por tamaño, carácter y ritmo para que disfruten el verano seguros y en armonía.",
-      img: "/hero-dog-premium.png",
+      img: "/verano-armonia.png",
       fallback: "/hero-dog-premium.png",
     },
   ];

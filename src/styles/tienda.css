@@ -43,9 +43,9 @@ html[data-theme="dark"] body:has(.tienda-page) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--t-line);
+  border-bottom: 1px solid rgba(220, 240, 228, 0.1);
   background: rgba(11, 15, 13, 0.94);
-  padding: 10px 16px;
+  padding: 12px var(--gutter-mobile, 20px);
   backdrop-filter: blur(12px);
 }
 
@@ -60,10 +60,10 @@ html[data-theme="dark"] body:has(.tienda-page) {
 
 .tienda-logo {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   place-items: center;
-  border-radius: 12px;
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
   background: var(--t-accent);
   color: var(--t-accent-ink);
 }
@@ -120,16 +120,16 @@ html[data-theme="dark"] body:has(.tienda-page) {
 
 .tienda-main {
   display: grid;
-  gap: 20px;
+  gap: 24px;
   max-width: 980px;
   margin: 0 auto;
-  padding: 16px 16px 40px;
+  padding: 22px var(--gutter-mobile, 20px) 52px;
 }
 
 .tienda-home,
 .tienda-footer a {
   display: inline-flex;
-  min-height: 44px;
+  min-height: var(--touch-min, 48px);
   align-items: center;
   justify-self: start;
   color: var(--t-accent);
@@ -162,31 +162,37 @@ html[data-theme="dark"] body:has(.tienda-page) {
 }
 
 .tienda-hero p:not(.tienda-eyebrow) {
-  max-width: 560px;
+  max-width: min(100%, var(--measure, 64ch));
   margin: 0;
   color: var(--t-muted);
   font-size: 1.05rem;
+  line-height: 1.6;
 }
 
 .tienda-grid {
   display: grid;
-  gap: 14px;
+  gap: 20px;
 }
 
 .tienda-product {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
-  gap: 14px;
-  border: 1px solid var(--t-line);
-  border-radius: 22px;
+  gap: 18px;
+  border: 1px solid rgba(220, 240, 228, 0.1);
+  border-radius: var(--radius-blob-a, 34px 22px 38px 24px / 24px 36px 22px 32px);
   background: var(--t-card);
-  padding: 14px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  padding: 20px;
+}
+
+.tienda-product:nth-child(even) {
+  border-radius: var(--radius-blob-b, 24px 36px 22px 34px / 32px 24px 36px 22px);
 }
 
 .tienda-photo {
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 16px;
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
   object-fit: cover;
 }
 
@@ -210,7 +216,7 @@ html[data-theme="dark"] body:has(.tienda-page) {
 .tienda-product-body {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -227,8 +233,9 @@ html[data-theme="dark"] body:has(.tienda-page) {
 
 .tienda-specs {
   display: grid;
-  gap: 4px;
-  margin: 4px 0 6px;
+  gap: 6px;
+  margin: 4px 0 8px;
+  line-height: 1.55;
 }
 
 .tienda-specs div {
@@ -260,13 +267,14 @@ html[data-theme="dark"] body:has(.tienda-page) {
   justify-content: center;
   gap: 10px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
   background: var(--t-accent);
+  box-shadow: 0 12px 26px rgba(92, 196, 151, 0.16);
   color: var(--t-accent-ink);
   cursor: pointer;
   font-size: 1rem;
   font-weight: 900;
-  padding: 0 18px;
+  padding: 0 20px;
 }
 
 .tienda-add:hover,
@@ -279,8 +287,8 @@ html[data-theme="dark"] body:has(.tienda-page) {
   grid-template-columns: 52px minmax(44px, auto) 52px;
   align-items: center;
   justify-self: start;
-  border: 1px solid var(--t-line);
-  border-radius: 14px;
+  border: 1px solid rgba(220, 240, 228, 0.12);
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
   overflow: hidden;
 }
 
@@ -306,21 +314,25 @@ html[data-theme="dark"] body:has(.tienda-page) {
 }
 
 .tienda-qty--small {
-  grid-template-columns: 46px minmax(36px, auto) 46px;
+  grid-template-columns: 48px minmax(40px, auto) 48px;
 }
 
 .tienda-qty--small button {
-  height: 46px;
+  height: var(--touch-min, 48px);
 }
 
 .tienda-health {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
+  max-width: min(100%, var(--measure, 64ch));
   margin: 0;
-  border-left: 3px solid var(--t-accent);
+  border: 1px solid rgba(92, 196, 151, 0.16);
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
+  background: rgba(92, 196, 151, 0.08);
   color: var(--t-text);
-  padding: 4px 0 4px 12px;
+  line-height: 1.58;
+  padding: 16px 18px;
 }
 
 .tienda-health .line-icon {
@@ -332,11 +344,12 @@ html[data-theme="dark"] body:has(.tienda-page) {
 
 .tienda-cart {
   display: grid;
-  gap: 12px;
-  border: 1px solid rgba(92, 196, 151, 0.35);
-  border-radius: 22px;
+  gap: 16px;
+  border: 1px solid rgba(92, 196, 151, 0.22);
+  border-radius: var(--radius-blob-b, 24px 36px 22px 34px / 32px 24px 36px 22px);
   background: var(--t-card);
-  padding: 18px 16px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.3);
+  padding: 24px 20px;
   scroll-margin-top: 84px;
 }
 
@@ -374,9 +387,9 @@ html[data-theme="dark"] body:has(.tienda-page) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px 12px;
+  gap: 10px 14px;
   border-top: 1px solid var(--t-line);
-  padding: 12px 0;
+  padding: 16px 0;
 }
 
 .tienda-cart-list li:first-child {
@@ -394,21 +407,22 @@ html[data-theme="dark"] body:has(.tienda-page) {
   margin: 0;
   color: var(--t-muted);
   font-size: 0.9rem;
+  line-height: 1.55;
 }
 
 .tienda-remove {
   grid-column: 1 / -1;
   justify-self: start;
   min-width: 96px;
-  min-height: 44px;
-  border: 1px solid rgba(242, 184, 181, 0.55);
-  border-radius: 12px;
+  min-height: var(--touch-min, 48px);
+  border: 1px solid rgba(242, 184, 181, 0.45);
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
   background: transparent;
   color: #f2b8b5;
   cursor: pointer;
   font: inherit;
   font-weight: 800;
-  padding: 0 16px;
+  padding: 0 18px;
 }
 
 .tienda-remove:hover {
@@ -427,13 +441,14 @@ html[data-theme="dark"] body:has(.tienda-page) {
 
 .tienda-footer {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   max-width: 980px;
   margin: 0 auto;
   border-top: 1px solid var(--t-line);
   color: var(--t-muted);
   font-size: 0.88rem;
-  padding: 20px 16px 96px;
+  line-height: 1.55;
+  padding: 24px var(--gutter-mobile, 20px) 104px;
 }
 
 .tienda-footer p {
@@ -503,19 +518,21 @@ html[data-theme="dark"] body:has(.tienda-page) {
 .tienda-aviso {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  max-width: 560px;
-  margin: 14px 0 0;
-  border: 1px solid rgba(92, 196, 151, 0.35);
-  border-radius: 14px;
+  gap: 12px;
+  max-width: min(100%, var(--measure, 64ch));
+  margin: 16px 0 0;
+  border: 1px solid rgba(92, 196, 151, 0.24);
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
   background: rgba(92, 196, 151, 0.1);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
   color: var(--t-text);
   font-size: 0.98rem;
-  padding: 10px 12px;
+  line-height: 1.56;
+  padding: 14px 18px;
 }
 
 .tienda-hero p.tienda-aviso {
-  margin-top: 14px;
+  margin-top: 16px;
   color: var(--t-text);
   font-size: 0.98rem;
 }
@@ -530,7 +547,7 @@ html[data-theme="dark"] body:has(.tienda-page) {
 @media (max-width: 420px) {
   .tienda-bar {
     gap: 8px;
-    padding: 8px 12px;
+    padding: 10px var(--gutter-mobile, 20px);
   }
 
   .tienda-logo {

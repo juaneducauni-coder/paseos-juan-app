@@ -532,19 +532,48 @@ function activeNotices(iso) {
     .sort((a, b) => String(b.actualizadoEn || b.fecha || "").localeCompare(String(a.actualizadoEn || a.fecha || "")));
 }
 
+// Avisos que este usuario ya marcó como vistos (solo en este celular; no borra el aviso).
+const SEEN_NOTICES_KEY = "paseosJuan_avisos_vistos";
+
+function seenNotices() {
+  try {
+    const list = JSON.parse(localStorage.getItem(SEEN_NOTICES_KEY));
+    return Array.isArray(list) ? list.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function markNoticeSeen(id) {
+  try {
+    localStorage.setItem(SEEN_NOTICES_KEY, JSON.stringify([...new Set([...seenNotices(), String(id)])].slice(-200)));
+  } catch {
+    // Sin lugar en el celular: el aviso se sigue mostrando.
+  }
+}
+
+function unseenNotices(iso) {
+  const seen = seenNotices();
+  return activeNotices(iso).filter((aviso) => !seen.includes(String(aviso.id)));
+}
+
+// Rojo: ya pasó algo (seguridad, perro suelto). Azul: alerta preventiva (clima, obras, etc.).
 function NoticeList(notices, { full = false } = {}) {
+  const seen = seenNotices();
   return `
     <ul class="pw-notices" role="list">
-      ${notices.map((aviso) => {
-        const urgent = /seguridad|perro suelto/i.test(aviso.tipo || "");
+      ${notices.map((aviso, index) => {
+        const urgent = /seguridad|perro suelto|incidente|accidente/i.test(aviso.tipo || "");
+        const isSeen = seen.includes(String(aviso.id));
         return `
-          <li class="pw-notice ${urgent ? "pw-notice--danger" : ""}">
-            ${ic(urgent ? "alertTriangle" : "mapPin", "pw-icon")}
+          <li class="pw-notice ${urgent ? "pw-notice--danger" : "pw-notice--info"} ${isSeen ? "is-seen" : ""}">
+            <span class="pw-notice-num" aria-hidden="true">${index + 1}</span>
             <div>
               <p class="pw-notice-head"><strong>${esc(aviso.barrio || "Barrio sin cargar")}</strong>${aviso.tipo ? ` · ${esc(aviso.tipo)}` : ""}</p>
               <p>${esc(aviso.mensaje || aviso.titulo || "")}</p>
               ${full ? `<p class="pw-notice-meta">${aviso.vigenteHasta ? `Hasta el ${esc(isoToLabel(aviso.vigenteHasta))}` : "Solo hoy"}${aviso.creadoPorNombre ? ` · ${esc(aviso.creadoPorNombre)}` : ""}</p>` : ""}
             </div>
+            ${isSeen ? `<span class="pw-notice-seen">${ic("check", "pw-icon pw-icon--sm")}Visto</span>` : `<button class="pw-notice-btn" type="button" data-pw-notice-seen="${esc(aviso.id)}">Visto</button>`}
           </li>
         `;
       }).join("")}
@@ -1045,7 +1074,7 @@ const TABS = [
 
 function TabBar({ sel, stops }) {
   const equipPending = sel.isToday && stops.length && checklistFor(sel.now.iso, sel.shift).checked.length < checklistItems().length;
-  const notices = activeNotices(sel.now.iso).length;
+  const notices = unseenNotices(sel.now.iso).length;
   const draft = getDraft();
   const badge = { equipo: equipPending ? "!" : "", mas: notices ? String(notices) : "", incidente: draftHasContent(draft) && !draft.enviado ? "•" : "" };
   return `
@@ -1128,7 +1157,7 @@ function RouteScreen(ctx) {
   const queue = buildQueue(stops, progress, sel);
   const totals = routeTotals(stops, progress);
   const percent = totals.toWalk ? Math.round((totals.delivered / totals.toWalk) * 100) : 100;
-  const notices = activeNotices(sel.now.iso);
+  const notices = unseenNotices(sel.now.iso);
 
   return `
     <section class="pw-screen" aria-labelledby="pw-tab-title">
@@ -2013,6 +2042,64 @@ function EquipScreen({ sel, plan, stops, names }) {
 
 // ---------- pantalla: Incidente (3 pasos) ----------
 
+// Dictado por voz del detalle (si el celular lo permite). El texto queda en el borrador.
+let dictation = null;
+
+function speechOk() {
+  return typeof window !== "undefined" && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+function stopDictation() {
+  if (dictation) dictation.stop();
+  dictation = null;
+}
+
+function toggleDictation(button) {
+  if (dictation) {
+    stopDictation();
+    return;
+  }
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) return;
+  const recognition = new Recognition();
+  recognition.lang = "es-AR";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  const label = () => document.querySelector("[data-pw-dictar-text]");
+  const setOn = (on) => {
+    const current = document.querySelector("[data-pw-dictar]");
+    if (current) {
+      current.setAttribute("aria-pressed", String(on));
+      current.classList.toggle("is-on", on);
+    }
+    if (label()) label().textContent = on ? "Te escucho… tocá para cortar" : "Contarlo con la voz";
+  };
+  recognition.onstart = () => setOn(true);
+  recognition.onresult = (event) => {
+    const text = String(event.results?.[0]?.[0]?.transcript || "").trim();
+    if (!text) return;
+    const base = getDraft().detalle.trim();
+    writeDraft({ detalle: `${base ? `${base} ` : ""}${text}`.slice(0, 160) });
+    view.incidentStatus = "Listo: revisá lo que quedó escrito.";
+    view.incidentWarn = false;
+  };
+  recognition.onerror = () => {
+    view.incidentStatus = "No te escuché. Probá de nuevo o escribilo.";
+    view.incidentWarn = true;
+  };
+  recognition.onend = () => {
+    dictation = null;
+    rerender('[data-pw-field="detalle"]');
+  };
+  dictation = recognition;
+  try {
+    recognition.start();
+  } catch {
+    dictation = null;
+  }
+  void button;
+}
+
 function incidentDogs(stops, draft) {
   const list = stops.map((stop) => stop.dog);
   draft.dogs.forEach((name) => {
@@ -2043,6 +2130,8 @@ function IncidentScreen({ sel }) {
       <label class="pw-field">Detalle <small>(opcional)</small>
         <input type="text" maxlength="160" data-pw-field="detalle" value="${esc(draft.detalle)}" placeholder="Ej.: tiró de la correa y gruñó" autocomplete="off" />
       </label>
+      ${speechOk() ? `<button class="pw-btn pw-btn--ghost pw-btn--block pw-voice-btn" type="button" data-pw-dictar aria-pressed="false">${ic("message", "pw-icon")}<span data-pw-dictar-text>Contarlo con la voz</span></button>` : ""}
+      <button class="pw-btn pw-btn--ghost pw-btn--block" type="button" data-pw-inc-none>No hubo incidente · volver a la ruta</button>
     `;
   } else if (step === 2) {
     const dogs = incidentDogs(stops, draft);
@@ -3381,6 +3470,36 @@ function handlePaseadorClick(event) {
     view.incidentStatus = "";
     rerender("#pw-tab-title");
     announce("Reporte nuevo.");
+    return true;
+  }
+
+  const seenBtn = target.closest("[data-pw-notice-seen]");
+  if (seenBtn) {
+    markNoticeSeen(seenBtn.getAttribute("data-pw-notice-seen"));
+    announce("Aviso marcado como visto.");
+    rerender("#pw-tab-title");
+    return true;
+  }
+
+  const dictar = target.closest("[data-pw-dictar]");
+  if (dictar) {
+    toggleDictation(dictar);
+    return true;
+  }
+
+  // "No hubo incidente": descarta el borrador (si no se envió) y vuelve a la ruta.
+  if (target.closest("[data-pw-inc-none]")) {
+    stopDictation();
+    if (!getDraft().enviado) {
+      try {
+        localStorage.removeItem(INCIDENT_KEY);
+      } catch {
+        // Nada que borrar.
+      }
+    }
+    view.incidentStatus = "";
+    view.incidentWarn = false;
+    goTab("ruta");
     return true;
   }
 

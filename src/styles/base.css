@@ -9,13 +9,35 @@
   --bone: #faf8f2;
   --ink: #0f1311;
   --text: #565c57;
-  --line: rgba(15, 31, 19, 0.12);
-  --line-strong: rgba(15, 31, 19, 0.2);
-  --surface: rgba(250, 248, 242, 0.86);
+  --line: rgba(15, 31, 19, 0.09);
+  --line-strong: rgba(15, 31, 19, 0.16);
+  --surface: rgba(250, 248, 242, 0.88);
   --white: #ffffff;
-  --shadow: 0 22px 60px rgba(15, 31, 19, 0.1);
-  --soft-shadow: 0 14px 38px rgba(15, 31, 19, 0.08);
+  --shadow: 0 24px 62px rgba(15, 31, 19, 0.09), 0 6px 18px rgba(2, 95, 64, 0.05);
+  --soft-shadow: 0 16px 42px rgba(15, 31, 19, 0.07), 0 4px 12px rgba(2, 95, 64, 0.04);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Escala compartida de aire, lectura, toque y figuras orgánicas */
+  --space-2xs: 8px;
+  --space-xs: 12px;
+  --space-sm: 18px;
+  --space-md: 24px;
+  --space-lg: 32px;
+  --space-xl: 48px;
+  --space-2xl: 72px;
+  --gutter-mobile: 20px;
+  --measure: 64ch;
+  --line-body: 1.58;
+  --touch-min: 48px;
+  --touch-gap: 8px;
+
+  --radius-blob-a: 34px 22px 38px 24px / 24px 36px 22px 32px;
+  --radius-blob-b: 24px 36px 22px 34px / 32px 24px 36px 22px;
+  --radius-blob-soft: 28px 18px 30px 20px / 20px 30px 18px 28px;
+  --radius-blob-sm: 20px 14px 22px 15px / 15px 22px 14px 20px;
+  --radius-btn: 22px 15px 24px 16px / 16px 24px 15px 22px;
+  --radius-sheet: 34px 24px 0 0 / 24px 34px 0 0;
+  --radius-pill: 999px;
 }
 
 * {
@@ -33,7 +55,7 @@ body {
   color: var(--ink);
   font-family:
     Inter, Sora, Montserrat, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.5;
+  line-height: var(--line-body);
   text-rendering: geometricPrecision;
 }
 
@@ -79,15 +101,15 @@ a {
   left: 50%;
   z-index: 50;
   display: flex;
-  width: min(calc(100% - 32px), 1180px);
+  width: min(calc(100% - 40px), 1180px);
   min-height: 68px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px 10px 14px;
-  border: 1px solid rgba(15, 31, 19, 0.1);
-  border-radius: 26px;
-  background: rgba(250, 248, 242, 0.74);
-  box-shadow: 0 18px 50px rgba(15, 31, 19, 0.08);
+  padding: 10px 14px 10px 16px;
+  border: 1px solid rgba(15, 31, 19, 0.07);
+  border-radius: var(--radius-blob-soft);
+  background: rgba(250, 248, 242, 0.8);
+  box-shadow: var(--soft-shadow);
   transform: translateX(-50%);
   backdrop-filter: blur(22px);
 }
@@ -150,17 +172,17 @@ small,
 
 .header-cta {
   display: inline-flex;
-  min-height: 42px;
+  min-height: var(--touch-min);
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(2, 95, 64, 0.18);
+  border: 1px solid rgba(2, 95, 64, 0.16);
   border-radius: 999px;
   background: rgba(2, 95, 64, 0.08);
   color: var(--green);
   font-size: 0.8rem;
   font-weight: 850;
   letter-spacing: 0.08em;
-  padding: 0 18px;
+  padding: 0 20px;
   text-decoration: none;
   text-transform: uppercase;
   transition: transform 420ms var(--ease), background 420ms var(--ease), color 420ms var(--ease);
@@ -175,12 +197,13 @@ small,
 .menu-button {
   position: relative;
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: var(--touch-min);
+  height: var(--touch-min);
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 17px;
-  background: rgba(255, 255, 255, 0.76);
+  border-radius: var(--radius-btn);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 6px 18px rgba(15, 31, 19, 0.06);
   cursor: pointer;
   transition: transform 420ms var(--ease), border-color 420ms var(--ease), background 420ms var(--ease);
 }
@@ -249,11 +272,11 @@ small,
   display: grid;
   width: min(430px, calc(100% - 32px));
   grid-template-rows: auto 1fr auto auto;
-  gap: 14px;
+  gap: 18px;
   overflow-y: auto;
-  padding: 22px;
+  padding: 26px;
   border: 1px solid rgba(250, 248, 242, 0.1);
-  border-radius: 30px;
+  border-radius: var(--radius-blob-a);
   background:
     linear-gradient(145deg, rgba(15, 31, 19, 0.98), rgba(8, 18, 11, 0.98)),
     repeating-linear-gradient(135deg, rgba(250, 248, 242, 0.035) 0 1px, transparent 1px 18px);
@@ -307,11 +330,11 @@ small,
 
 .menu-close {
   display: grid;
-  width: 44px;
-  height: 44px;
+  width: var(--touch-min);
+  height: var(--touch-min);
   place-items: center;
   border: 1px solid rgba(250, 248, 242, 0.14);
-  border-radius: 15px;
+  border-radius: var(--radius-btn);
   background: rgba(250, 248, 242, 0.04);
   color: var(--bone);
   cursor: pointer;
@@ -331,34 +354,36 @@ small,
 .menu-nav {
   display: grid;
   align-content: start;
-  gap: 4px;
-  padding-top: 8px;
+  gap: var(--touch-gap);
+  padding-top: 10px;
 }
 
 .menu-nav a {
   display: grid;
-  min-height: 42px;
+  min-height: var(--touch-min);
   grid-template-columns: 34px 1fr;
   align-items: center;
-  border-bottom: 1px solid rgba(250, 248, 242, 0.1);
+  border-bottom: 1px solid rgba(250, 248, 242, 0.08);
+  border-radius: var(--radius-blob-sm);
   color: var(--bone);
   font-size: 0.92rem;
   font-weight: 850;
   letter-spacing: 0.07em;
+  padding-inline: 10px;
   text-decoration: none;
   text-transform: uppercase;
   transition: background 380ms var(--ease), padding 380ms var(--ease), color 380ms var(--ease);
 }
 
 .menu-nav a:first-child {
-  border-radius: 14px;
+  border-radius: var(--radius-blob-sm);
   border-bottom-color: transparent;
   background: rgba(95, 127, 58, 0.22);
-  padding-inline: 12px;
+  padding-inline: 14px;
 }
 
 .menu-nav a:hover {
-  padding-left: 12px;
+  padding-left: 16px;
   color: #d6e8c7;
 }
 
@@ -371,7 +396,7 @@ small,
   min-height: 52px;
   place-items: center;
   border: 1px solid rgba(159, 189, 114, 0.66);
-  border-radius: 16px;
+  border-radius: var(--radius-btn);
   color: var(--bone);
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -433,9 +458,10 @@ p {
 }
 
 .hero p:not(.eyebrow) {
-  max-width: 620px;
+  max-width: min(100%, var(--measure));
   color: var(--text);
   font-size: 1.08rem;
+  line-height: 1.62;
 }
 
 .hero-actions,
@@ -444,7 +470,7 @@ p {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 14px;
 }
 
 .primary-button,
@@ -457,18 +483,18 @@ p {
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: var(--radius-btn);
   cursor: pointer;
   font-weight: 900;
   letter-spacing: 0.05em;
-  padding: 0 22px;
+  padding: 0 24px;
   text-decoration: none;
   text-transform: uppercase;
-  transition: transform 420ms var(--ease), box-shadow 420ms var(--ease), background 420ms var(--ease), border-color 420ms var(--ease), color 420ms var(--ease);
+  transition: transform 420ms var(--ease), box-shadow 420ms var(--ease), background 420ms var(--ease), border-color 420ms var(--ease), color 420ms var(--ease), border-radius 420ms var(--ease);
 }
 
 .primary-button {
-  border-color: var(--green);
+  border-color: rgba(2, 95, 64, 0.2);
   background: var(--green);
   color: var(--bone);
   box-shadow: 0 18px 36px rgba(2, 95, 64, 0.18);
@@ -476,9 +502,10 @@ p {
 
 .secondary-button,
 .ghost-button {
-  border-color: rgba(15, 31, 19, 0.18);
-  background: rgba(250, 248, 242, 0.64);
+  border-color: rgba(15, 31, 19, 0.12);
+  background: rgba(250, 248, 242, 0.78);
   color: var(--military);
+  box-shadow: 0 8px 22px rgba(15, 31, 19, 0.05);
 }
 
 .primary-button:hover,
@@ -499,8 +526,8 @@ p {
   position: relative;
   overflow: hidden;
   min-height: 620px;
-  border: 1px solid rgba(15, 31, 19, 0.13);
-  border-radius: 34px;
+  border: 1px solid rgba(15, 31, 19, 0.08);
+  border-radius: 42px 26px 46px 28px / 28px 46px 26px 42px;
   background:
     linear-gradient(180deg, rgba(15, 31, 19, 0.06), rgba(15, 31, 19, 0.02)),
     var(--military);
@@ -523,12 +550,12 @@ p {
   bottom: 22px;
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-  max-width: 260px;
-  padding: 18px;
-  border: 1px solid rgba(250, 248, 242, 0.16);
-  border-radius: 22px;
-  background: rgba(15, 31, 19, 0.72);
+  gap: 6px 14px;
+  max-width: 270px;
+  padding: 20px;
+  border: 1px solid rgba(250, 248, 242, 0.14);
+  border-radius: var(--radius-blob-soft);
+  background: rgba(15, 31, 19, 0.74);
   color: var(--bone);
   backdrop-filter: blur(16px);
 }
@@ -586,7 +613,7 @@ p {
 .footer {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 86px 24px;
+  padding: 96px max(var(--gutter-mobile), 28px);
 }
 
 .section-heading.centered {
@@ -596,10 +623,11 @@ p {
 }
 
 .section-heading.centered p:not(.eyebrow) {
-  max-width: 760px;
+  max-width: min(100%, var(--measure));
   margin: 16px auto 0;
   color: var(--text);
   font-size: 1.05rem;
+  line-height: 1.62;
 }
 
 .section-heading h2,
@@ -618,7 +646,7 @@ p {
 .section-grid {
   display: grid;
   grid-template-columns: minmax(250px, 0.78fr) minmax(0, 1fr);
-  gap: 48px;
+  gap: 52px;
   align-items: start;
   border-top: 1px solid var(--line);
 }
@@ -628,23 +656,29 @@ p {
 .dog-grid,
 .dashboard-grid {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 .price-card,
 .panel,
 .dog-card,
 .auth-card {
-  border: 1px solid var(--line);
-  border-radius: 26px;
-  background: rgba(250, 248, 242, 0.86);
+  border: 1px solid rgba(15, 31, 19, 0.07);
+  border-radius: var(--radius-blob-a);
+  background: rgba(250, 248, 242, 0.9);
   box-shadow: var(--soft-shadow);
+}
+
+.price-card:nth-child(even),
+.panel:nth-child(even),
+.dog-card:nth-child(even) {
+  border-radius: var(--radius-blob-b);
 }
 
 .panel,
 .dog-card,
 .auth-card {
-  padding: 24px;
+  padding: 28px;
 }
 
 .panel h3,
@@ -683,9 +717,9 @@ p {
   display: grid;
   max-width: 1180px;
   margin: 0 auto;
-  gap: 24px;
+  gap: 28px;
   border-top: 1px solid var(--line);
-  padding: 86px 24px;
+  padding: 96px max(var(--gutter-mobile), 28px);
 }
 
 .pricing-heading {
@@ -721,9 +755,9 @@ p {
 
 .tariff-sizes,
 .price-card {
-  border: 1px solid var(--line);
-  border-radius: 26px;
-  background: rgba(250, 248, 242, 0.9);
+  border: 1px solid rgba(15, 31, 19, 0.07);
+  border-radius: var(--radius-blob-a);
+  background: rgba(250, 248, 242, 0.92);
   box-shadow: var(--soft-shadow);
 }
 
@@ -747,13 +781,13 @@ p {
 }
 
 .price-card {
-  gap: 16px;
-  padding: 24px;
-  transition: transform 420ms var(--ease), box-shadow 420ms var(--ease), border-color 420ms var(--ease);
+  gap: 18px;
+  padding: 28px;
+  transition: transform 420ms var(--ease), box-shadow 420ms var(--ease), border-color 420ms var(--ease), border-radius 420ms var(--ease);
 }
 
 .price-card:hover {
-  border-color: rgba(2, 95, 64, 0.28);
+  border-color: rgba(2, 95, 64, 0.22);
   box-shadow: var(--shadow);
   transform: translateY(-4px);
 }
@@ -761,11 +795,11 @@ p {
 .price-card > strong {
   margin: 0;
   color: var(--bone);
-  border-radius: 18px;
+  border-radius: var(--radius-blob-sm);
   background: var(--green);
   font-size: 1.28rem;
   letter-spacing: 0.14em;
-  padding: 13px 16px;
+  padding: 14px 18px;
   text-align: center;
 }
 
@@ -826,10 +860,11 @@ p {
 
 .compact-plan-card {
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.56);
-  padding: 13px;
+  border: 1px solid rgba(15, 31, 19, 0.08);
+  border-radius: var(--radius-blob-sm);
+  background: rgba(255, 255, 255, 0.66);
+  box-shadow: 0 8px 20px rgba(15, 31, 19, 0.04);
+  padding: 16px;
 }
 
 .compact-plan-card span {
@@ -892,8 +927,10 @@ details p {
 }
 
 .evaluation-heading p:not(.eyebrow) {
+  max-width: min(100%, var(--measure));
   color: var(--text);
   font-size: 1.05rem;
+  line-height: 1.62;
 }
 
 .evaluation-form,
@@ -901,31 +938,31 @@ details p {
 .panel,
 .dog-card dl {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
 
 .evaluation-form {
   width: min(100%, 820px);
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 20px;
 }
 
 .evaluation-board {
   display: grid;
-  gap: 16px;
+  gap: 18px;
   min-width: 0;
   margin: 0;
-  border: 1px solid rgba(15, 31, 19, 0.11);
-  border-radius: 22px;
+  border: 1px solid rgba(15, 31, 19, 0.07);
+  border-radius: var(--radius-blob-a);
   background: var(--bone);
-  box-shadow: 0 14px 36px rgba(15, 31, 19, 0.06);
-  padding: 22px;
+  box-shadow: var(--soft-shadow);
+  padding: 26px;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
+  gap: 16px;
 }
 
 .span-2 {
@@ -934,7 +971,7 @@ details p {
 
 label {
   display: grid;
-  gap: 7px;
+  gap: 8px;
   color: var(--text);
   font-weight: 800;
 }
@@ -943,11 +980,12 @@ input,
 textarea,
 select {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
+  min-height: var(--touch-min);
+  border: 1px solid rgba(15, 31, 19, 0.14);
+  border-radius: var(--radius-blob-sm);
+  background: rgba(255, 255, 255, 0.84);
   color: var(--ink);
-  padding: 13px 14px;
+  padding: 13px 16px;
   outline: none;
   transition: border-color 320ms var(--ease), box-shadow 320ms var(--ease), background 320ms var(--ease);
 }
@@ -1001,15 +1039,17 @@ textarea {
   display: grid;
   min-height: 100svh;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
-  gap: 34px;
+  gap: 38px;
   align-items: center;
   max-width: 1080px;
   margin: 0 auto;
-  padding: 136px 24px 60px;
+  padding: 136px max(var(--gutter-mobile), 28px) 68px;
 }
 
 .auth-copy p:not(.eyebrow) {
+  max-width: min(100%, var(--measure));
   color: var(--text);
+  line-height: 1.62;
 }
 
 .walker-shell {
@@ -1102,7 +1142,7 @@ textarea {
 
 .walker-online {
   display: inline-flex;
-  min-height: 42px;
+  min-height: var(--touch-min);
   align-items: center;
   gap: 8px;
   border: 1px solid rgba(31, 143, 90, 0.22);
@@ -1110,7 +1150,7 @@ textarea {
   background: rgba(31, 143, 90, 0.08);
   color: #f4f1e8;
   font-size: 0.78rem;
-  padding: 0 14px;
+  padding: 0 16px;
 }
 
 .walker-online b {
@@ -1125,17 +1165,18 @@ textarea {
   position: relative;
   z-index: 1;
   display: grid;
-  gap: 18px;
-  width: min(calc(100% - 36px), 1200px);
+  gap: 22px;
+  width: min(calc(100% - (var(--gutter-mobile) * 2)), 1200px);
   margin: 0 auto;
-  padding: 28px 0 56px;
+  padding: 28px 0 64px;
 }
 
 .walker-shift-card,
 .walker-panel,
 .walker-summary-card,
 .assigned-dog-card {
-  border: 1px solid rgba(31, 143, 90, 0.18);
+  border: 1px solid rgba(31, 143, 90, 0.14);
+  border-radius: var(--radius-blob-a);
   background: #101f16;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
 }
@@ -1143,13 +1184,13 @@ textarea {
 .walker-shift-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
-  gap: 22px;
+  gap: 24px;
   align-items: end;
-  border-radius: 34px;
+  border-radius: 38px 24px 40px 26px / 26px 38px 24px 36px;
   background:
     linear-gradient(135deg, rgba(15, 31, 19, 0.98), rgba(19, 41, 28, 0.92)),
     repeating-linear-gradient(135deg, rgba(244, 241, 232, 0.025) 0 1px, transparent 1px 18px);
-  padding: clamp(22px, 4vw, 42px);
+  padding: clamp(24px, 4vw, 44px);
 }
 
 .walker-eyebrow {
@@ -1214,13 +1255,13 @@ textarea {
   min-height: 52px;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 10px;
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: var(--radius-btn);
   cursor: pointer;
   font-weight: 950;
   letter-spacing: 0.06em;
-  padding: 0 18px;
+  padding: 0 20px;
   text-transform: uppercase;
   transition: transform 320ms var(--ease), background 320ms var(--ease), border-color 320ms var(--ease), box-shadow 320ms var(--ease), color 320ms var(--ease);
 }
@@ -1717,23 +1758,23 @@ textarea {
 .pickup-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
+  gap: var(--touch-gap);
 }
 
 .pickup-actions button {
   display: inline-flex;
-  min-height: 42px;
+  min-height: var(--touch-min);
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  border: 1px solid rgba(31, 143, 90, 0.22);
-  border-radius: 13px;
+  gap: 8px;
+  border: 1px solid rgba(31, 143, 90, 0.18);
+  border-radius: var(--radius-blob-sm);
   background: rgba(15, 31, 19, 0.72);
   color: #f4f1e8;
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 900;
-  padding: 0 9px;
+  padding: 0 12px;
   text-transform: uppercase;
 }
 
@@ -1838,13 +1879,13 @@ textarea {
 .assignment-button-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: var(--touch-gap);
 }
 
 .assignment-button-row button {
-  min-height: 38px;
-  border: 1px solid rgba(31, 143, 90, 0.22);
-  border-radius: 12px;
+  min-height: var(--touch-min);
+  border: 1px solid rgba(31, 143, 90, 0.18);
+  border-radius: var(--radius-blob-sm);
   background: rgba(15, 31, 19, 0.72);
   color: #f4f1e8;
   cursor: pointer;
@@ -1887,8 +1928,8 @@ textarea {
 }
 
 .low-priority-action {
-  min-height: 44px;
-  opacity: 0.72;
+  min-height: var(--touch-min);
+  opacity: 0.78;
 }
 
 .route-form-grid {
@@ -1937,15 +1978,15 @@ textarea {
 }
 
 .route-order-list button {
-  min-height: 34px;
-  border: 1px solid rgba(31, 143, 90, 0.22);
-  border-radius: 11px;
+  min-height: var(--touch-min);
+  border: 1px solid rgba(31, 143, 90, 0.18);
+  border-radius: var(--radius-blob-sm);
   background: rgba(15, 31, 19, 0.72);
   color: #f4f1e8;
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   font-weight: 900;
-  padding: 0 8px;
+  padding: 0 12px;
   text-transform: uppercase;
 }
 
@@ -1969,10 +2010,10 @@ textarea {
 .dashboard {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
-  gap: 22px;
+  gap: 26px;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 132px 22px 42px;
+  padding: 132px max(var(--gutter-mobile), 24px) 52px;
 }
 
 .dashboard-client {
@@ -1985,10 +2026,10 @@ textarea {
   top: 116px;
   align-self: start;
   display: grid;
-  gap: 18px;
-  padding: 24px;
-  border: 1px solid rgba(250, 248, 242, 0.12);
-  border-radius: 28px;
+  gap: 20px;
+  padding: 28px;
+  border: 1px solid rgba(250, 248, 242, 0.1);
+  border-radius: var(--radius-blob-a);
   background:
     linear-gradient(180deg, var(--military), #08120b),
     repeating-linear-gradient(135deg, rgba(250, 248, 242, 0.035) 0 1px, transparent 1px 18px);
@@ -2279,13 +2320,13 @@ textarea {
 .coordinator-dashboard {
   grid-template-columns: 1fr;
   max-width: 1280px;
-  padding: 28px 22px 48px;
+  padding: 28px max(var(--gutter-mobile), 24px) 56px;
 }
 
 .coordinator-hero,
 .coordinator-module {
-  border: 1px solid rgba(2, 95, 64, 0.14);
-  border-radius: 30px;
+  border: 1px solid rgba(2, 95, 64, 0.1);
+  border-radius: var(--radius-blob-a);
   background: #faf8f2;
   color: #0f1311;
   box-shadow: var(--soft-shadow);
@@ -2294,9 +2335,9 @@ textarea {
 .coordinator-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.78fr);
-  gap: 22px;
+  gap: 24px;
   align-items: end;
-  padding: 30px;
+  padding: 32px;
 }
 
 .coordinator-hero p,
@@ -2385,13 +2426,13 @@ textarea {
 
 .coordinator-request-card {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   min-height: 280px;
-  border: 1px solid rgba(2, 95, 64, 0.12);
-  border-radius: 24px;
-  background: rgba(250, 248, 242, 0.9);
+  border: 1px solid rgba(2, 95, 64, 0.09);
+  border-radius: var(--radius-blob-soft);
+  background: rgba(250, 248, 242, 0.92);
   box-shadow: 0 14px 34px rgba(15, 31, 19, 0.06);
-  padding: 18px;
+  padding: 22px;
   transition: transform 320ms var(--ease), border-color 320ms var(--ease), box-shadow 320ms var(--ease);
 }
 
@@ -2428,9 +2469,9 @@ textarea {
 
 .payments-heading,
 .payments-panel {
-  border: 1px solid rgba(2, 95, 64, 0.14);
-  border-radius: 28px;
-  background: rgba(250, 248, 242, 0.92);
+  border: 1px solid rgba(2, 95, 64, 0.1);
+  border-radius: var(--radius-blob-a);
+  background: rgba(250, 248, 242, 0.94);
   box-shadow: var(--soft-shadow);
 }
 
@@ -2744,10 +2785,11 @@ dd {
 }
 
 .notice {
-  border-radius: 18px;
+  border-radius: var(--radius-blob-sm);
   background: rgba(2, 95, 64, 0.08);
   font-weight: 800;
-  padding: 13px;
+  padding: 16px 18px;
+  line-height: 1.55;
 }
 
 .demo-client-card {
@@ -2847,10 +2889,10 @@ dd {
   min-height: 460px;
   display: none;
   overflow: hidden;
-  border: 1px solid rgba(2, 95, 64, 0.18);
-  border-radius: 28px;
+  border: 1px solid rgba(2, 95, 64, 0.12);
+  border-radius: var(--radius-blob-a);
   background: var(--bone);
-  box-shadow: 0 30px 90px rgba(15, 31, 19, 0.24);
+  box-shadow: 0 30px 90px rgba(15, 31, 19, 0.22);
   opacity: 0;
   transform: translateY(14px);
 }
@@ -2883,12 +2925,12 @@ dd {
 
 .chat-head button {
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: var(--touch-min);
+  height: var(--touch-min);
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.54);
+  border-radius: var(--radius-btn);
+  background: rgba(255, 255, 255, 0.64);
   color: var(--ink);
   cursor: pointer;
 }
@@ -2907,8 +2949,9 @@ dd {
 
 .chat-message {
   max-width: 82%;
-  border-radius: 18px;
-  padding: 11px 13px;
+  border-radius: var(--radius-blob-sm);
+  padding: 13px 16px;
+  line-height: 1.55;
 }
 
 .chat-message.support {
@@ -2924,21 +2967,22 @@ dd {
 
 .chat-quick-actions {
   display: grid;
-  gap: 8px;
+  gap: var(--touch-gap);
   border-top: 1px solid var(--line);
-  padding: 12px 16px;
+  padding: 14px 18px;
 }
 
 .chat-quick-actions button {
   display: flex;
+  min-height: var(--touch-min);
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.54);
+  border-radius: var(--radius-btn);
+  background: rgba(255, 255, 255, 0.62);
   color: var(--ink);
   cursor: pointer;
-  padding: 10px;
+  padding: 10px 14px;
   text-align: left;
 }
 
@@ -3024,15 +3068,15 @@ dd {
 
 @media (max-width: 760px) {
   .topbar {
-    top: 10px;
-    width: min(calc(100% - 20px), 1180px);
-    min-height: 62px;
-    border-radius: 22px;
-    padding: 8px 9px 8px 10px;
+    top: 12px;
+    width: min(calc(100% - (var(--gutter-mobile) * 2)), 1180px);
+    min-height: 64px;
+    border-radius: var(--radius-blob-soft);
+    padding: 8px 10px 8px 12px;
   }
 
   .brand strong {
-    font-size: 0.82rem;
+    font-size: 0.8rem;
   }
 
   .brand small,
@@ -3043,19 +3087,19 @@ dd {
   .brand-mark {
     width: 44px;
     height: 44px;
-    border-radius: 15px;
+    border-radius: var(--radius-blob-sm);
   }
 
   .menu-button {
-    width: 46px;
-    height: 46px;
+    width: var(--touch-min);
+    height: var(--touch-min);
   }
 
   .mobile-menu {
-    inset: 10px;
+    inset: 12px;
     width: auto;
-    border-radius: 28px;
-    padding: 20px;
+    border-radius: var(--radius-blob-a);
+    padding: 24px 20px;
   }
 
   .menu-nav a {
@@ -3064,7 +3108,7 @@ dd {
 
   .hero {
     min-height: auto;
-    padding: 112px 18px 54px;
+    padding: 118px var(--gutter-mobile) 60px;
   }
 
   .hero h1 {
@@ -3139,7 +3183,7 @@ dd {
   .auth-layout,
   .footer {
     grid-template-columns: 1fr;
-    padding: 58px 18px;
+    padding: 64px var(--gutter-mobile);
   }
 
   .section-heading h2,
@@ -3173,17 +3217,18 @@ dd {
   }
 
   .dashboard {
-    padding: 112px 14px 28px;
+    padding: 116px var(--gutter-mobile) 36px;
   }
 
   .quick-actions {
     position: sticky;
     top: 84px;
     z-index: 10;
-    border: 1px solid var(--line);
-    border-radius: 24px;
-    background: rgba(250, 248, 242, 0.86);
-    padding: 10px;
+    border: 1px solid rgba(15, 31, 19, 0.08);
+    border-radius: var(--radius-blob-soft);
+    background: rgba(250, 248, 242, 0.88);
+    box-shadow: var(--soft-shadow);
+    padding: 12px;
     backdrop-filter: blur(16px);
   }
 
@@ -3282,21 +3327,23 @@ dd {
     position: sticky;
     align-items: flex-start;
     flex-direction: column;
+    padding: 14px var(--gutter-mobile);
   }
 
   .walker-header-actions {
     width: 100%;
     justify-content: space-between;
+    gap: var(--touch-gap);
   }
 
   .walker-ghost-button {
-    min-height: 44px;
-    padding: 0 12px;
+    min-height: var(--touch-min);
+    padding: 0 14px;
   }
 
   .walker-dashboard {
-    width: min(calc(100% - 24px), 1200px);
-    padding: 18px 0 42px;
+    width: min(calc(100% - (var(--gutter-mobile) * 2)), 1200px);
+    padding: 20px 0 48px;
   }
 
   .walker-shift-card,
@@ -3305,8 +3352,8 @@ dd {
   .admin-hero,
   .admin-panel,
   .admin-card {
-    border-radius: 24px;
-    padding: 18px;
+    border-radius: var(--radius-blob-a);
+    padding: 22px;
   }
 
   .walker-shift-copy h1 {
@@ -3374,8 +3421,8 @@ dd {
   display: flex;
   flex-direction: column;
   background: var(--white);
-  border: 1px solid var(--line);
-  border-radius: 24px;
+  border: 1px solid rgba(15, 31, 19, 0.08);
+  border-radius: var(--radius-blob-a);
   overflow: hidden;
   margin-top: 24px;
   box-shadow: var(--soft-shadow);
@@ -3562,10 +3609,10 @@ dd {
 }
 
 .chat-message-text {
-  padding: 12px 16px;
-  border-radius: 16px;
+  padding: 14px 18px;
+  border-radius: var(--radius-blob-sm);
   font-size: 0.95rem;
-  line-height: 1.4;
+  line-height: 1.55;
 }
 
 .is-mine .chat-message-text {
@@ -3613,13 +3660,16 @@ dd {
 }
 
 .chat-quick-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-min);
   white-space: nowrap;
-  padding: 6px 12px;
+  padding: 10px 16px;
   border: 1px solid var(--line-strong);
   border-radius: 99px;
   background: var(--white);
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.2s var(--ease);
 }
@@ -3698,14 +3748,14 @@ a.primary-button {
 .menu-whatsapp,
 .footer-whatsapp {
   display: inline-flex;
-  min-height: 44px;
+  min-height: var(--touch-min);
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   color: var(--green);
   font-weight: 800;
-  padding: 0 18px;
+  padding: 0 20px;
   text-decoration: none;
 }
 
@@ -3848,12 +3898,13 @@ html {
   left: 50%;
   z-index: 10000;
   max-width: min(92vw, 460px);
-  padding: 12px 20px;
-  border-radius: 14px;
+  padding: 14px 22px;
+  border-radius: var(--radius-blob-sm);
   background: #015f3d;
   color: #ffffff;
   font-weight: 700;
-  box-shadow: 0 14px 34px rgba(15, 31, 19, 0.22);
+  line-height: 1.5;
+  box-shadow: 0 16px 38px rgba(15, 31, 19, 0.22);
   transform: translateX(-50%);
 }
 
@@ -4018,22 +4069,45 @@ html[data-theme="dark"] select:focus {
 /* En celular, espacio al final para que los botones flotantes no tapen lo último */
 @media (max-width: 760px) {
   #app {
-    padding-bottom: 76px;
+    padding-bottom: 88px;
   }
 
   .a11y-toggle {
-    width: 44px;
-    height: 44px;
+    width: var(--touch-min);
+    height: var(--touch-min);
   }
 
-  /* WhatsApp flotante: más chico y pegado a la esquina, a la altura del de accesibilidad */
+  /* WhatsApp flotante: pegado a la esquina pero con tolerancia de toque de 48px */
   .whatsapp {
-    right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    min-height: 44px;
-    padding: 0 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    min-height: var(--touch-min);
+    padding: 0 18px;
     font-size: 0.92rem;
   }
+}
+
+/* Capa compartida: figuras orgánicas y tolerancia al toque en accesorios flotantes */
+.a11y-panel {
+  border-radius: var(--radius-blob-a);
+  box-shadow: var(--shadow);
+}
+
+.a11y-toggle {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  border-radius: var(--radius-btn);
+}
+
+.chat-conversation-item {
+  min-height: var(--touch-min);
+}
+
+.route-order-list,
+.dog-chip-row,
+.walker-shift-meta,
+.route-stats {
+  gap: var(--touch-gap);
 }
 
 /* Oculto a la vista pero presente (campo trampa para robots, textos para lectores) */

@@ -4,18 +4,18 @@
   display: grid;
   min-height: 100svh;
   place-items: center;
-  padding: 110px 16px 60px;
+  padding: 112px var(--gutter-mobile, 20px) 68px;
 }
 
 .acc-card {
   display: grid;
   width: min(100%, 460px);
-  gap: 14px;
-  padding: 28px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
+  gap: 18px;
+  padding: 30px 26px;
+  border: 1px solid rgba(15, 31, 19, 0.08);
+  border-radius: var(--radius-blob-a, 34px 22px 38px 24px / 24px 36px 22px 32px);
   background: var(--card, #fffdf8);
-  box-shadow: var(--soft-shadow);
+  box-shadow: var(--shadow);
 }
 
 .acc-eyebrow {
@@ -30,49 +30,53 @@
 .acc-card h1 {
   margin: 0;
   font-size: clamp(1.7rem, 5vw, 2.2rem);
-  line-height: 1.1;
+  line-height: 1.15;
 }
 
 .acc-lead,
 .acc-help {
   margin: 0;
   color: var(--text);
+  line-height: 1.58;
 }
 
 .acc-form {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .acc-form label {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   font-weight: 700;
 }
 
 .acc-actions {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .acc-button {
   display: inline-flex;
-  min-height: 50px;
+  min-height: 52px;
   align-items: center;
   justify-content: center;
   border: 1px solid #015f3d;
-  border-radius: 14px;
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
   background: #015f3d;
+  box-shadow: 0 12px 26px rgba(1, 95, 61, 0.16);
   color: #ffffff;
   font-weight: 800;
+  padding: 0 20px;
   text-decoration: none;
   cursor: pointer;
 }
 
 .acc-button.is-secondary {
   background: transparent;
+  box-shadow: none;
   color: var(--ink);
-  border-color: var(--line-strong);
+  border-color: rgba(15, 31, 19, 0.14);
 }
 
 .acc-button:disabled {
@@ -92,6 +96,9 @@
 }
 
 .acc-pin summary {
+  display: inline-flex;
+  min-height: var(--touch-min, 48px);
+  align-items: center;
   cursor: pointer;
   font-weight: 700;
 }
@@ -131,15 +138,17 @@ html[data-theme="dark"] .acc-status.is-error {
 
 .acc-alert {
   margin: 0;
-  padding: 12px 14px;
-  border-left: 4px solid #8a5a00;
-  border-radius: 10px;
+  padding: 14px 18px;
+  border: 1px solid rgba(138, 90, 0, 0.22);
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
   background: #fff4d6;
+  box-shadow: 0 8px 20px rgba(138, 90, 0, 0.08);
   color: #3d2a00;
+  line-height: 1.56;
 }
 
 html[data-theme="dark"] .acc-alert {
-  border-left-color: #e6b84f;
+  border-color: rgba(230, 184, 79, 0.28);
   background: #2e2513;
   color: #f6e4b8;
 }
@@ -181,11 +190,11 @@ html[data-theme="dark"] .acc-alert {
 }
 
 .acc-ver {
-  min-width: 76px;
-  min-height: 44px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
+  min-width: 78px;
+  min-height: var(--touch-min, 48px);
+  padding: 0 14px;
+  border: 1px solid rgba(15, 31, 19, 0.14);
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
   background: transparent;
   color: var(--ink);
   font: inherit;
@@ -206,7 +215,7 @@ html[data-theme="dark"] .acc-alert {
 .acc-foot .acc-back {
   display: flex;
   width: 100%;
-  min-height: 44px;
-  padding: 0 16px;
+  min-height: var(--touch-min, 48px);
+  padding: 0 18px;
   font-size: 1rem;
 }
