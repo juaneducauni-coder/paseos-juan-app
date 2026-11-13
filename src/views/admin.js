@@ -1,11 +1,15 @@
-// Vista del rol Admin (Juan Buitrago, fundador).
+// Vista del rol Admin (Juan Buitrago, fundador). Celular primero: pocas letras, botones grandes,
+// barra fija abajo (Inicio · Equipo · Plata · Más) y lo importante arriba (un próximo paso,
+// hasta 3 prioridades y "Hoy en números").
 // Datos fijos: src/data/realData.js (BASE RUTAS, precios). Datos del día: servidor compartido
-// (src/api/client.js): paseos, incidentes, checklists, pedidos, rutas, plantillas y avisos.
+// (src/api/client.js): paseos, incidentes, checklists, pedidos, rutas, plantillas, avisos y fotos.
 // Solo admin: pagos (registro de apoyo, con su comprobante) y resumen de clientes. Usuarios: /api/usuarios.
 // Archivos recibidos (carnets, comprobantes, documentos): colección "archivos" (admin y coordinador;
 // los comprobantes de pago los abre solo el admin). Se suben con archivos.subir: sin señal no se encolan.
+// Fotos de los perros: colección "fotos" (fotosPerros.de / fotosPerros.subir), necesitan señal.
 // Lo que no está confirmado se rotula como "Pendiente de confirmar".
-// Las marcas de "hecho" de las prioridades se guardan solo en este dispositivo.
+// Las marcas de "hecho" de las prioridades, la pestaña elegida y las secciones abiertas se guardan
+// solo en este dispositivo.
 import {
   PENDIENTE,
   DATA_UPDATED,
@@ -26,73 +30,136 @@ import {
 } from "../data/realData.js";
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, registros, usuarios, archivos, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS } from "../api/client.js";
+import { session, registros, usuarios, archivos, fotosPerros, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS } from "../api/client.js";
 
 const DONE_KEY = "paseosJuanAdmin_prioridadesHechas";
-const OPEN_KEY = "paseosJuanAdmin_seccionesAbiertas";
+const FOLD_KEY = "paseosJuanAdmin_plegables";
+const TAB_KEY = "paseosJuanAdmin_pestana";
 const TIME_ZONE = "America/Argentina/Buenos_Aires";
 const SIZES = ["Pequeño", "Mediano", "Grande"];
 const SHIFT_MORNING = SHIFTS.manana.label;
 const SHIFT_AFTERNOON = SHIFTS.tarde.label;
-const LIVE_COLS = ["paseos", "incidentes", "checklists", "pedidos", "rutas", "plantillas", "avisos"];
+const LIVE_COLS = ["paseos", "incidentes", "checklists", "pedidos", "rutas", "plantillas", "avisos", "fotos"];
 // Solo admin: registro de apoyo de pagos y clientes (para el resumen por barrio, sin teléfonos),
 // y los archivos recibidos (el admin es el único que abre los comprobantes de pago).
 const ADMIN_COLS = ["pagos", "clientes", "archivos"];
 // Un perro está atrasado si pasaron más de estos minutos desde la hora prevista y no se retiró.
 const LATE_MINUTES = 10;
 const PAGO_MEDIOS = ["Efectivo", "Transferencia", "Naranja X"];
+const PAGO_CONCEPTOS = ["Plan 1", "Plan 2", "Plan 3", "Paseo suelto"];
 const LIBRO = "Libro contable del Sistema de Gestión";
 // Tipos de archivo del servidor (api/_lib/archivos.js), con su etiqueta y color.
 const ARCHIVO_TIPOS = {
-  "carnet de vacunas": { label: "Carnet de vacunas", tone: "ok" },
-  "comprobante de pago": { label: "Comprobante de pago", tone: "info" },
-  documento: { label: "Documento", tone: "neutral" },
-  foto: { label: "Foto", tone: "neutral" },
+  "carnet de vacunas": { label: "Carnet", tone: "green" },
+  "comprobante de pago": { label: "Comprobante", tone: "blue" },
+  documento: { label: "Documento", tone: "gray" },
+  foto: { label: "Foto", tone: "gray" },
 };
 // Lo mismo que acepta prepararArchivo() en src/api/client.js.
 const ARCHIVO_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf";
 const ARCHIVO_MIME = /^(image\/(jpeg|png|webp)|application\/pdf)$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
-// Cuántos archivos se muestran en "Archivos recibidos" (los más nuevos primero).
 const ARCHIVOS_SHOWN = 20;
+const PAGOS_SHORT = 8;
+const UNDO_MS = 5000;
+
+const TABS = [
+  { id: "inicio", label: "Inicio", icon: "home" },
+  { id: "equipo", label: "Equipo", icon: "users" },
+  { id: "plata", label: "Plata", icon: "wallet" },
+  { id: "mas", label: "Más", icon: "grid" },
+];
+
+// Pantallas del menú "Más".
+const MAS_VIEWS = {
+  fotos: { title: "Fotos de perros", icon: "camera" },
+  carga: { title: "Carga semanal", icon: "chart" },
+  planes: { title: "Planes y precios", icon: "creditCard" },
+  archivos: { title: "Archivos", icon: "fileUp" },
+  datos: { title: "Datos a revisar", icon: "clipboardCheck" },
+  clientes: { title: "Clientes por barrio", icon: "mapPin" },
+  indicadores: { title: "Indicadores", icon: "activity" },
+};
+
+// A qué pestaña (y pantalla de "Más") lleva cada destino de los botones "Ver".
+const TARGETS = {
+  "adm-usuarios": ["equipo"],
+  "adm-pagos": ["plata"],
+  "adm-finanzas": ["plata"],
+  "adm-fotos": ["mas", "fotos"],
+  "adm-carga": ["mas", "carga"],
+  "adm-precios": ["mas", "planes"],
+  "adm-archivos": ["mas", "archivos"],
+  "adm-datos": ["mas", "datos"],
+  "adm-clientes": ["mas", "clientes"],
+  "adm-indicadores": ["mas", "indicadores"],
+};
 
 // Último mensaje de estado (se escribe en la región aria-live después de cada render).
 let pendingStatus = "";
+let undoTimer = null;
 
 // Estado en memoria de la página (no se guarda en el dispositivo: puede tener un PIN recién creado).
 const ui = {
+  tab: readTab().tab,
+  mas: readTab().mas,
+  sheet: null, // "pago" | "crear"
+  sheetReturn: "", // selector del botón que abrió la hoja (para volver el foco)
+  sheetEnter: false,
   users: null, // lista de /api/usuarios (sin PIN)
   usersLoading: false,
   usersError: "",
-  showCreate: false,
+  roleFor: null, // usuario con los botones de rol abiertos
   resetFor: null, // usuario con el formulario de PIN abierto
   confirmOff: null, // usuario esperando confirmación para desactivar
   credential: null, // { tipo, usuario, nombre, pin } — se muestra una sola vez
   busy: false,
-  openDogs: new Set(), // listas de perros abiertas en "El día en vivo"
   liveDay: null,
   liveError: "",
   adminLoaded: false,
   adminError: "",
   pagosMes: null, // "AAAA-MM" o "todos"; null = mes actual
-  archivosTipo: "todos", // filtro de "Archivos recibidos"
-  savingPago: false, // se está subiendo el comprobante o guardando el pago
+  pagosTodos: false, // lista larga de pagos
+  archivosTipo: "todos",
+  fotosFiltro: "faltan",
+  fotosSubiendo: new Set(),
+  savingPago: false,
   lateSignature: "",
-  msgs: { users: null, live: null, pagos: null, archivos: null },
+  navBadges: {},
+  undo: null, // { text, run }
+  msgs: { users: null, live: null, pagos: null, archivos: null, fotos: null },
 };
 
 // Lo que se va escribiendo en los formularios, para no perderlo si la página se vuelve a dibujar.
-const emptyPago = () => ({ fecha: hoyAR(), concepto: "", monto: "", medio: "", pasadoAlLibro: false });
+const emptyPago = () => ({ fecha: hoyAR(), concepto: "", monto: "", medioSel: "", medioOtro: "", pasadoAlLibro: false });
+const emptyCrear = () => ({ nombre: "", usuario: "", usuarioTocado: false, rol: "paseador", pin: "" });
 // pagoArchivo: el comprobante elegido (File) se guarda acá porque el <input type="file"> se vacía al
 // redibujar. pagoSubido: si el comprobante ya subió pero el pago no se pudo guardar, no se sube dos veces.
 const drafts = {
-  crear: { nombre: "", usuario: "", rol: "paseador", pin: "" },
+  crear: emptyCrear(),
   reset: { pin: "" },
-  roles: {},
   pago: emptyPago(),
   pagoArchivo: null,
   pagoSubido: null,
 };
+
+/* ---------- Íconos que no están en el set compartido ---------- */
+
+const LOCAL_ICONS = {
+  grid: `<rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" />`,
+  refresh: `<path d="M20 11a8 8 0 0 0-14.7-4.3L4 8" /><path d="M4 4v4h4" /><path d="M4 13a8 8 0 0 0 14.7 4.3L20 16" /><path d="M20 20v-4h-4" />`,
+  check: `<path d="m5 12.5 4.5 4.5L19 7.5" />`,
+  arrowLeft: `<path d="M19 12H5" /><path d="m11 6-6 6 6 6" />`,
+  key: `<circle cx="8" cy="15" r="4" /><path d="m11 12 9-9" /><path d="m16 7 3 3" />`,
+  undo: `<path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" />`,
+  off: `<circle cx="12" cy="12" r="9" /><path d="m6 6 12 12" />`,
+  wifiOff: `<path d="M3 3l18 18" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M5 12.5a10 10 0 0 1 4.2-2.4" /><path d="M14.8 10.1A10 10 0 0 1 19 12.5" /><path d="M2 8.8a15 15 0 0 1 4.3-2.6" /><path d="M10.7 5.1A15 15 0 0 1 22 8.8" /><path d="M12 20h.01" />`,
+};
+
+function ico(name, className = "adm-icon-sm") {
+  if (!LOCAL_ICONS[name]) return icon(name, className);
+  return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${LOCAL_ICONS[name]}</svg>`;
+}
 
 /* ---------- Utilidades ---------- */
 
@@ -139,8 +206,13 @@ function todayInfo() {
   return { dayName, date: `${get("day")}/${get("month")}/${get("year")}` };
 }
 
-function readDone() {
-  return getStoredArray(DONE_KEY);
+function readJsonKey(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function writeStored(key, value) {
@@ -151,8 +223,30 @@ function writeStored(key, value) {
   }
 }
 
-function openSections() {
-  return new Set(getStoredArray(OPEN_KEY));
+function readDone() {
+  return getStoredArray(DONE_KEY);
+}
+
+function readTab() {
+  const stored = readJsonKey(TAB_KEY, {});
+  const tab = TABS.some((item) => item.id === stored?.tab) ? stored.tab : "inicio";
+  const mas = tab === "mas" && MAS_VIEWS[stored?.mas] ? stored.mas : null;
+  return { tab, mas };
+}
+
+function storeTab() {
+  writeStored(TAB_KEY, { tab: ui.tab, mas: ui.mas });
+}
+
+// Plegables: si el usuario lo abrió o cerró, se respeta; si no, vale lo que diga la página.
+function foldOpen(key, byDefault = false) {
+  const stored = readJsonKey(FOLD_KEY, {});
+  return typeof stored?.[key] === "boolean" ? stored[key] : byDefault;
+}
+
+function rememberFold(key, open) {
+  const stored = readJsonKey(FOLD_KEY, {});
+  writeStored(FOLD_KEY, { ...(stored && typeof stored === "object" ? stored : {}), [key]: open });
 }
 
 function timeAR(iso) {
@@ -196,16 +290,80 @@ function firstName(nombre) {
   return String(nombre || "").trim().split(/\s+/)[0] || "";
 }
 
+function initial(nombre) {
+  return (String(nombre || "").trim().charAt(0) || "?").toUpperCase();
+}
+
 function isAdminPage() {
   return /^\/(dashboard\/)?admin\/?$/.test(window.location.pathname);
+}
+
+// "?" que se despliega: la explicación larga queda guardada acá, no a la vista.
+function Help(text, label = "Más info") {
+  return `
+    <details class="adm-help">
+      <summary aria-label="${esc(label)}"><span aria-hidden="true">?</span></summary>
+      <div class="adm-help-body">${text}</div>
+    </details>
+  `;
+}
+
+/* ---------- Perros, fotos y seguridad ---------- */
+
+function dogById(perroId, nombre) {
+  return REAL_DOGS.find((dog) => dog.id === perroId)
+    || (nombre ? REAL_DOGS.find((dog) => normText(dog.name) === normText(nombre)) : null)
+    || null;
+}
+
+// Chips de seguridad: bozal (rojo) y "no juntar" (amarillo), siempre con texto.
+function SafetyChips(dog) {
+  if (!dog) return "";
+  const bozal = dog.safety.some((note) => /bozal/i.test(note));
+  const noJuntar = (dog.incompatibleWith || []).length > 0 || dog.safety.some((note) => /no juntar/i.test(note));
+  if (!bozal && !noJuntar) return "";
+  const noJuntarText = (dog.incompatibleWith || []).length ? `No juntar con ${listJoin(dog.incompatibleWith)}` : "No juntar";
+  return `
+    <span class="adm-chips">
+      ${bozal ? `<span class="adm-chip adm-chip--red">${ico("alertTriangle", "adm-icon-xs")} Bozal</span>` : ""}
+      ${noJuntar ? `<span class="adm-chip adm-chip--yellow" title="${esc(noJuntarText)}">${ico("x", "adm-icon-xs")} No juntar<span class="adm-sr-only">: ${esc(noJuntarText)}</span></span>` : ""}
+    </span>
+  `;
+}
+
+// Miniatura cuadrada redondeada o círculo con la inicial.
+function DogAvatar(perroId, nombre, size = "md") {
+  const src = fotosPerros.de(perroId);
+  if (src) return `<img class="adm-avatar adm-avatar--${size}" src="${esc(src)}" alt="" loading="lazy" />`;
+  return `<span class="adm-avatar adm-avatar--${size} adm-avatar--empty" aria-hidden="true">${esc(initial(nombre))}</span>`;
+}
+
+function fotoDe(perroId) {
+  if (!perroId) return null;
+  return registros.cached("fotos").find((foto) => foto.id === perroId || foto.perroId === perroId) || null;
+}
+
+// Botón "Foto" (abre la cámara). Necesita señal: lo dice en una línea arriba de la lista.
+function FotoButton(perroId, nombre, { compact = false, change = false } = {}) {
+  if (!perroId) return "";
+  const busy = ui.fotosSubiendo.has(perroId);
+  // Sin señal la foto no se puede subir: el botón se apaga en vez de abrir la cámara para nada.
+  const offline = isOffline();
+  const label = busy ? "Subiendo…" : offline ? "Sin señal" : change ? "Cambiar" : "Foto";
+  return `
+    <label class="adm-btn ${change ? "adm-btn--ghost" : "adm-btn--soft"} ${compact ? "adm-btn--icon" : "adm-btn--sm"} adm-file-button ${busy ? "is-busy" : ""} ${offline && !busy ? "is-off" : ""}" data-adm-foto-label="${esc(perroId)}">
+      ${ico(offline && !busy ? "wifiOff" : "camera")}<span class="${compact ? "adm-sr-only" : ""}">${label}${compact ? ` de ${esc(nombre)}` : ""}</span>
+      <input class="adm-file-input" type="file" accept="image/*" capture="environment" data-adm-foto="${esc(perroId)}" data-adm-foto-nombre="${esc(nombre)}" ${busy || offline ? "disabled" : ""} aria-label="${offline && !busy ? "Sin señal, no se puede subir la foto" : change ? "Cambiar la foto" : "Sacar foto"} de ${esc(nombre)}" />
+    </label>
+  `;
 }
 
 /* ---------- El día en vivo (datos compartidos) ---------- */
 
 function liveOpts(col, hoy) {
   // Pedidos nuevos y avisos vigentes pueden ser de días anteriores; las plantillas no tienen fecha
-  // (se repiten cada semana); pagos y clientes se miran completos.
-  return ["pedidos", "plantillas", "avisos", ...ADMIN_COLS].includes(col) ? {} : { desde: hoy };
+  // (se repiten cada semana); fotos, pagos y clientes se miran completos.
+  return ["pedidos", "plantillas", "avisos", "fotos", ...ADMIN_COLS].includes(col) ? {} : { desde: hoy };
 }
 
 function shiftOf(record) {
@@ -237,7 +395,7 @@ function toMinutes(hhmm) {
 const MIDDAY = 13 * 60 + 30;
 
 function normText(value) {
-  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
 // Ruta efectiva de hoy: el cambio del día (rutas) manda sobre la plantilla semanal. Si el servidor
@@ -339,7 +497,10 @@ function liveData() {
     .filter((archivo) => archivo.tipo === "carnet de vacunas" && archivo.creadoPor === "web"
       && Date.now() - Date.parse(archivo.creadoEn || "") < DAY_MS)
     .sort(byNewest);
-  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos, carnetsWeb };
+  // Hoy en números: perros que salen según la ruta de hoy, entregados, atrasados e incidentes.
+  const perrosHoy = compliance.reduce((sum, item) => sum + item.stops.length - item.noSale, 0);
+  const entregados = paseos.filter((paseo) => paseo.estado === "entregado").length;
+  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos, carnetsWeb, perrosHoy, entregados };
 }
 
 function lateSignature(live) {
@@ -363,8 +524,8 @@ function startLive() {
   });
 }
 
-// Pagos, clientes y archivos (solo admin). Los errores de pagos y clientes se muestran en la
-// sección de pagos; los de archivos, en "Archivos recibidos".
+// Pagos, clientes y archivos (solo admin). Los errores de pagos y clientes se muestran en Plata;
+// los de archivos, en "Archivos".
 async function refreshAdminData() {
   const hoy = hoyAR();
   const results = await Promise.allSettled(ADMIN_COLS.map((col) => registros.list(col, liveOpts(col, hoy))));
@@ -376,7 +537,7 @@ async function refreshAdminData() {
   const archivosError = errorsOf(["archivos"]);
   ui.adminError = [pagosError, archivosError].filter(Boolean).join(" ");
   if (pagosError) setMsg("pagos", `No se pudieron traer pagos o clientes: ${pagosError}`, true);
-  if (archivosError) setMsg("archivos", `No se pudo traer la lista de archivos: ${archivosError}`, true);
+  if (archivosError) setMsg("archivos", `No se pudo traer la lista: ${archivosError}`, true);
   if (before !== ui.adminError) rerender();
 }
 
@@ -386,9 +547,9 @@ async function refreshLive(manual) {
   const errors = [...new Set(results.filter((r) => r.status === "rejected").map((r) => r.reason?.message || "No se pudieron traer los datos."))];
   const before = ui.liveError;
   ui.liveError = errors.join(" ");
-  if (ui.liveError) setMsg("live", `No se pudieron actualizar los datos del día: ${ui.liveError}`, true);
-  else if (manual) setMsg("live", navigator.onLine === false ? "Sin conexión: se muestra lo último que llegó." : "Datos del día actualizados.");
-  else if (before) setMsg("live", "Datos del día actualizados.");
+  if (ui.liveError) setMsg("live", `No se pudo actualizar: ${ui.liveError}`, true);
+  else if (manual) setMsg("live", isOffline() ? "Sin señal: ves lo último que llegó." : "Actualizado.");
+  else if (before) setMsg("live", "Actualizado.");
   if (manual || before !== ui.liveError) rerender();
 }
 
@@ -406,6 +567,19 @@ const ROLE_DATA = {
   ayudante: "acompaña al paseador en su ruta: marca pasos y reporta incidentes y observaciones. Ve rutas y avisos. Sin datos de clientes ni plata.",
   marketing: "pedidos (incluye los del formulario web) y avisos por barrio para comunicar. Nada de la operación ni plata.",
 };
+// Botones de rol: el más usado primero, con ícono, nombre corto y una línea.
+const ROLE_CHOICES = [
+  { rol: "paseador", short: "Paseador", icon: "pawPrint", line: "Hace su ruta y marca cada paso." },
+  { rol: "ayudante", short: "Ayudante", icon: "userCheck", line: "Acompaña al paseador. Sin datos de clientes." },
+  { rol: "supervisor", short: "Supervisor", icon: "radar", line: "Controla los paseos del momento. No ve plata." },
+  { rol: "coordinador", short: "Coordinador", icon: "route", line: "Rutas, horarios, clientes y avisos. No ve plata." },
+  { rol: "marketing", short: "Marketing", icon: "message", line: "Pedidos y avisos. Nada de plata." },
+  { rol: "admin", short: "Admin", icon: "shieldCheck", line: "Todo, incluida la plata." },
+].filter((choice) => ROLE_LABELS[choice.rol]);
+
+function roleShort(rol) {
+  return ROLE_CHOICES.find((choice) => choice.rol === rol)?.short || ROLE_LABELS[rol] || rol;
+}
 
 function roleLine(rol) {
   const pages = (ROLE_PAGES[rol] || []).filter((page) => PAGE_LABELS[page])
@@ -434,6 +608,27 @@ function loadUsers() {
 // Mismas reglas que el servidor (api/_lib/auth.js), para avisar antes de enviar.
 function normalizeUsuario(value) {
   return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+// Usuario sugerido a partir del nombre: el primer nombre sin tildes; si ya existe, se suma el apellido
+// o un número.
+function suggestUsuario(nombre) {
+  const words = normalizeUsuario(nombre).split(/\s+/).map((word) => word.replace(/[^a-z0-9]/g, "")).filter(Boolean);
+  if (!words.length) return "";
+  const taken = new Set((ui.users || []).map((user) => user.usuario));
+  let base = words[0];
+  if (!/^[a-z]/.test(base)) base = `u${base}`;
+  base = base.slice(0, 24);
+  if (base.length < 3) base = (base + (words[1] || "") + "pj").slice(0, 24);
+  if (!taken.has(base)) return base;
+  if (words[1]) {
+    const withLast = `${base}.${words[1]}`.slice(0, 31);
+    if (!taken.has(withLast)) return withLast;
+  }
+  for (let n = 2; n < 100; n += 1) {
+    if (!taken.has(`${base}${n}`)) return `${base}${n}`;
+  }
+  return base;
 }
 
 function pinProblem(pin) {
@@ -481,8 +676,8 @@ function flushMsgs() {
 }
 
 // Cómo volver a encontrar el elemento con foco después de redibujar: por id o, si no tiene,
-// por su atributo data-adm-* (y su posición entre los iguales). Los títulos de las secciones
-// plegables se buscan por la sección.
+// por su atributo data-adm-* (y su posición entre los iguales). Los títulos de los plegables
+// se buscan por el plegable.
 function focusKey(el) {
   if (!el || el === document.body || !el.closest?.(".adm-shell")) return null;
   if (el.id) return { selector: `#${CSS.escape(el.id)}`, index: 0 };
@@ -498,11 +693,13 @@ function focusKey(el) {
   return { selector, index: Math.max(0, [...document.querySelectorAll(selector)].indexOf(el)) };
 }
 
-// Vuelve a dibujar sin perder el foco ni lo escrito (los borradores viven en "drafts").
+// Vuelve a dibujar sin perder el foco, lo escrito (los borradores viven en "drafts") ni el
+// lugar dentro de la hoja abierta.
 function rerender() {
   if (!isAdminPage() || session.user()?.rol !== "admin") return;
   const active = document.activeElement;
   const key = focusKey(active);
+  const sheetScroll = document.querySelector(".adm-sheet-body")?.scrollTop || 0;
   let selection = null;
   try {
     if (active && typeof active.selectionStart === "number") selection = [active.selectionStart, active.selectionEnd];
@@ -510,6 +707,8 @@ function rerender() {
     selection = null;
   }
   render();
+  const sheetBody = document.querySelector(".adm-sheet-body");
+  if (sheetBody && sheetScroll) sheetBody.scrollTop = sheetScroll;
   if (!key) return;
   const matches = document.querySelectorAll(key.selector);
   const again = matches[key.index] || matches[0];
@@ -596,8 +795,14 @@ function hasCarnet(pedido, live) {
   return Boolean(pedido.carnet?.id) || live.carnetsWeb.some((archivo) => archivo.pedidoId === pedido.id);
 }
 
+// Nombre de un usuario a partir de la lista de usuarios (si ya llegó).
+function nameOf(usuario) {
+  return ui.users?.find((user) => user.usuario === usuario)?.nombre || usuario || "";
+}
+
 // Hasta 3 prioridades calculadas, en orden: incidente de hoy, atrasos del turno actual,
 // pedidos nuevos (con los carnets que llegaron por la web), cruces de seguridad, datos, evaluación.
+// "short" es lo que se ve en la tarjeta; "title" y "detail" quedan en el "?".
 function buildPriorities(live = liveData()) {
   const { conflicts } = safetyConflicts();
   const statusIssues = REAL_DOGS.filter((dog) => dog.status !== "Activo");
@@ -611,18 +816,22 @@ function buildPriorities(live = liveData()) {
     const count = live.incidentes.length;
     const latest = live.incidentes[0];
     const dogs = [...new Set(live.incidentes.map((item) => item.perroNombre).filter(Boolean))];
-    const who = latest.creadoPorNombre || "quien lo cargó";
+    const mine = Boolean(latest.creadoPor) && latest.creadoPor === currentUser().usuario;
+    const who = latest.creadoPorNombre || nameOf(latest.creadoPor) || "quien lo cargó";
     priorities.push({
       id: `incidentes-${live.hoy}-${count}`,
-      tag: "Incidente de hoy",
-      tone: "danger",
+      tag: "Incidente",
+      tone: "red",
+      short: count === 1 ? `Incidente${dogs.length ? `: ${dogs[0]}` : " hoy"}` : `${count} incidentes hoy`,
       title: count === 1
         ? `Hubo un incidente hoy${dogs.length ? ` con ${dogs[0]}` : ""}`
         : `Hubo ${count} incidentes hoy${dogs.length ? ` (${listJoin(dogs)})` : ""}`,
-      detail: `${count > 1 ? "El último lo cargó" : "Lo cargó"} ${who}${recordTime(latest) ? ` a las ${recordTime(latest)}` : ""}. Riesgo: ${latest.riesgo || PENDIENTE}. Lesiones: ${latest.lesiones || PENDIENTE}.`,
-      action: `Leé el incidente${dogs.length ? ` de ${listJoin(dogs)}` : ""} y hablá con ${who} antes de que termine el día.`,
-      target: "adm-vivo",
-      targetLabel: count === 1 ? "Ver el incidente" : "Ver los incidentes",
+      detail: `${count > 1 ? (mine ? "El último lo cargaste vos" : "El último lo cargó") : (mine ? "Lo cargaste vos" : "Lo cargó")}${mine ? "" : ` ${who}`}${recordTime(latest) ? ` a las ${recordTime(latest)}` : ""}. Riesgo: ${latest.riesgo || PENDIENTE}. Lesiones: ${latest.lesiones || PENDIENTE}.`,
+      action: mine
+        ? `Revisá el incidente${dogs.length ? ` de ${listJoin(dogs)}` : ""} que cargaste.`
+        : `Leé el incidente${dogs.length ? ` de ${listJoin(dogs)}` : ""} y hablá con ${who} hoy.`,
+      target: "adm-incidentes",
+      targetLabel: count === 1 ? "Ver incidente" : "Ver incidentes",
     });
   }
 
@@ -640,22 +849,24 @@ function buildPriorities(live = liveData()) {
       priorities.push({
         id: `atrasos-sin-marcas-${live.hoy}-${turno}`,
         tag: "Atrasos",
-        tone: "warning",
+        tone: "yellow",
+        short: "Nadie marca retiros",
         title: `Nadie marcó retiros hoy: ${plural(count, "perro figura", "perros figuran")} pasados de hora en el turno ${turno}`,
         detail: `Según la ruta de hoy, ${listJoin(names)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""} ya tendrían que estar retirados. En la app no hay ningún paseo marcado hoy.`,
-        action: `Preguntale a ${contact} si el equipo está marcando los retiros en la página del paseador.`,
+        action: `Preguntale a ${contact} si el equipo está marcando los retiros en la app.`,
         target: "adm-cumplimiento",
-        targetLabel: "Ver el cumplimiento",
+        targetLabel: "Ver rutas",
       });
     } else priorities.push({
       id: `atrasos-${live.hoy}-${turno}-${count}`,
       tag: "Atrasos",
-      tone: "warning",
+      tone: "red",
+      short: `${plural(count, "atrasado", "atrasados")} (${turno})`,
       title: `${plural(count, "perro atrasado", "perros atrasados")} en el turno ${turno}`,
       detail: `${listJoin(names)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Pasaron más de ${LATE_MINUTES} minutos de la hora prevista y nadie marcó el retiro.`,
-      action: `Preguntale a ${contact} qué pasa con ${worst.perroNombre} (retiro previsto ${worst.hora}, ruta ${routes.join(" y ")}).`,
+      action: `Preguntale a ${contact} qué pasa con ${worst.perroNombre} (retiro ${worst.hora}, ruta ${routes.join(" y ")}).`,
       target: "adm-cumplimiento",
-      targetLabel: count === 1 ? "Ver el atraso" : "Ver los atrasos",
+      targetLabel: count === 1 ? "Ver atraso" : "Ver atrasos",
     });
   }
 
@@ -679,28 +890,30 @@ function buildPriorities(live = liveData()) {
       priorities.push({
         id: `pedidos-${live.pedidosNuevos[0].id}-${count}-${carnetCount}`,
         tag: "Pedidos",
-        tone: "info",
+        tone: "blue",
+        short: `${plural(count, "pedido nuevo", "pedidos nuevos")}${conCarnet.length ? " · con carnet" : ""}`,
         title: `${plural(count, "pedido nuevo", "pedidos nuevos")} sin responder${conCarnet.length ? ` · ${conCarnet.length === count && count === 1 ? "trae carnet de vacunas" : `${conCarnet.length} con carnet`}` : ""}`,
         detail: `${listJoin(titles)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Llegan del formulario de la web o los carga el equipo.${sueltosText ? ` ${sueltosText}` : ""}`,
         action: count === 1
           ? `Respondé el pedido “${oldest}”${hasCarnet(oldestPedido, live) ? " y mirá el carnet que mandó" : ""}.`
-          : `Respondé los ${count} pedidos nuevos, empezando por el más viejo: “${oldest}”${hasCarnet(oldestPedido, live) ? " (trae carnet)" : ""}.`,
+          : `Respondé los ${count} pedidos nuevos, empezando por “${oldest}”${hasCarnet(oldestPedido, live) ? " (trae carnet)" : ""}.`,
         target: "adm-pedidos",
-        targetLabel: count === 1 ? "Ver el pedido" : "Ver los pedidos",
+        targetLabel: count === 1 ? "Ver pedido" : "Ver pedidos",
       });
     } else {
       const first = carnetsSueltos[0];
       priorities.push({
         id: `carnets-web-${first.id}-${carnetsSueltos.length}`,
         tag: "Pedidos",
-        tone: "info",
+        tone: "blue",
+        short: carnetsSueltos.length === 1 ? `Carnet de ${first.perroNombre || "un perro"}` : `${carnetsSueltos.length} carnets nuevos`,
         title: carnetsSueltos.length === 1
           ? `Pedido nuevo con carnet: llegó el carnet de ${first.perroNombre || "un perro"} por la web`
           : `Pedidos nuevos con carnet: llegaron ${carnetsSueltos.length} carnets por la web`,
         detail: sueltosText,
-        action: `Abrí el carnet de ${first.perroNombre || "ese perro"} en “Archivos recibidos” y sumalo a su ficha.`,
+        action: `Abrí el carnet de ${first.perroNombre || "ese perro"} en “Archivos” y sumalo a su ficha.`,
         target: "adm-archivos",
-        targetLabel: carnetsSueltos.length === 1 ? "Ver el carnet" : "Ver los carnets",
+        targetLabel: carnetsSueltos.length === 1 ? "Ver carnet" : "Ver carnets",
       });
     }
   }
@@ -715,12 +928,13 @@ function buildPriorities(live = liveData()) {
     priorities.push({
       id: "seguridad-cruces",
       tag: "Seguridad",
-      tone: "danger",
+      tone: "red",
+      short: `${center}: no juntar`,
       title: `${center} comparte turno con perros marcados “no juntar”`,
       detail: `Según BASE RUTAS, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (ruta ${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
       action: `Confirmá con Sebastián cómo se separa a ${center} de ${listJoin(others)} en la ruta ${routes}.`,
       target: "adm-seguridad",
-      targetLabel: "Ver los cruces",
+      targetLabel: "Ver cruces",
     });
   }
 
@@ -729,7 +943,8 @@ function buildPriorities(live = liveData()) {
     priorities.push({
       id: "datos-a-revisar",
       tag: "Datos",
-      tone: "warning",
+      tone: "yellow",
+      short: `${plural(reviews.length, "perro", "perros")} a revisar`,
       title: `${plural(reviews.length, "perro tiene", "perros tienen")} datos a revisar`,
       detail: statusIssues.length
         ? `Primero el estado de ${listJoin(names)}: ${statusIssues.length === 1 ? "no está" : "no están"} claros entre la tabla de precios y BASE RUTAS. Los demás: plan que no coincide con los días, nombres distintos o duración.`
@@ -738,7 +953,7 @@ function buildPriorities(live = liveData()) {
         ? `Decidí el estado de ${listJoin(names)} y corregilo en la planilla.`
         : "Revisá la lista de datos a confirmar y corregí la planilla.",
       target: "adm-datos",
-      targetLabel: "Ver la lista",
+      targetLabel: "Ver lista",
     });
   }
 
@@ -747,12 +962,13 @@ function buildPriorities(live = liveData()) {
     priorities.push({
       id: "evaluaciones",
       tag: "Evaluación",
-      tone: "info",
+      tone: "blue",
+      short: `${unevaluated.length} sin evaluar`,
       title: `${unevaluated.length} de ${active.length} perros en ruta siguen SIN EVALUAR`,
       detail: `Registro maestro del 14/08/2026. Conviene empezar por los que tienen bozal o “no juntar”: ${listJoin(first.map((dog) => dog.name))}.`,
       action: `Agendá la evaluación de ${listJoin(first.map((dog) => dog.name))}.`,
       target: "adm-seguridad",
-      targetLabel: "Ver indicaciones de seguridad",
+      targetLabel: "Ver perros",
     });
   }
 
@@ -778,172 +994,280 @@ function theoreticalBilling() {
   return { included, excluded, excludedPlans, byPlan, total };
 }
 
-/* ---------- Componentes ---------- */
+/* ---------- Armazón: encabezado, barra de abajo y "Deshacer" ---------- */
 
 export function adminShell(content) {
   return `
-    <div class="adm-shell">
+    <div class="adm-shell ${ui.sheet ? "has-sheet" : ""}">
       ${AdminHeader()}
       ${content}
+      ${BottomNav()}
+      ${UndoBar()}
+      <p class="adm-sr-only" role="status" aria-live="polite" data-adm-status></p>
     </div>
   `;
 }
 
 function AdminHeader() {
+  const pending = registros.pendingCount();
+  const offline = isOffline();
   return `
     <header class="adm-header">
       <a class="adm-brand" href="/admin" data-link aria-label="Paseos Juan, panel del admin">
         <span class="adm-logo"><img src="/paseos-juan-logo-white.svg" alt="" /></span>
         <span class="adm-brand-text">
           <strong>Paseos Juan</strong>
-          <small>Panel del admin</small>
+          <small>Admin · ${esc(firstName(currentUser().nombre) || "Juan")}</small>
         </span>
       </a>
       <div class="adm-header-actions">
-        <span class="adm-user">${icon("lock", "adm-icon-sm")} ${esc(currentUser().nombre)} · ${esc(ROLE_LABELS[currentUser().rol] || currentUser().rol)}</span>
-        <button class="adm-button adm-button--ghost" type="button" data-adm-a11y>
-          ${icon("eye", "adm-icon-sm")}
-          <span>Accesibilidad</span>
-        </button>
-        <button class="adm-button adm-button--ghost" type="button" data-admin-logout>
-          ${icon("logOut", "adm-icon-sm")}
-          <span>Salir</span>
-        </button>
+        ${pending ? `<span class="adm-chip adm-chip--yellow" title="Se envían solos cuando hay señal">${ico("clock", "adm-icon-xs")} ${pending} sin enviar</span>` : ""}
+        <button class="adm-btn adm-btn--ghost adm-btn--icon" id="adm-refresh" type="button" data-adm-refresh aria-label="Actualizar datos">${ico("refresh")}</button>
+        <button class="adm-btn adm-btn--ghost adm-btn--head" type="button" data-admin-logout>${ico("logOut")}<span>Salir</span></button>
       </div>
     </header>
+    ${offline ? `<p class="adm-offline">${ico("alertCircle")} <span>Sin señal: lo que marques se envía solo. Fotos y archivos necesitan señal.</span></p>` : ""}
   `;
 }
+
+function BottomNav() {
+  const badges = ui.navBadges || {};
+  return `
+    <nav class="adm-nav" aria-label="Secciones del admin">
+      ${TABS.map((tab) => {
+        const current = ui.tab === tab.id;
+        const badge = badges[tab.id];
+        return `
+          <button class="adm-nav-item ${current ? "is-current" : ""}" type="button" data-adm-tab="${tab.id}" ${current ? `aria-current="page"` : ""}>
+            <span class="adm-nav-icon">${ico(tab.icon, "adm-icon")}${badge ? `<span class="adm-nav-badge adm-nav-badge--${badge.tone}">${badge.count}</span>` : ""}</span>
+            <span class="adm-nav-label">${tab.label}</span>
+            ${badge ? `<span class="adm-sr-only">: ${esc(badge.label)}</span>` : ""}
+          </button>
+        `;
+      }).join("")}
+    </nav>
+  `;
+}
+
+function UndoBar() {
+  if (!ui.undo) return "";
+  return `
+    <div class="adm-undo" role="status">
+      <span>${esc(ui.undo.text)}</span>
+      ${ui.undo.run ? `<button class="adm-btn adm-btn--undo" type="button" data-adm-undo>${ico("undo")} Deshacer</button>` : ""}
+    </div>
+  `;
+}
+
+// Muestra un aviso abajo 5 segundos, con "Deshacer" si hay run() para volver atrás.
+function offerUndo(text, run) {
+  clearTimeout(undoTimer);
+  ui.undo = { text, run };
+  undoTimer = setTimeout(() => {
+    ui.undo = null;
+    rerender();
+  }, UNDO_MS);
+}
+
+/* ---------- Página ---------- */
 
 export function adminDashboard() {
   startLive();
   if (ui.users === null && !ui.usersLoading && !ui.usersError) loadUsers();
   const live = liveData();
   ui.lateSignature = lateSignature(live);
-  const priorities = buildPriorities(live);
-  const done = readDone();
-  const open = openSections();
+  const pagos = pagosData();
+  ui.navBadges = {
+    inicio: live.incidentes.length + live.lateNow.length
+      ? { count: live.incidentes.length + live.lateNow.length, tone: "red", label: `${plural(live.incidentes.length, "incidente", "incidentes")} y ${plural(live.lateNow.length, "atrasado", "atrasados")}` }
+      : null,
+    plata: pagos.faltan.length ? { count: pagos.faltan.length, tone: "yellow", label: `${plural(pagos.faltan.length, "pago sin pasar", "pagos sin pasar")} al Libro` } : null,
+  };
   // Los mensajes nuevos se escriben un instante después, para que el lector de pantalla los lea.
   setTimeout(flushMsgs, 60);
 
+  let page;
+  if (ui.tab === "equipo") page = EquipoTab();
+  else if (ui.tab === "plata") page = PlataTab(pagos);
+  else if (ui.tab === "mas") page = MasTab();
+  else page = InicioTab(live);
+
   return `
-    <main class="adm-page" id="adm-main">
-      ${TodayHero(priorities, done, live)}
-      ${LivePanel(live)}
-      ${SafetyPanel()}
-      ${UsersPanel()}
-      <div class="adm-toolbar" role="group" aria-label="Secciones">
-        <p class="adm-toolbar-text">Todo lo demás, ordenado. Tocá un título para abrirlo.</p>
-        <div class="adm-toolbar-actions">
-          <button class="adm-button adm-button--ghost" type="button" data-adm-expand="open">${icon("chevronDown", "adm-icon-sm")} Abrir todo</button>
-          <button class="adm-button adm-button--ghost" type="button" data-adm-expand="close">Cerrar todo</button>
-          <button class="adm-button adm-button--ghost" type="button" data-adm-copy>${icon("copy", "adm-icon-sm")} Copiar resumen</button>
-        </div>
-      </div>
-      <div class="adm-sections">
-        ${ReviewSection(open)}
-        ${ArchivosSection(open)}
-        ${LoadSection(open)}
-        ${ClientesSection(open)}
-        ${PagosSection(open)}
-        ${FactsSection(open)}
-        ${TeamSection(open)}
-        ${PricesSection(open)}
-        ${FinanceSection(open)}
-      </div>
-      ${SourcesFooter()}
-      <p class="adm-sr-only" role="status" aria-live="polite" data-adm-status></p>
+    <main class="adm-page adm-page--${ui.tab}" id="adm-main" tabindex="-1">
+      ${page}
     </main>
+    ${ui.sheet === "pago" ? PagoSheet() : ""}
+    ${ui.sheet === "crear" ? CrearSheet() : ""}
   `;
 }
 
-function TodayHero(priorities, done, live) {
+/* ---------- Inicio ---------- */
+
+function InicioTab(live) {
+  const priorities = buildPriorities(live);
+  const done = readDone();
   const { dayName, date } = todayInfo();
-  const dogs = activeDogs();
-  const morning = dogs.filter((dog) => goesOn(dog, dayName, SHIFT_MORNING)).length;
-  const afternoon = dogs.filter((dog) => goesOn(dog, dayName, SHIFT_AFTERNOON)).length;
-  const next = priorities.find((priority) => !done.includes(priority.id));
-  const todayLine = morning + afternoon
-    ? `Según BASE RUTAS, hoy salen ${plural(morning, "perro", "perros")} a la mañana y ${plural(afternoon, "perro", "perros")} a la tarde.`
-    : "Hoy no hay paseos cargados en BASE RUTAS.";
   const name = firstName(currentUser().nombre);
 
   return `
-    <section class="adm-hero" aria-labelledby="adm-hero-title">
-      <div class="adm-hero-head">
-        <p class="adm-eyebrow">${esc(dayName)} ${esc(date)}</p>
-        <h1 id="adm-hero-title">Hola${name ? `, ${esc(name)}` : ""}</h1>
-        <p class="adm-hero-sub">${todayLine}</p>
-        ${live.incidentes.length ? `
-          <p class="adm-hero-alert">${icon("alertTriangle", "adm-icon-sm")} ${plural(live.incidentes.length, "incidente cargado hoy", "incidentes cargados hoy")}. Está primero en tus prioridades.</p>
-        ` : ""}
+    <div class="adm-hello">
+      <h1 id="adm-title" tabindex="-1">Hola${name ? `, ${esc(name)}` : ""}</h1>
+      <p>${esc(dayName)} ${esc(date)}</p>
+    </div>
+    ${MsgRegion("live")}
+    <div class="adm-home">
+      <div class="adm-home-main">
+        ${NextCard(priorities, done)}
+        ${PriorityList(priorities, done)}
+        ${Numbers(live)}
       </div>
+      <div class="adm-home-side">
+        ${SafetyCard()}
+        ${IncidentsBlock(live)}
+        ${RoutesFold(live)}
+        ${PedidosFold(live)}
+        ${AvisosFold(live)}
+        ${ChecklistsFold(live)}
+      </div>
+    </div>
+  `;
+}
 
-      ${next ? `
-        <div class="adm-next" aria-labelledby="adm-next-title">
-          <p class="adm-next-label" id="adm-next-title">${icon("arrowRight", "adm-icon-sm")} Próximo paso</p>
-          <p class="adm-next-text">${esc(next.action)}</p>
-          <div class="adm-next-actions">
-            <button class="adm-button adm-button--primary" type="button" data-adm-done="${next.id}">
-              ${icon("checkCircle", "adm-icon-sm")} Listo, ya lo hice
-            </button>
-            <button class="adm-button adm-button--ghost" type="button" data-adm-goto="${next.target}">
-              ${esc(next.targetLabel)}
-            </button>
-          </div>
-        </div>
-      ` : `
-        <div class="adm-next adm-next--done">
-          <p class="adm-next-label">${icon("checkCircle", "adm-icon-sm")} Próximo paso</p>
-          <p class="adm-next-text">Marcaste las prioridades como hechas. Abrí “Carga semanal” y revisá el día con más perros.</p>
-          <div class="adm-next-actions">
-            <button class="adm-button adm-button--primary" type="button" data-adm-goto="adm-carga">Ver la carga semanal</button>
-          </div>
-        </div>
-      `}
+function NextCard(priorities, done) {
+  const next = priorities.find((priority) => !done.includes(priority.id));
+  if (!next) {
+    return `
+      <section class="adm-next adm-next--done" aria-labelledby="adm-next-title">
+        <p class="adm-next-label" id="adm-next-title">${ico("checkCircle")} Próximo paso</p>
+        <p class="adm-next-text">Todo hecho. Mirá la carga de la semana.</p>
+        <button class="adm-btn adm-btn--primary adm-btn--block" type="button" data-adm-goto="adm-carga">${ico("chart")} Carga semanal</button>
+      </section>
+    `;
+  }
+  return `
+    <section class="adm-next adm-next--${next.tone}" aria-labelledby="adm-next-title">
+      <p class="adm-next-label" id="adm-next-title">${ico("arrowRight")} Próximo paso</p>
+      <p class="adm-next-text">${esc(next.action)}</p>
+      <div class="adm-next-actions">
+        <button class="adm-btn adm-btn--primary" type="button" data-adm-goto="${next.target}">${esc(next.targetLabel)} ${ico("arrowRight")}</button>
+        <button class="adm-btn adm-btn--soft" type="button" data-adm-done="${esc(next.id)}" data-adm-done-label="${esc(next.short)}" aria-pressed="false" aria-label="Listo: ${esc(next.short)}">${ico("check")} Listo</button>
+      </div>
+    </section>
+  `;
+}
 
-      <h2 class="adm-priorities-title">Tus ${priorities.length} prioridades</h2>
-      <ol class="adm-priorities">
-        ${priorities.map((priority, index) => {
+// El próximo paso ya está arriba con sus botones: acá van las otras prioridades (sin repetirlo).
+function PriorityList(priorities, done) {
+  const next = priorities.find((priority) => !done.includes(priority.id));
+  const rest = priorities.map((priority, index) => ({ priority, index })).filter((item) => item.priority !== next);
+  if (!rest.length) return "";
+  return `
+    <section class="adm-block" aria-labelledby="adm-prio-title">
+      <h2 class="adm-h2" id="adm-prio-title">${next ? "Después" : "Prioridades"}</h2>
+      <ol class="adm-prios">
+        ${rest.map(({ priority, index }) => {
           const isDone = done.includes(priority.id);
           return `
-            <li class="adm-priority adm-priority--${priority.tone} ${isDone ? "is-done" : ""}">
-              <span class="adm-priority-number" aria-hidden="true">${index + 1}</span>
-              <div class="adm-priority-body">
-                <p class="adm-tag adm-tag--${priority.tone}">${priority.tag}${isDone ? " · Hecho" : ""}</p>
-                <h3>${esc(priority.title)}</h3>
-                <p>${esc(priority.detail)}</p>
-                <button class="adm-link-button" type="button" data-adm-done="${priority.id}" aria-pressed="${isDone}">
-                  ${isDone ? "Desmarcar" : "Marcar como hecho"}
+            <li value="${index + 1}" class="adm-prio adm-prio--${priority.tone} ${isDone ? "is-done" : ""}">
+              <div class="adm-prio-head">
+                <span class="adm-prio-num" aria-hidden="true">${index + 1}</span>
+                <div class="adm-prio-text">
+                  <span class="adm-chip adm-chip--${isDone ? "green" : priority.tone}">${esc(priority.tag)}${isDone ? " · Hecho" : ""}</span>
+                  <h3>${esc(priority.short)}</h3>
+                </div>
+                ${Help(`<p><strong>${esc(priority.title)}.</strong> ${esc(priority.detail)}</p>`, `Más info: ${priority.short}`)}
+              </div>
+              <div class="adm-prio-actions">
+                <button class="adm-btn adm-btn--ghost" type="button" data-adm-goto="${priority.target}">${esc(priority.targetLabel)}</button>
+                <button class="adm-btn ${isDone ? "adm-btn--done" : "adm-btn--soft"}" type="button" data-adm-done="${esc(priority.id)}" data-adm-done-label="${esc(priority.short)}" aria-pressed="${isDone}">
+                  ${ico("check")} ${isDone ? "Hecho" : "Listo"}
                 </button>
               </div>
             </li>
           `;
         }).join("")}
       </ol>
-      <p class="adm-note">Las marcas de “hecho” se guardan solo en este dispositivo.</p>
     </section>
   `;
 }
 
-/* ---------- El día en vivo ---------- */
+function Numbers(live) {
+  const items = [
+    { label: "Perros hoy", value: live.perrosHoy, tone: "gray", target: "adm-cumplimiento" },
+    { label: "Entregados", value: live.entregados, tone: live.entregados ? "green" : "gray", target: "adm-cumplimiento" },
+    { label: "Atrasados", value: live.late.length, tone: live.late.length ? "red" : "gray", target: "adm-cumplimiento" },
+    { label: "Incidentes", value: live.incidentes.length, tone: live.incidentes.length ? "red" : "gray", target: "adm-incidentes" },
+  ];
+  return `
+    <section class="adm-block" aria-labelledby="adm-num-title">
+      <div class="adm-h2-row">
+        <h2 class="adm-h2" id="adm-num-title">Hoy en números</h2>
+        ${Help(`<p>Perros hoy: los que salen según la ruta de hoy (sin contar los “no sale”). Entregados: marcados en la app. Atrasado: pasaron más de ${LATE_MINUTES} minutos de la hora prevista y nadie marcó el retiro. Se actualiza solo cada minuto.</p>`, "Qué cuenta cada número")}
+      </div>
+      <div class="adm-nums">
+        ${items.map((item) => `
+          <button class="adm-num adm-num--${item.tone}" type="button" data-adm-goto="${item.target}" data-adm-num="${esc(item.label)}">
+            <strong>${item.value}</strong>
+            <span>${item.label}</span>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+// Seguridad: siempre visible en Inicio. Cruces "no juntar" y perros con bozal, con su foto.
+function SafetyCard() {
+  const { conflicts, missing, notRouted } = safetyConflicts();
+  const dogs = safetyDogs();
+  return `
+    <section class="adm-card adm-safety" id="adm-seguridad" tabindex="-1" aria-labelledby="adm-safety-title">
+      <div class="adm-h2-row">
+        <h2 class="adm-h2" id="adm-safety-title">${ico("alertTriangle")} Seguridad</h2>
+        ${Help(`<p>Fuente: BASE RUTAS (${DATA_UPDATED}). Siempre visible.</p>
+          ${missing.length || notRouted.length ? `<ul>
+            ${missing.map((m) => `<li>${esc(m.dog)} figura “no juntar con ${esc(m.other)}”, pero ${esc(m.other)} no está en el registro: ${PENDIENTE}.</li>`).join("")}
+            ${notRouted.map((n) => `<li>${esc(n.dog)} y ${esc(n.other)}: hoy ${esc(n.idle)} no tiene ruta. Si vuelve, revisá el turno.</li>`).join("")}
+          </ul>` : ""}`, "Más info de seguridad")}
+      </div>
+      ${conflicts.length ? `
+        <ul class="adm-cross-list" aria-label="Perros marcados no juntar que comparten turno">
+          ${conflicts.map((c) => {
+            const reviewNote = [c.a, c.b].filter((name) => /día|lunes|martes|miércoles|jueves|viernes|sábado|contratad/i.test(REAL_DOGS.find((dog) => dog.name === name)?.review || ""));
+            return `
+              <li class="adm-cross">
+                <span class="adm-cross-dogs">
+                  ${DogAvatar(dogById(null, c.a)?.id, c.a, "sm")}<strong>${esc(c.a)}</strong>
+                  <span class="adm-cross-x" aria-label="no juntar con">✕</span>
+                  ${DogAvatar(dogById(null, c.b)?.id, c.b, "sm")}<strong>${esc(c.b)}</strong>
+                </span>
+                <span class="adm-chip adm-chip--yellow">${esc(c.shift)} · ${esc(daysText(c.days))}</span>
+                ${reviewNote.length ? `<span class="adm-chip adm-chip--gray">Días a revisar</span>` : ""}
+              </li>
+            `;
+          }).join("")}
+        </ul>
+      ` : `<p class="adm-empty">Sin cruces “no juntar” en BASE RUTAS.</p>`}
+      <ul class="adm-dog-chips" aria-label="Perros con indicaciones de seguridad">
+        ${dogs.map((dog) => `
+          <li>
+            ${DogAvatar(dog.id, dog.name, "sm")}
+            <span class="adm-dog-chip-name">${esc(dog.name)}</span>
+            ${SafetyChips(dog)}
+          </li>
+        `).join("")}
+      </ul>
+    </section>
+  `;
+}
 
 const ESTADOS = {
-  pendiente: { label: "Por retirar", tone: "neutral" },
-  retirado: { label: "Retirado", tone: "info" },
-  paseando: { label: "Paseando", tone: "info" },
-  entregado: { label: "Entregado", tone: "ok" },
-  "no-sale": { label: "No sale", tone: "warning" },
+  pendiente: { label: "Por retirar", tone: "gray" },
+  retirado: { label: "Retirado", tone: "blue" },
+  paseando: { label: "Paseando", tone: "blue" },
+  entregado: { label: "Entregado", tone: "green" },
+  "no-sale": { label: "No sale", tone: "yellow" },
 };
-
-function plannedToday(shift) {
-  const { dayName } = todayInfo();
-  return activeDogs().filter((dog) => goesOn(dog, dayName, shift)).length;
-}
-
-// Nombre de un usuario a partir de la lista de usuarios (si ya llegó).
-function nameOf(usuario) {
-  return ui.users?.find((user) => user.usuario === usuario)?.nombre || usuario || "";
-}
 
 // "Cargado por Sebastián a las 10:15" (o "Actualizado por …" si lo tocó otra persona).
 function byLine(record, onlyCreated = false) {
@@ -957,52 +1281,26 @@ function byLine(record, onlyCreated = false) {
   return time ? `Cargado a las ${time}` : "";
 }
 
-function ShiftCard(shift) {
-  const info = {
-    manana: { title: "Turno mañana", hours: `${SHIFTS.manana.from} a ${SHIFTS.manana.to}`, planned: plannedToday(SHIFT_MORNING) },
-    tarde: { title: "Turno tarde", hours: `${SHIFTS.tarde.from} a ${SHIFTS.tarde.to}`, planned: plannedToday(SHIFT_AFTERNOON) },
-    otro: { title: "Sin turno indicado", hours: "", planned: null },
-  }[shift.key];
-  if (shift.key === "otro" && !shift.total) return "";
-  const ratio = shift.salen ? shift.entregados / shift.salen : 0;
-  const openKey = `perros-${shift.key}`;
-
+function Fold(key, { title, iconName, count = null, tone = "gray", open = false, id = "" }, body) {
   return `
-    <article class="adm-shift" aria-labelledby="adm-shift-${shift.key}">
-      <h3 id="adm-shift-${shift.key}">${info.title}${info.hours ? ` <span class="adm-th-sub">${info.hours}</span>` : ""}</h3>
-      ${shift.total ? `
-        <p class="adm-shift-big"><strong>${shift.entregados}</strong> de ${plural(shift.salen, "perro entregado", "perros entregados")}</p>
-        <span class="adm-progress" aria-hidden="true"><span style="--v:${ratio.toFixed(3)}"></span></span>
-        <ul class="adm-shift-stats">
-          <li><strong>${shift.retirados}</strong> retirados</li>
-          <li><strong>${shift.paseando}</strong> paseando</li>
-          <li><strong>${shift.pendientes}</strong> por retirar</li>
-          ${shift.noSale ? `<li><strong>${shift.noSale}</strong> no ${shift.noSale === 1 ? "sale" : "salen"}</li>` : ""}
-        </ul>
-        <details class="adm-inner adm-dogs" data-adm-dogs="${openKey}" ${ui.openDogs.has(openKey) ? "open" : ""}>
-          <summary>Ver los ${shift.total} perros</summary>
-          <ul class="adm-dog-list">
-            ${shift.rows.slice().sort((a, b) => String(a.perroNombre || "").localeCompare(String(b.perroNombre || ""))).map((record) => {
-              const estado = ESTADOS[record.estado || "pendiente"] || { label: record.estado, tone: "neutral" };
-              return `
-                <li>
-                  <span class="adm-dog-name">${esc(record.perroNombre || record.perroId || "Perro sin nombre")}</span>
-                  <span class="adm-pill adm-pill--${estado.tone}">${esc(estado.label)}${record.pendiente ? " · sin enviar" : ""}</span>
-                  <span class="adm-dog-meta">${esc(byLine(record))}${record.nota ? ` · Nota: ${esc(record.nota)}` : ""}</span>
-                </li>
-              `;
-            }).join("")}
-          </ul>
-        </details>
-      ` : `<p class="adm-empty">Todavía nadie cargó paseos de este turno. Los marca el paseador en su página al retirar a cada perro.</p>`}
-      ${info.planned !== null ? `<p class="adm-note">Previstos según BASE RUTAS: ${info.planned}.${shift.total ? " “Retirados” incluye a los que ya están paseando o entregados." : ""}</p>` : ""}
-    </article>
+    <details class="adm-fold" ${id ? `id="${id}" tabindex="-1"` : ""} data-adm-fold="${esc(key)}" ${foldOpen(key, open) ? "open" : ""}>
+      <summary>
+        <span class="adm-fold-icon">${ico(iconName)}</span>
+        <span class="adm-fold-title">${title}</span>
+        ${count !== null ? `<span class="adm-count adm-count--${tone}">${count}</span>` : ""}
+        <span class="adm-chevron">${ico("chevronDown")}</span>
+      </summary>
+      <div class="adm-fold-body">${body}</div>
+    </details>
   `;
 }
 
-function IncidentList(incidentes) {
+function IncidentsBlock(live) {
+  const { incidentes } = live;
+  if (!incidentes.length) {
+    return `<p class="adm-ok-line" id="adm-incidentes" tabindex="-1">${ico("checkCircle")} Sin incidentes hoy</p>`;
+  }
   const fields = [
-    ["perroNombre", "Perro"],
     ["lugar", "Lugar"],
     ["antes", "Antes"],
     ["conducta", "Qué pasó"],
@@ -1012,298 +1310,283 @@ function IncidentList(incidentes) {
     ["protocolo", "Protocolo"],
   ];
   return `
-    <div class="adm-incidents" role="region" aria-labelledby="adm-inc-title">
-      <h3 id="adm-inc-title">${icon("alertTriangle", "adm-icon-sm")} ${plural(incidentes.length, "incidente hoy", "incidentes hoy")}</h3>
-      <ul class="adm-incident-list">
-        ${incidentes.map((item) => `
-          <li class="adm-incident">
-            <div class="adm-incident-head">
-              <strong>${esc(item.titulo || item.perroNombre || "Incidente")}</strong>
-              ${recordTime(item) ? `<span class="adm-muted">${esc(recordTime(item))} h</span>` : ""}
-              ${item.riesgo ? `<span class="adm-pill adm-pill--danger">Riesgo: ${esc(item.riesgo)}</span>` : ""}
-            </div>
-            <dl class="adm-incident-facts">
-              ${fields.filter(([key]) => item[key] && !(key === "perroNombre" && !item.titulo)).map(([key, label]) => `
-                <div><dt>${label}</dt><dd>${esc(Array.isArray(item[key]) ? item[key].join(", ") : item[key])}</dd></div>
-              `).join("")}
-            </dl>
-            ${byLine(item, true) ? `<p class="adm-note">${esc(byLine(item, true))}.</p>` : ""}
-          </li>
-        `).join("")}
+    <section class="adm-card adm-card--red" id="adm-incidentes" tabindex="-1" aria-labelledby="adm-inc-title">
+      <h2 class="adm-h2" id="adm-inc-title">${ico("alertTriangle")} ${plural(incidentes.length, "incidente hoy", "incidentes hoy")}</h2>
+      <ul class="adm-list">
+        ${incidentes.map((item) => {
+          const dog = dogById(Array.isArray(item.perros) ? item.perros[0] : null, item.perroNombre);
+          const facts = fields.filter(([key]) => item[key]);
+          return `
+            <li class="adm-row">
+              ${DogAvatar(dog?.id, item.perroNombre || item.titulo || "!", "md")}
+              <div class="adm-row-main">
+                <strong class="adm-row-title">${esc(item.titulo || item.perroNombre || "Incidente")}</strong>
+                <span class="adm-row-meta">${recordTime(item) ? `${esc(recordTime(item))} h · ` : ""}${esc(item.creadoPorNombre || nameOf(item.creadoPor) || "")}</span>
+                <span class="adm-chips">
+                  ${item.riesgo ? `<span class="adm-chip adm-chip--red">Riesgo: ${esc(item.riesgo)}</span>` : ""}
+                  ${item.lesiones ? `<span class="adm-chip adm-chip--yellow">Lesiones: ${esc(item.lesiones)}</span>` : ""}
+                </span>
+                ${facts.length ? `
+                  <details class="adm-more" data-adm-fold-inner="inc-${esc(item.id)}" ${foldOpen(`inc-${item.id}`) ? "open" : ""}>
+                    <summary>Ver detalle</summary>
+                    <dl class="adm-facts-dl">
+                      ${facts.map(([key, label]) => `<div><dt>${label}</dt><dd>${esc(Array.isArray(item[key]) ? item[key].join(", ") : item[key])}</dd></div>`).join("")}
+                    </dl>
+                  </details>
+                ` : ""}
+              </div>
+            </li>
+          `;
+        }).join("")}
       </ul>
-    </div>
+    </section>
   `;
+}
+
+const STOP_STATUS = {
+  atrasado: { label: "Atrasado", tone: "red" },
+  entregado: { label: "Entregado", tone: "green" },
+  "no-sale": { label: "No sale", tone: "yellow" },
+};
+
+const ROUTE_SOURCE = {
+  dia: "Cambio del día",
+  plantilla: "Plantilla",
+  planilla: "BASE RUTAS",
+};
+
+function stopStatus(stop) {
+  if (STOP_STATUS[stop.status]) return STOP_STATUS[stop.status];
+  return ESTADOS[stop.estado] || { label: stop.estado, tone: "gray" };
+}
+
+function StopRow(stop) {
+  const st = stopStatus(stop);
+  const dog = dogById(stop.perroId, stop.perroNombre);
+  const perroId = stop.perroId || dog?.id || "";
+  const extra = [
+    stop.status === "atrasado" ? `${stop.atraso} min tarde` : "",
+    stop.paseo?.horaRetiro ? `retiro ${stop.paseo.horaRetiro}` : "",
+    stop.paseo?.horaEntrega ? `entrega ${stop.paseo.horaEntrega}` : "",
+    stop.nota ? stop.nota : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <li class="adm-row adm-stop ${stop.status === "atrasado" ? "is-late" : ""}">
+      ${DogAvatar(perroId, stop.perroNombre, "md")}
+      <div class="adm-row-main">
+        <span class="adm-stop-top"><strong class="adm-stop-time">${esc(stop.hora || "--:--")}</strong> <strong class="adm-row-title">${esc(stop.perroNombre || "Perro sin nombre")}</strong></span>
+        <span class="adm-chips">
+          <span class="adm-chip adm-chip--${st.tone}">${esc(st.label)}${stop.paseo?.pendiente ? " · sin enviar" : ""}</span>
+          ${SafetyChips(dog)}
+        </span>
+        ${extra ? `<span class="adm-row-meta">${esc(extra)}</span>` : ""}
+      </div>
+      ${perroId && !fotosPerros.de(perroId) ? FotoButton(perroId, stop.perroNombre, { compact: true }) : ""}
+    </li>
+  `;
+}
+
+function RouteCard(item) {
+  const { route, stops } = item;
+  const salen = stops.length - item.noSale;
+  const key = `ruta-${route.ruta}`;
+  const people = [
+    route.paseador ? nameOf(route.paseador) : "Paseador sin asignar",
+    route.ayudante ? `+ ${nameOf(route.ayudante)}` : "",
+    route.supervisor ? `· supervisa ${route.supervisor}` : "",
+  ].filter(Boolean).join(" ");
+  const late = stops.filter((stop) => stop.status === "atrasado");
+  const ratio = salen ? item.entregados / salen : 0;
+  return `
+    <article class="adm-route ${late.length ? "has-late" : ""}" aria-labelledby="adm-route-${esc(route.ruta)}">
+      <div class="adm-route-head">
+        <h3 id="adm-route-${esc(route.ruta)}">${esc(route.ruta || "Ruta")} <span>${esc(route.turno || "")}</span></h3>
+        <span class="adm-chip adm-chip--gray">${esc(ROUTE_SOURCE[route.fuente] || "")}</span>
+      </div>
+      <p class="adm-row-meta">${esc(people)}</p>
+      ${stops.length ? `
+        <p class="adm-route-progress"><strong>${item.entregados}</strong> de ${salen} entregados</p>
+        <span class="adm-progress" aria-hidden="true"><span style="--v:${ratio.toFixed(3)}"></span></span>
+        <span class="adm-chips">
+          ${item.atrasados ? `<span class="adm-chip adm-chip--red">${plural(item.atrasados, "atrasado", "atrasados")}</span>` : `<span class="adm-chip adm-chip--green">Sin atrasos</span>`}
+          ${item.noSale ? `<span class="adm-chip adm-chip--yellow">${item.noSale} no ${item.noSale === 1 ? "sale" : "salen"}</span>` : ""}
+        </span>
+        ${late.length ? `<ul class="adm-list adm-list--tight">${late.map(StopRow).join("")}</ul>` : ""}
+        <details class="adm-more" data-adm-fold-inner="${esc(key)}" ${foldOpen(key) ? "open" : ""}>
+          <summary>Ver las ${stops.length} paradas</summary>
+          <ol class="adm-list adm-list--tight">${stops.map(StopRow).join("")}</ol>
+        </details>
+      ` : `<p class="adm-empty">Sin paradas cargadas.</p>`}
+    </article>
+  `;
+}
+
+function RoutesFold(live) {
+  const { compliance, effective, late } = live;
+  const shiftLine = (key, label) => {
+    const shift = live.shifts.find((item) => item.key === key);
+    if (!shift?.total) return "";
+    return `<span class="adm-chip adm-chip--blue">${label}: ${shift.retirados} retirados · ${shift.paseando} paseando · ${shift.pendientes} por retirar</span>`;
+  };
+  const shifts = [shiftLine("manana", "Mañana"), shiftLine("tarde", "Tarde"), shiftLine("otro", "Sin turno")].filter(Boolean).join("");
+  return Fold("rutas", {
+    title: "Rutas de hoy",
+    iconName: "route",
+    count: late.length ? `${late.length} tarde` : compliance.length,
+    tone: late.length ? "red" : "gray",
+    open: late.length > 0,
+    id: "adm-cumplimiento",
+  }, `
+    ${effective.fromSheet ? `<div class="adm-warn-line">${ico("alertCircle")} <span>Sin plantilla en la app: horarios de BASE RUTAS.</span> ${Help(`<p>Todavía no hay plantilla de hoy cargada en la app: se usan los horarios de la planilla BASE RUTAS (12/11/2026). Paseadores sin asignar: ${PENDIENTE.toLowerCase()}. La plantilla la arma el coordinador.</p>`, "Por qué BASE RUTAS")}</div>` : ""}
+    ${shifts ? `<div class="adm-chips adm-chips--wrap">${shifts}</div>` : ""}
+    ${!isOffline() && registros.cached("fotos").length < REAL_DOGS.length ? `<p class="adm-row-meta">${ico("camera", "adm-icon-xs")} “Foto” abre la cámara (necesita señal).</p>` : ""}
+    ${compliance.length ? `<div class="adm-routes">${compliance.map(RouteCard).join("")}</div>` : `<p class="adm-empty">Hoy no hay rutas.</p>`}
+  `);
+}
+
+function PedidosFold(live) {
+  const { pedidosNuevos } = live;
+  return Fold("pedidos", {
+    title: "Pedidos nuevos",
+    iconName: "message",
+    count: pedidosNuevos.length,
+    tone: pedidosNuevos.length ? "blue" : "gray",
+    open: pedidosNuevos.length > 0,
+    id: "adm-pedidos",
+  }, pedidosNuevos.length ? `
+    <ul class="adm-list">
+      ${pedidosNuevos.slice(0, 6).map((pedido) => {
+        const carnetId = pedido.carnet?.id || live.carnetsWeb.find((archivo) => archivo.pedidoId === pedido.id)?.id || "";
+        return `
+          <li class="adm-row">
+            <div class="adm-row-main">
+              <strong class="adm-row-title">${esc(pedido.titulo || pedido.tipo || "Pedido sin título")}</strong>
+              <span class="adm-row-meta">${esc(ymdToAR(pedido.fecha) || dateAR(pedido.creadoEn))} · ${pedido.origen === "web" ? "Web" : esc(pedido.creadoPorNombre || "App")}</span>
+              ${carnetId ? `<span class="adm-chips"><span class="adm-chip adm-chip--green">${ico("fileCheck", "adm-icon-xs")} Trae carnet</span></span>` : ""}
+            </div>
+            ${carnetId ? `<button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(carnetId)}" data-adm-area="live" aria-label="Ver el carnet${pedido.datos?.perro ? ` de ${esc(pedido.datos.perro)}` : ""}">${ico("eye")} Carnet</button>` : ""}
+          </li>
+        `;
+      }).join("")}
+    </ul>
+    ${pedidosNuevos.length > 6 ? `<p class="adm-row-meta">Y ${plural(pedidosNuevos.length - 6, "más", "más")}. Los responde el coordinador.</p>` : ""}
+  ` : `<p class="adm-empty">Sin pedidos nuevos.</p>`);
+}
+
+const AVISO_TONES = { "perro suelto": "red", seguridad: "red", "obra o corte": "yellow", clima: "blue", "cambio de horario": "blue" };
+
+function AvisosFold(live) {
+  const { avisos } = live;
+  return Fold("avisos", {
+    title: "Avisos por barrio",
+    iconName: "mapPin",
+    count: avisos.length,
+    tone: avisos.length ? "yellow" : "gray",
+    open: avisos.some((aviso) => AVISO_TONES[aviso.tipo] === "red"),
+    id: "adm-avisos",
+  }, avisos.length ? `
+    <ul class="adm-list">
+      ${avisos.map((aviso) => `
+        <li class="adm-row">
+          <div class="adm-row-main">
+            <span class="adm-chips">
+              <strong class="adm-row-title">${esc(aviso.barrio || "Barrio sin indicar")}</strong>
+              <span class="adm-chip adm-chip--${AVISO_TONES[aviso.tipo] || "gray"}">${esc(aviso.tipo || "otro")}</span>
+            </span>
+            <span>${esc(aviso.mensaje || aviso.titulo || "")}</span>
+            <span class="adm-row-meta">${aviso.vigenteHasta ? `Hasta ${esc(ymdToAR(aviso.vigenteHasta))}` : "Solo hoy"}${byLine(aviso, true) ? ` · ${esc(byLine(aviso, true))}` : ""}</span>
+          </div>
+        </li>
+      `).join("")}
+    </ul>
+  ` : `<p class="adm-empty">Sin avisos vigentes.</p>`);
 }
 
 function checklistLine(record) {
   const items = record.items && typeof record.items === "object" ? Object.values(record.items) : [];
   const ok = items.filter(Boolean).length;
   const complete = record.completo === true || (items.length > 0 && ok === items.length);
-  return { complete, text: items.length ? `${ok} de ${items.length} ítems` : "" };
+  return { complete, text: items.length ? `${ok}/${items.length}` : "" };
 }
 
-const STOP_STATUS = {
-  "a-tiempo": { label: "A tiempo", tone: "ok" },
-  atrasado: { label: "Atrasado", tone: "danger" },
-  entregado: { label: "Entregado", tone: "ok" },
-  "no-sale": { label: "No sale", tone: "warning" },
-};
-
-const ROUTE_SOURCE = {
-  dia: "Cambio del día",
-  plantilla: "Plantilla semanal",
-  planilla: "Planilla BASE RUTAS",
-};
-
-function stopLine(stop) {
-  const estado = ESTADOS[stop.estado] || { label: stop.estado };
-  const parts = [`Retiro previsto ${stop.hora || PENDIENTE.toLowerCase()}`];
-  if (stop.status === "atrasado") parts.push(`${stop.atraso} min de atraso`);
-  else if (stop.paseo) parts.push(estado.label);
-  if (stop.paseo?.horaRetiro) parts.push(`retirado ${stop.paseo.horaRetiro}`);
-  if (stop.paseo?.horaEntrega) parts.push(`entregado ${stop.paseo.horaEntrega}`);
-  return parts.join(" · ");
+function ChecklistsFold(live) {
+  const { checklists } = live;
+  const incomplete = checklists.filter((record) => !checklistLine(record).complete).length;
+  return Fold("checklists", {
+    title: "Checklists",
+    iconName: "clipboardCheck",
+    count: checklists.length,
+    tone: incomplete ? "yellow" : checklists.length ? "green" : "gray",
+  }, checklists.length ? `
+    <ul class="adm-list">
+      ${checklists.map((record) => {
+        const line = checklistLine(record);
+        return `
+          <li class="adm-row">
+            <span class="adm-avatar adm-avatar--sm adm-avatar--empty" aria-hidden="true">${esc(initial(record.creadoPorNombre || record.creadoPor))}</span>
+            <div class="adm-row-main">
+              <strong class="adm-row-title">${esc(record.creadoPorNombre || record.creadoPor || "Sin nombre")}</strong>
+              <span class="adm-row-meta">${esc(record.turno || "Turno sin indicar")}</span>
+            </div>
+            <span class="adm-chip ${line.complete ? "adm-chip--green" : "adm-chip--yellow"}">${line.complete ? "Completo" : "Incompleto"}${line.text ? ` ${line.text}` : ""}</span>
+          </li>
+        `;
+      }).join("")}
+    </ul>
+  ` : `<p class="adm-empty">Nadie cargó el checklist hoy.</p>`);
 }
 
-function RouteCard(item) {
-  const { route, stops } = item;
-  const salen = stops.length - item.noSale;
-  const openKey = `ruta-${route.ruta}`;
-  const people = [
-    route.paseador ? `Paseador: ${nameOf(route.paseador)}` : "Paseador: sin asignar",
-    route.ayudante ? `Ayudante: ${nameOf(route.ayudante)}` : "",
-    route.supervisor ? `Supervisa: ${route.supervisor}` : "",
-  ].filter(Boolean).join(" · ");
-  const late = stops.filter((stop) => stop.status === "atrasado").sort((a, b) => b.atraso - a.atraso);
-
-  return `
-    <article class="adm-shift adm-route ${late.length ? "has-late" : ""}" aria-labelledby="adm-route-${esc(route.ruta)}">
-      <h4 id="adm-route-${esc(route.ruta)}">${esc(route.ruta || "Ruta sin código")} <span class="adm-th-sub">${esc(route.turno || "Turno sin indicar")} · ${esc(ROUTE_SOURCE[route.fuente] || "")}</span></h4>
-      <p class="adm-dog-meta">${esc(people)}</p>
-      ${stops.length ? `
-        <ul class="adm-route-stats" aria-label="Cumplimiento de ${esc(route.ruta)}">
-          <li class="is-ok"><strong>${item.aTiempo}</strong> a tiempo</li>
-          <li class="${item.atrasados ? "is-late" : ""}"><strong>${item.atrasados}</strong> ${item.atrasados === 1 ? "atrasado" : "atrasados"}</li>
-          <li><strong>${item.entregados}</strong> de ${salen} ${item.entregados === 1 ? "entregado" : "entregados"}</li>
-          ${item.noSale ? `<li><strong>${item.noSale}</strong> no ${item.noSale === 1 ? "sale" : "salen"}</li>` : ""}
-        </ul>
-        ${late.length ? `
-          <ul class="adm-late-list" aria-label="Atrasados de ${esc(route.ruta)}">
-            ${late.map((stop) => `<li><strong>${esc(stop.perroNombre || "Perro sin nombre")}</strong> <span>retiro ${esc(stop.hora)} · ${stop.atraso} min sin retiro</span></li>`).join("")}
-          </ul>
-        ` : ""}
-        <details class="adm-inner adm-dogs" data-adm-dogs="${esc(openKey)}" ${ui.openDogs.has(openKey) ? "open" : ""}>
-          <summary>Ver las ${stops.length} paradas en orden</summary>
-          <ol class="adm-dog-list adm-stop-list">
-            ${stops.map((stop) => {
-              let st = STOP_STATUS[stop.status];
-              if (stop.status === "a-tiempo") {
-                st = stop.estado === "pendiente"
-                  ? { label: "Por retirar · a tiempo", tone: "neutral" }
-                  : { label: `${(ESTADOS[stop.estado] || { label: stop.estado }).label} · a tiempo`, tone: "info" };
-              }
-              return `
-                <li>
-                  <span class="adm-dog-name">${esc(stop.hora || "--:--")} · ${esc(stop.perroNombre || "Perro sin nombre")}</span>
-                  <span class="adm-pill adm-pill--${st.tone}">${esc(st.label)}${stop.paseo?.pendiente ? " · sin enviar" : ""}</span>
-                  <span class="adm-dog-meta">${esc(stopLine(stop))}${stop.nota ? ` · Nota: ${esc(stop.nota)}` : ""}</span>
-                </li>
-              `;
-            }).join("")}
-          </ol>
-        </details>
-      ` : `<p class="adm-empty">Esta ruta no tiene paradas cargadas.</p>`}
-    </article>
-  `;
-}
-
-function CompliancePanel(live) {
-  const { compliance, effective, late } = live;
-  return `
-    <div class="adm-compliance" id="adm-cumplimiento" tabindex="-1" role="region" aria-labelledby="adm-compliance-title">
-      <h3 id="adm-compliance-title">${icon("route", "adm-icon-sm")} Cumplimiento por ruta ${late.length ? `<span class="adm-count adm-count--danger">${plural(late.length, "atrasado", "atrasados")}</span>` : ""}</h3>
-      <p class="adm-note">Atrasado = pasaron más de ${LATE_MINUTES} minutos de la hora prevista y nadie marcó el retiro. Hora de Argentina.</p>
-      ${effective.fromSheet ? `
-        <p class="adm-warn-box">${icon("alertCircle", "adm-icon-sm")} <span>Todavía no hay plantilla de hoy cargada en la app: se usan los horarios de la planilla BASE RUTAS (12/11/2026). Paseadores sin asignar: ${PENDIENTE.toLowerCase()}.</span></p>
-      ` : ""}
-      ${compliance.length ? `
-        <div class="adm-live-grid">${compliance.map(RouteCard).join("")}</div>
-      ` : `<p class="adm-empty">Hoy no hay rutas: ni cambios del día, ni plantilla, ni paseos en la planilla.</p>`}
-    </div>
-  `;
-}
-
-const AVISO_TONES = { "perro suelto": "danger", seguridad: "danger", "obra o corte": "warning", clima: "info", "cambio de horario": "info" };
-
-function AvisosPanel(live) {
-  const { avisos } = live;
-  return `
-    <div class="adm-avisos" id="adm-avisos" role="region" aria-labelledby="adm-avisos-title">
-      <h3 id="adm-avisos-title">${icon("mapPin", "adm-icon-sm")} Avisos por barrio vigentes <span class="adm-count">${avisos.length}</span></h3>
-      ${avisos.length ? `
-        <ul class="adm-aviso-list">
-          ${avisos.map((aviso) => `
-            <li class="adm-aviso">
-              <div class="adm-aviso-head">
-                <strong>${esc(aviso.barrio || "Barrio sin indicar")}</strong>
-                <span class="adm-pill adm-pill--${AVISO_TONES[aviso.tipo] || "neutral"}">${esc(aviso.tipo || "otro")}</span>
-                <span class="adm-muted">${aviso.vigenteHasta ? `Hasta el ${esc(ymdToAR(aviso.vigenteHasta))}` : "Solo hoy"}</span>
-              </div>
-              <p>${esc(aviso.mensaje || aviso.titulo || "")}</p>
-              ${byLine(aviso, true) ? `<p class="adm-note">${esc(byLine(aviso, true))}.</p>` : ""}
-            </li>
-          `).join("")}
-        </ul>
-      ` : `<p class="adm-empty">No hay avisos vigentes por barrio. Los cargan el coordinador o el supervisor cuando pasa algo en una zona.</p>`}
-    </div>
-  `;
-}
-
-function LivePanel(live) {
-  const offline = navigator.onLine === false;
-  const { checklists, pedidosNuevos } = live;
-
-  return `
-    <section class="adm-live" id="adm-vivo" tabindex="-1" aria-labelledby="adm-live-title">
-      <header class="adm-panel-head">
-        <span class="adm-panel-icon">${icon("radio", "adm-icon")}</span>
-        <div>
-          <h2 id="adm-live-title">El día en vivo</h2>
-          <p>Lo que carga el equipo hoy, ${esc(ymdToAR(live.hoy))}. Se actualiza solo cada minuto.</p>
-        </div>
-        <button class="adm-button adm-button--ghost adm-panel-action" id="adm-live-refresh" type="button" data-adm-live-refresh>Actualizar ahora</button>
-      </header>
-      ${offline ? `<p class="adm-msg is-error">Sin conexión: ves lo último que llegó. Se actualiza solo cuando vuelve la señal.</p>` : ""}
-      ${MsgRegion("live")}
-
-      ${live.incidentes.length ? IncidentList(live.incidentes) : `
-        <p class="adm-live-ok">${icon("checkCircle", "adm-icon-sm")} Sin incidentes cargados hoy.</p>
-      `}
-
-      ${CompliancePanel(live)}
-      ${AvisosPanel(live)}
-
-      <div class="adm-live-grid">
-        ${live.shifts.map(ShiftCard).join("")}
-
-        <article class="adm-shift" aria-labelledby="adm-live-check">
-          <h3 id="adm-live-check">Checklist antes de salir</h3>
-          ${checklists.length ? `
-            <ul class="adm-mini-list">
-              ${checklists.map((record) => {
-                const line = checklistLine(record);
-                return `
-                  <li>
-                    <span><strong>${esc(record.creadoPorNombre || record.creadoPor || "Sin nombre")}</strong> · ${esc(record.turno || "Turno sin indicar")}</span>
-                    <span class="adm-pill ${line.complete ? "adm-pill--ok" : "adm-pill--warning"}">${line.complete ? "Completo" : "Incompleto"}${line.text ? ` · ${line.text}` : ""}</span>
-                  </li>
-                `;
-              }).join("")}
-            </ul>
-          ` : `<p class="adm-empty">Nadie cargó el checklist hoy. Lo completa cada paseador en su página antes de salir.</p>`}
-        </article>
-
-        <article class="adm-shift" id="adm-pedidos" tabindex="-1" aria-labelledby="adm-live-pedidos">
-          <h3 id="adm-live-pedidos">Pedidos nuevos <span class="adm-count">${pedidosNuevos.length}</span></h3>
-          ${pedidosNuevos.length ? `
-            <ul class="adm-mini-list adm-pedido-list">
-              ${pedidosNuevos.slice(0, 6).map((pedido) => {
-                const carnetId = pedido.carnet?.id || live.carnetsWeb.find((archivo) => archivo.pedidoId === pedido.id)?.id || "";
-                return `
-                  <li>
-                    <span><strong>${esc(pedido.titulo || pedido.tipo || "Pedido sin título")}</strong></span>
-                    ${carnetId ? `<span class="adm-pill adm-pill--ok">${icon("fileCheck", "adm-icon-xs")} Trae carnet</span>` : ""}
-                    <span class="adm-dog-meta">${esc(ymdToAR(pedido.fecha) || dateAR(pedido.creadoEn))} · ${pedido.origen === "web" ? "Formulario web" : esc(pedido.creadoPorNombre || "Cargado en la app")}</span>
-                    ${carnetId ? `<button class="adm-link-button" type="button" data-adm-archivo-abrir="${esc(carnetId)}" data-adm-area="live">Ver el carnet${pedido.datos?.perro ? ` de ${esc(pedido.datos.perro)}` : ""}</button>` : ""}
-                  </li>
-                `;
-              }).join("")}
-            </ul>
-            ${pedidosNuevos.length > 6 ? `<p class="adm-note">Y ${plural(pedidosNuevos.length - 6, "pedido más", "pedidos más")}. Los responde el coordinador desde su página.</p>` : ""}
-          ` : `<p class="adm-empty">No hay pedidos nuevos. Llegan del formulario de la web o los carga el equipo.</p>`}
-        </article>
-      </div>
-    </section>
-  `;
-}
-
-/* ---------- Usuarios y accesos ---------- */
-
-function roleOptions(selected) {
-  return Object.entries(ROLE_LABELS).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
-}
+/* ---------- Equipo (usuarios y accesos) ---------- */
 
 function CredentialBox() {
   const cred = ui.credential;
   if (!cred) return "";
   const text = credentialText(cred);
   return `
-    <div class="adm-cred" id="adm-cred" tabindex="-1" role="region" aria-labelledby="adm-cred-title">
-      <p class="adm-tag adm-tag--warning">Solo se muestra ahora</p>
-      <h3 id="adm-cred-title">${cred.tipo === "alta" ? `Usuario creado: ${esc(cred.nombre)}` : `PIN nuevo de ${esc(cred.nombre)}`}</h3>
-      <p>Copiá este mensaje y mandáselo por WhatsApp:</p>
-      <p class="adm-cred-text">${esc(text)}</p>
-      <div class="adm-form-actions">
-        <button class="adm-button adm-button--primary" type="button" data-adm-cred-copy>${icon("copy", "adm-icon-sm")} Copiar mensaje</button>
-        <a class="adm-button adm-button--ghost" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener noreferrer">${icon("message", "adm-icon-sm")} Abrir WhatsApp</a>
-        <button class="adm-button adm-button--ghost" type="button" data-adm-cred-hide>Listo, ya lo mandé</button>
+    <section class="adm-card adm-cred" id="adm-cred" tabindex="-1" aria-labelledby="adm-cred-title">
+      <span class="adm-chip adm-chip--yellow">Solo se ve ahora</span>
+      <h2 class="adm-h2" id="adm-cred-title">${cred.tipo === "alta" ? `Listo: ${esc(cred.nombre)}` : `PIN nuevo de ${esc(cred.nombre)}`}</h2>
+      <dl class="adm-cred-data">
+        <div><dt>Usuario</dt><dd>${esc(cred.usuario)}</dd></div>
+        <div><dt>PIN</dt><dd class="adm-pin-big">${esc(cred.pin)}</dd></div>
+      </dl>
+      <a class="adm-btn adm-btn--whatsapp adm-btn--block" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener noreferrer">${ico("message")} Mandar por WhatsApp</a>
+      <div class="adm-btn-row">
+        <button class="adm-btn adm-btn--ghost" type="button" data-adm-cred-copy>${ico("copy")} Copiar</button>
+        <button class="adm-btn adm-btn--ghost" type="button" data-adm-cred-hide>${ico("check")} Listo</button>
       </div>
-      <p class="adm-note">Este PIN no queda guardado en la página: cuando tocás “Listo” desaparece. Si se pierde, resetealo.</p>
-    </div>
+      ${Help(`<p>Mensaje: “${esc(text)}”</p><p>El PIN no queda guardado en la página: al tocar “Listo” desaparece. Si se pierde, generá uno nuevo con “PIN”.</p>`, "Ver el mensaje")}
+    </section>
   `;
 }
 
-function CreateForm() {
-  const d = drafts.crear;
-  const team = listJoin(TEAM.map((person) => person.name));
+function RolePicker(user) {
   return `
-    <form class="adm-form" id="adm-create" data-adm-form="crear" novalidate aria-labelledby="adm-create-title">
-      <h3 id="adm-create-title">Crear usuario</h3>
-      <p class="adm-note">Equipo autorizado: ${esc(team)}. Si vas a sumar a otra persona, confirmalo antes.</p>
-      <div class="adm-form-grid">
-        <label class="adm-field" for="adm-crear-nombre">
-          <span>Nombre</span>
-          <input class="adm-input" id="adm-crear-nombre" name="nombre" autocomplete="off" maxlength="60" required placeholder="Ej. Sebastián" value="${esc(d.nombre)}" data-adm-draft="crear" data-adm-key="nombre" />
-        </label>
-        <label class="adm-field" for="adm-crear-usuario">
-          <span>Usuario <small>para entrar, sin espacios</small></span>
-          <input class="adm-input" id="adm-crear-usuario" name="usuario" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="31" required placeholder="Ej. sebastian" value="${esc(d.usuario)}" data-adm-draft="crear" data-adm-key="usuario" />
-        </label>
-        <label class="adm-field" for="adm-crear-rol">
-          <span>Rol</span>
-          <select class="adm-input" id="adm-crear-rol" name="rol" data-adm-draft="crear" data-adm-key="rol">${roleOptions(d.rol)}</select>
-        </label>
-        <div class="adm-field">
-          <label for="adm-crear-pin"><span>PIN inicial <small>6 a 8 números</small></span></label>
-          <div class="adm-pin-row">
-            <input class="adm-input" id="adm-crear-pin" name="pin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="8" required value="${esc(d.pin)}" data-adm-draft="crear" data-adm-key="pin" />
-            <button class="adm-button adm-button--ghost" type="button" data-adm-gen-pin="crear">Generar</button>
-          </div>
-        </div>
-      </div>
-      <p class="adm-role-hint" data-adm-role-hint aria-live="polite"><strong>${esc(ROLE_LABELS[d.rol] || d.rol)}:</strong> ${esc(roleLine(d.rol))}</p>
-      <div class="adm-form-actions">
-        <button class="adm-button adm-button--primary" type="submit">${icon("userPlus", "adm-icon-sm")} Crear usuario</button>
-        <button class="adm-button adm-button--ghost" type="button" data-adm-create-toggle>Cancelar</button>
-      </div>
-    </form>
+    <div class="adm-role-picker" role="group" aria-label="Rol de ${esc(user.nombre)}">
+      ${ROLE_CHOICES.map((choice) => `
+        <button class="adm-choice ${choice.rol === user.rol ? "is-on" : ""}" type="button" data-adm-role-set="${esc(user.usuario)}" data-adm-rol="${choice.rol}" aria-pressed="${choice.rol === user.rol}">
+          ${ico(choice.icon)} <span>${esc(choice.short)}</span>
+        </button>
+      `).join("")}
+    </div>
   `;
 }
 
 function ResetForm(user) {
   const reactivar = !user.activo;
   return `
-    <form class="adm-form adm-form--inline" data-adm-form="reset" data-adm-usuario="${esc(user.usuario)}" novalidate aria-labelledby="adm-reset-title">
-      <p id="adm-reset-title"><strong>${reactivar ? "Reactivar" : "Resetear el PIN de"} ${esc(user.nombre)}.</strong> ${reactivar ? "Va a poder entrar de nuevo con este PIN." : "Se cierra su sesión en todos lados y entra con el PIN nuevo."}</p>
-      <label for="adm-reset-pin"><span>PIN nuevo <small>6 a 8 números</small></span></label>
+    <form class="adm-inline-form" data-adm-form="reset" data-adm-usuario="${esc(user.usuario)}" novalidate aria-labelledby="adm-reset-title">
+      <p id="adm-reset-title"><strong>${reactivar ? "Reactivar" : "PIN nuevo para"} ${esc(user.nombre)}</strong></p>
       <div class="adm-pin-row">
-        <input class="adm-input" id="adm-reset-pin" name="pin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="8" required value="${esc(drafts.reset.pin)}" data-adm-draft="reset" data-adm-key="pin" />
-        <button class="adm-button adm-button--ghost" type="button" data-adm-gen-pin="reset">Generar</button>
+        <label class="adm-sr-only" for="adm-reset-pin">PIN nuevo, de 6 a 8 números</label>
+        <input class="adm-input adm-input--pin" id="adm-reset-pin" name="pin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="8" required placeholder="6 a 8 números" value="${esc(drafts.reset.pin)}" data-adm-draft="reset" data-adm-key="pin" />
+        <button class="adm-btn adm-btn--ghost" type="button" data-adm-gen-pin="reset">${ico("key")} Generar</button>
       </div>
-      <div class="adm-form-actions">
-        <button class="adm-button adm-button--primary" type="submit">${reactivar ? "Reactivar" : "Guardar PIN nuevo"}</button>
-        <button class="adm-button adm-button--ghost" type="button" data-adm-reset-cancel>Cancelar</button>
+      <div class="adm-btn-row">
+        <button class="adm-btn adm-btn--primary" type="submit">${ico("check")} ${reactivar ? "Reactivar" : "Guardar"}</button>
+        <button class="adm-btn adm-btn--ghost" type="button" data-adm-reset-cancel>Cancelar</button>
       </div>
+      ${reactivar ? "" : `<p class="adm-row-meta">Se cierra su sesión en todos lados.</p>`}
     </form>
   `;
 }
@@ -1311,302 +1594,52 @@ function ResetForm(user) {
 function ConfirmOff(user) {
   return `
     <div class="adm-confirm" id="adm-confirm" tabindex="-1" role="group" aria-labelledby="adm-confirm-text">
-      <p id="adm-confirm-text"><strong>¿Desactivar a ${esc(user.nombre)}?</strong> No va a poder entrar y se cierra su sesión. Lo que cargó queda guardado. Después lo podés reactivar con un PIN nuevo.</p>
-      <div class="adm-form-actions">
-        <button class="adm-button adm-button--danger" type="button" data-adm-off-confirm="${esc(user.usuario)}">Sí, desactivar</button>
-        <button class="adm-button adm-button--ghost" type="button" data-adm-off-cancel>Cancelar</button>
+      <p id="adm-confirm-text"><strong>¿Desactivar a ${esc(user.nombre)}?</strong> No va a poder entrar. Lo que cargó queda.</p>
+      <div class="adm-btn-row">
+        <button class="adm-btn adm-btn--danger" type="button" data-adm-off-confirm="${esc(user.usuario)}">${ico("off")} Desactivar</button>
+        <button class="adm-btn adm-btn--ghost" type="button" data-adm-off-cancel>Cancelar</button>
       </div>
     </div>
   `;
 }
 
-function UserRow(user, me) {
+function UserCard(user, me) {
   const isMe = user.usuario === me;
-  const roleDraft = drafts.roles[user.usuario] || user.rol;
-  const lastLogin = user.ultimoIngreso ? `Último ingreso: ${dateAR(user.ultimoIngreso)} ${timeAR(user.ultimoIngreso)}` : "Todavía no ingresó";
-  const created = user.creadoEn ? ` · Creado el ${dateAR(user.creadoEn)}` : "";
-  const safeId = String(user.usuario).replace(/[^a-z0-9_-]/gi, "_");
-
+  const lastLogin = user.ultimoIngreso ? `Entró ${dateAR(user.ultimoIngreso)}` : "Nunca entró";
   return `
-    <li class="adm-user-row ${user.activo ? "" : "is-off"}">
+    <li class="adm-user ${user.activo ? "" : "is-off"}">
       <div class="adm-user-head">
-        <strong>${esc(user.nombre)}</strong>
-        <span class="adm-muted">usuario: ${esc(user.usuario)}</span>
-        <span class="adm-pill adm-pill--neutral">${esc(ROLE_LABELS[user.rol] || user.rol)}</span>
-        ${user.activo ? "" : `<span class="adm-pill adm-pill--warning">Desactivado</span>`}
-        ${isMe ? `<span class="adm-pill adm-pill--ok">Sos vos</span>` : ""}
+        <span class="adm-avatar adm-avatar--md adm-avatar--empty adm-avatar--person" aria-hidden="true">${esc(initial(user.nombre))}</span>
+        <div class="adm-row-main">
+          <strong class="adm-row-title">${esc(user.nombre)}</strong>
+          <span class="adm-row-meta">${esc(user.usuario)} · ${esc(lastLogin)}</span>
+        </div>
+        <span class="adm-chips adm-chips--end">
+          <span class="adm-chip adm-chip--blue">${esc(roleShort(user.rol))}</span>
+          ${user.activo ? "" : `<span class="adm-chip adm-chip--gray">Desactivado</span>`}
+          ${isMe ? `<span class="adm-chip adm-chip--green">Vos</span>` : ""}
+        </span>
       </div>
-      <p class="adm-user-meta">${esc(lastLogin)}${esc(created)}</p>
       ${isMe ? `
-        <p class="adm-note">Tu PIN lo cambiás en <a class="adm-inline-link" href="/login" data-link>Cambiar mi PIN</a>. No podés cambiar tu propio rol ni desactivarte.</p>
+        <div class="adm-btn-row">
+          <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/login" data-link>${ico("key")} Cambiar mi PIN</a>
+        </div>
       ` : user.activo ? `
-        <div class="adm-user-actions">
-          <div class="adm-role-change">
-            <label for="adm-rol-${safeId}">Rol</label>
-            <select class="adm-input adm-input--sm" id="adm-rol-${safeId}" data-adm-draft="roles" data-adm-key="${esc(user.usuario)}">${roleOptions(roleDraft)}</select>
-            <button class="adm-button adm-button--ghost" type="button" data-adm-role-save="${esc(user.usuario)}">Cambiar rol</button>
-          </div>
-          <button class="adm-button adm-button--ghost" type="button" data-adm-reset="${esc(user.usuario)}" aria-expanded="${ui.resetFor === user.usuario}">Resetear PIN</button>
-          <button class="adm-button adm-button--ghost adm-button--danger-ghost" type="button" data-adm-off="${esc(user.usuario)}">Desactivar</button>
+        <div class="adm-btn-row adm-btn-row--3">
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-rolefor="${esc(user.usuario)}" aria-expanded="${ui.roleFor === user.usuario}">${ico("userCheck")} Rol</button>
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-reset="${esc(user.usuario)}" aria-expanded="${ui.resetFor === user.usuario}">${ico("key")} PIN</button>
+          <button class="adm-btn adm-btn--ghost adm-btn--sm adm-btn--danger-ghost" type="button" data-adm-off="${esc(user.usuario)}">${ico("off")} Baja</button>
         </div>
       ` : `
-        <div class="adm-user-actions">
-          <button class="adm-button adm-button--ghost" type="button" data-adm-reset="${esc(user.usuario)}" aria-expanded="${ui.resetFor === user.usuario}">Reactivar con PIN nuevo</button>
+        <div class="adm-btn-row">
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-reset="${esc(user.usuario)}" aria-expanded="${ui.resetFor === user.usuario}">${ico("refresh")} Reactivar</button>
         </div>
       `}
+      ${!isMe && user.activo && ui.roleFor === user.usuario ? RolePicker(user) : ""}
       ${!isMe && ui.resetFor === user.usuario ? ResetForm(user) : ""}
       ${!isMe && ui.confirmOff === user.usuario ? ConfirmOff(user) : ""}
     </li>
   `;
-}
-
-function UsersPanel() {
-  const me = currentUser().usuario;
-  const list = (ui.users || []).slice().sort((a, b) => (b.activo === true) - (a.activo === true) || String(a.nombre).localeCompare(String(b.nombre)));
-  const activeCount = list.filter((user) => user.activo).length;
-
-  let body;
-  if (ui.users === null && ui.usersLoading) body = `<p class="adm-empty">Cargando usuarios…</p>`;
-  else if (ui.users === null) body = `<p class="adm-empty">No se pudo traer la lista. Tocá “Actualizar lista”.</p>`;
-  else if (!list.length) body = `<p class="adm-empty">Todavía no hay usuarios.</p>`;
-  else body = `<ul class="adm-user-list">${list.map((user) => UserRow(user, me)).join("")}</ul>`;
-
-  return `
-    <section class="adm-users" id="adm-usuarios" tabindex="-1" aria-labelledby="adm-users-title">
-      <header class="adm-panel-head">
-        <span class="adm-panel-icon">${icon("users", "adm-icon")}</span>
-        <div>
-          <h2 id="adm-users-title">Usuarios y accesos</h2>
-          <p>${ui.users ? `${plural(activeCount, "usuario activo", "usuarios activos")}. ` : ""}Quién entra a la app y qué puede ver. Los PIN guardados nunca se muestran.</p>
-        </div>
-      </header>
-
-      ${CredentialBox()}
-
-      <div class="adm-form-actions">
-        <button class="adm-button ${ui.showCreate ? "adm-button--ghost" : "adm-button--primary"}" type="button" data-adm-create-toggle aria-expanded="${ui.showCreate}" aria-controls="adm-create">
-          ${icon(ui.showCreate ? "x" : "userPlus", "adm-icon-sm")} ${ui.showCreate ? "Cerrar el formulario" : "Crear usuario"}
-        </button>
-        <button class="adm-button adm-button--ghost" id="adm-users-refresh" type="button" data-adm-users-refresh>Actualizar lista</button>
-      </div>
-      ${ui.showCreate ? CreateForm() : ""}
-      ${MsgRegion("users")}
-      ${body}
-
-      <details class="adm-inner" data-adm-inner="roles-ayuda" ${ui.openDogs.has("roles-ayuda") ? "open" : ""}>
-        <summary>Qué puede ver cada rol</summary>
-        <ul class="adm-role-help">
-          ${Object.keys(ROLE_LABELS).map((rol) => `<li><strong>${ROLE_LABELS[rol]}:</strong> ${esc(roleLine(rol))}</li>`).join("")}
-        </ul>
-      </details>
-    </section>
-  `;
-}
-
-function SafetyPanel() {
-  const { conflicts, missing, notRouted } = safetyConflicts();
-  const dogs = safetyDogs();
-
-  return `
-    <section class="adm-safety" id="adm-seguridad" tabindex="-1" aria-labelledby="adm-safety-title">
-      <header class="adm-safety-head">
-        <span class="adm-safety-icon">${icon("alertTriangle", "adm-icon")}</span>
-        <div>
-          <h2 id="adm-safety-title">Alertas de seguridad</h2>
-          <p>Siempre visibles. Fuente: BASE RUTAS (${DATA_UPDATED}).</p>
-        </div>
-      </header>
-
-      ${conflicts.length ? `
-        <div class="adm-table-wrap">
-          <table class="adm-table adm-table--safety">
-            <caption>Perros marcados “no juntar” que comparten turno</caption>
-            <thead>
-              <tr><th scope="col">Perros</th><th scope="col">Turno y ruta</th><th scope="col">Días</th></tr>
-            </thead>
-            <tbody>
-              ${conflicts.map((c) => `
-                <tr>
-                  <th scope="row">
-                    ${esc(c.a)} y ${esc(c.b)}
-                    ${[c.a, c.b].filter((name) => /día|lunes|martes|miércoles|jueves|viernes|sábado|contratad/i.test(REAL_DOGS.find((dog) => dog.name === name)?.review || "")).map((name) => `<span class="adm-row-note">Días de ${esc(name)}: dato a revisar</span>`).join("")}
-                  </th>
-                  <td>${esc(c.shift)} · ${esc(routeFor(c.shift))}</td>
-                  <td>${esc(daysText(c.days))}</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-        </div>
-      ` : `<p class="adm-empty">No hay perros “no juntar” que compartan turno en BASE RUTAS.</p>`}
-
-      <ul class="adm-safety-list" aria-label="Indicaciones de seguridad por perro">
-        ${dogs.map((dog) => `
-          <li>
-            <strong>${esc(dog.name)}</strong>
-            <span class="adm-safety-meta">${esc(dog.shifts.join(" y "))} · ${esc(daysText(dog.days))}</span>
-            <span class="adm-safety-notes">${dog.safety.map((note) => `<span class="adm-pill adm-pill--danger">${esc(note)}</span>`).join("")}</span>
-          </li>
-        `).join("")}
-      </ul>
-
-      ${missing.length || notRouted.length ? `
-        <ul class="adm-footnotes">
-          ${missing.map((m) => `<li>${esc(m.dog)} figura “no juntar con ${esc(m.other)}”, pero ${esc(m.other)} no está en el registro: ${PENDIENTE}.</li>`).join("")}
-          ${notRouted.map((n) => `<li>${esc(n.dog)} y ${esc(n.other)} figuran “no juntar”. Hoy ${esc(n.idle)} no tiene ruta cargada: si vuelve, revisá el turno.</li>`).join("")}
-        </ul>
-      ` : ""}
-    </section>
-  `;
-}
-
-function Section(id, open, { title, summary, iconName }, body) {
-  return `
-    <details class="adm-section" id="${id}" data-adm-section="${id}" ${open.has(id) ? "open" : ""}>
-      <summary>
-        <span class="adm-section-icon">${icon(iconName, "adm-icon")}</span>
-        <span class="adm-section-title">
-          <span class="adm-section-name">${title}</span>
-          <span class="adm-section-summary">${summary}</span>
-        </span>
-        <span class="adm-chevron">${icon("chevronDown", "adm-icon-sm")}</span>
-      </summary>
-      <div class="adm-section-body">
-        ${body}
-      </div>
-    </details>
-  `;
-}
-
-function ReviewSection(open) {
-  const dogs = reviewDogs().sort((a, b) => (a.status === "Activo") - (b.status === "Activo"));
-  const statusCount = dogs.filter((dog) => dog.status !== "Activo").length;
-
-  return Section("adm-datos", open, {
-    title: "Datos a revisar",
-    summary: `${plural(dogs.length, "perro", "perros")} · ${plural(statusCount, "con estado a definir", "con estado a definir")}`,
-    iconName: "clipboardCheck",
-  }, `
-    <p class="adm-lead">Inconsistencias entre BASE RUTAS, la tabla de precios y Perros paseados. Se corrigen en la planilla (fuente oficial: ${esc(BUSINESS_INFO.officialSources.dogs)}).</p>
-    <ul class="adm-review-list">
-      ${dogs.map((dog) => `
-        <li class="${dog.status !== "Activo" ? "is-status" : ""}">
-          <div class="adm-review-head">
-            <strong>${esc(dog.name)}</strong>
-            <span class="adm-muted">${esc(dog.id)} · ${esc(dog.plan)}</span>
-            <span class="adm-pill ${dog.status === "Activo" ? "adm-pill--neutral" : "adm-pill--warning"}">${esc(dog.status)}</span>
-          </div>
-          <p>${esc(dog.review || PENDIENTE)}</p>
-        </li>
-      `).join("")}
-    </ul>
-  `);
-}
-
-function LoadSection(open) {
-  const load = weeklyLoad();
-  const busiestText = load.busiest.length ? listJoin(load.busiest) : "Sin datos";
-
-  return Section("adm-carga", open, {
-    title: "Carga semanal",
-    summary: `Más carga: ${esc(busiestText)} (${plural(load.maxTotal, "salida", "salidas")})`,
-    iconName: "chart",
-  }, `
-    <p class="adm-lead">Perros por día y turno, calculado de BASE RUTAS (${DATA_UPDATED}). Solo perros activos: no cuenta bajas ni perros sin ruta. Cada barra lleva su número.</p>
-    <div class="adm-table-wrap">
-      <table class="adm-table adm-load">
-        <caption class="adm-sr-only">Perros por día y turno</caption>
-        <thead>
-          <tr>
-            <th scope="col">Día</th>
-            <th scope="col">Mañana <span class="adm-th-sub">${SHIFTS.manana.from} a ${SHIFTS.manana.to}</span></th>
-            <th scope="col">Tarde <span class="adm-th-sub">${SHIFTS.tarde.from} a ${SHIFTS.tarde.to}</span></th>
-            <th scope="col">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${load.rows.map((row) => {
-            const isBusiest = load.busiest.includes(row.day);
-            return `
-              <tr class="${isBusiest ? "is-busiest" : ""}">
-                <th scope="row">
-                  <span class="adm-day-full">${row.day}</span><span class="adm-day-short" aria-hidden="true">${SHORT_DAYS[row.day]}</span>
-                  ${isBusiest ? `<span class="adm-busiest">Más carga</span>` : ""}
-                </th>
-                ${[row.morning, row.afternoon].map((value, i) => `
-                  <td>
-                    <span class="adm-bar-cell">
-                      <span class="adm-bar ${i ? "adm-bar--tarde" : ""}" style="--v:${(value / load.maxShift).toFixed(3)}" aria-hidden="true"></span>
-                      <span class="adm-bar-value">${value}</span>
-                    </span>
-                  </td>
-                `).join("")}
-                <td class="adm-total">${row.total ? row.total : "—"}</td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-        <tfoot>
-          <tr>
-            <th scope="row">Semana</th>
-            <td>${load.rows.reduce((s, r) => s + r.morning, 0)}</td>
-            <td>${load.rows.reduce((s, r) => s + r.afternoon, 0)}</td>
-            <td class="adm-total">${load.weekTotal}</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-    <ul class="adm-footnotes">
-      <li>“Total” suma las salidas del día. ${listJoin(load.twoShifts.map((dog) => dog.name))} ${load.twoShifts.length === 1 ? "sale" : "salen"} en los dos turnos, por eso cuentan dos veces.</li>
-      <li>Mañana: ruta ${SHIFTS.manana.route}, supervisa ${SHIFTS.manana.supervisor}. Tarde: rutas ${SHIFTS.tarde.routes.join(" y ")}, supervisa ${SHIFTS.tarde.supervisor}.</li>
-      <li>Referencia: el máximo diario histórico fue de ${esc(BUSINESS_FACTS.find((f) => /máximo/i.test(f.label))?.value || PENDIENTE)} perros (dato histórico).</li>
-    </ul>
-  `);
-}
-
-function kindClass(kind) {
-  if (/meta/i.test(kind)) return "meta";
-  if (/hist/i.test(kind)) return "historico";
-  if (/calc/i.test(kind)) return "calculado";
-  return "dato";
-}
-
-function FactsSection(open) {
-  const active = activeDogs();
-  const load = weeklyLoad();
-  const unevaluated = active.filter((dog) => dog.category === "SIN EVALUAR").length;
-  const computed = [
-    { label: "Perros con ruta activa", value: String(active.length), source: `Calculado de BASE RUTAS, ${DATA_UPDATED}`, kind: "Calculado" },
-    { label: "Salidas por semana", value: String(load.weekTotal), source: `Calculado de BASE RUTAS, ${DATA_UPDATED}`, kind: "Calculado" },
-    { label: "Perros evaluados", value: `${active.length - unevaluated} de ${active.length}`, source: "Registro maestro, 14/08/2026", kind: "Dato" },
-  ];
-  const facts = [...BUSINESS_FACTS, ...computed];
-
-  return Section("adm-indicadores", open, {
-    title: "Indicadores del negocio",
-    summary: `${facts.length} indicadores, cada uno con su fuente`,
-    iconName: "activity",
-  }, `
-    <p class="adm-lead">Cada número dice si es un dato, un dato histórico, un cálculo de esta página o una meta.</p>
-    <ul class="adm-facts">
-      ${facts.map((fact) => `
-        <li class="adm-fact">
-          <span class="adm-kind adm-kind--${kindClass(fact.kind)}">${esc(fact.kind)}</span>
-          <strong class="adm-fact-value">${esc(fact.value)}</strong>
-          <span class="adm-fact-label">${esc(fact.label)}</span>
-          <span class="adm-fact-source">Fuente: ${esc(fact.source)}</span>
-        </li>
-      `).join("")}
-    </ul>
-    <details class="adm-inner" data-adm-inner="categorias" ${ui.openDogs.has("categorias") ? "open" : ""}>
-      <summary>Qué significa cada categoría de conducta</summary>
-      <dl class="adm-categories">
-        ${Object.entries(CATEGORIES).map(([name, text]) => `
-          <div><dt><span class="adm-cat adm-cat--${name.toLowerCase().replace(/\s+/g, "-")}">${name}</span></dt><dd>${esc(text)}</dd></div>
-        `).join("")}
-      </dl>
-    </details>
-  `);
 }
 
 const ROLE_PANELS = {
@@ -1625,95 +1658,128 @@ const ROLE_PERMISSIONS = [
   { role: "Cliente", who: "Cada tutor, solo su perro", can: ["Ver la ficha de su perro", "Escribir al chat", "Subir carnet de vacunas", "Subir comprobante", "Ver sus pagos", "Ver el estado del paseo"] },
 ];
 
-function TeamSection(open) {
-  return Section("adm-equipo", open, {
-    title: "Equipo y permisos",
-    summary: `${plural(TEAM.length, "persona", "personas")} · ${ROLE_PERMISSIONS.length} roles`,
-    iconName: "users",
-  }, `
-    <p class="adm-lead">Equipo autorizado. Vos decidís la distribución final de funciones. Los accesos a la app (usuario, rol y PIN) se manejan en <a class="adm-inline-link" href="#adm-usuarios" data-adm-goto="adm-usuarios">Usuarios y accesos</a>.</p>
-    <ul class="adm-team">
-      ${TEAM.map((person) => {
-        const panel = ROLE_PANELS[person.role];
-        return `
-          <li class="adm-person">
-            <div class="adm-person-head">
-              <strong>${esc(person.name)}</strong>
-              <span class="adm-pill adm-pill--neutral">${esc(person.label)}</span>
-            </div>
-            <p>${esc(person.tasks)}</p>
-            <p class="adm-person-panel">Panel: ${panel ? `<a href="${panel.path}" data-link>${panel.panel}</a>` : `<span class="adm-pending">${PENDIENTE}</span>`}</p>
-          </li>
-        `;
-      }).join("")}
-    </ul>
-    <p class="adm-note">Otros paseadores figuran como “Paseador asignado”.</p>
+function EquipoTab() {
+  const me = currentUser().usuario;
+  const list = (ui.users || []).slice().sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+  const activos = list.filter((user) => user.activo);
+  const inactivos = list.filter((user) => !user.activo);
 
-    <h3 class="adm-subtitle">Permisos por rol</h3>
-    <div class="adm-roles">
-      ${ROLE_PERMISSIONS.map((item) => `
-        <article class="adm-role">
-          <h4>${item.role}</h4>
-          <p class="adm-role-who">${esc(item.who)}</p>
-          <ul>${item.can.map((permission) => `<li>${esc(permission)}</li>`).join("")}</ul>
-        </article>
-      `).join("")}
+  let body;
+  if (ui.users === null && ui.usersLoading) body = `<p class="adm-empty">Cargando…</p>`;
+  else if (ui.users === null) body = `<p class="adm-empty">No se pudo traer la lista.</p><button class="adm-btn adm-btn--ghost" id="adm-users-refresh" type="button" data-adm-users-refresh>${ico("refresh")} Reintentar</button>`;
+  else if (!list.length) body = `<p class="adm-empty">Todavía no hay usuarios.</p>`;
+  else {
+    body = `
+      <ul class="adm-users">${activos.map((user) => UserCard(user, me)).join("")}</ul>
+      ${inactivos.length ? Fold("inactivos", { title: "Desactivados", iconName: "off", count: inactivos.length }, `<ul class="adm-users">${inactivos.map((user) => UserCard(user, me)).join("")}</ul>`) : ""}
+    `;
+  }
+
+  return `
+    <div class="adm-title-row" id="adm-usuarios" tabindex="-1">
+      <h1 id="adm-title" tabindex="-1">Equipo</h1>
+      ${ui.users ? `<span class="adm-count adm-count--gray">${activos.length} activos</span>` : ""}
+      ${Help(`<p>Quién entra a la app y qué ve. Los PIN guardados nunca se muestran.</p><p>Equipo autorizado: ${esc(listJoin(TEAM.map((person) => person.name)))}. Si vas a sumar a otra persona, confirmalo antes.</p>`, "Qué es Equipo")}
     </div>
-  `);
+    ${CredentialBox()}
+    <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" id="adm-crear-abrir" type="button" data-adm-sheet="crear">${ico("userPlus", "adm-icon")} Nuevo usuario</button>
+    ${ui.sheet === "crear" ? "" : MsgRegion("users")}
+    ${body}
+    ${Fold("roles", { title: "Qué ve cada rol", iconName: "eye" }, `
+      <ul class="adm-role-help">
+        ${ROLE_CHOICES.map((choice) => `<li>${ico(choice.icon)}<div><strong>${esc(ROLE_LABELS[choice.rol])}</strong><span>${esc(roleLine(choice.rol))}</span></div></li>`).join("")}
+      </ul>
+    `)}
+    ${Fold("equipo", { title: "Equipo y permisos", iconName: "users", count: TEAM.length, id: "adm-equipo" }, `
+      <ul class="adm-list">
+        ${TEAM.map((person) => {
+          const panel = ROLE_PANELS[person.role];
+          return `
+            <li class="adm-row">
+              <span class="adm-avatar adm-avatar--sm adm-avatar--empty adm-avatar--person" aria-hidden="true">${esc(initial(person.name))}</span>
+              <div class="adm-row-main">
+                <strong class="adm-row-title">${esc(person.name)}</strong>
+                <span class="adm-row-meta">${esc(person.label)} · ${panel ? `<a class="adm-link" href="${panel.path}" data-link>Panel ${panel.panel}</a>` : `Panel: ${PENDIENTE}`}</span>
+                <span class="adm-row-meta">${esc(person.tasks)}</span>
+              </div>
+            </li>
+          `;
+        }).join("")}
+      </ul>
+      <div class="adm-roles">
+        ${ROLE_PERMISSIONS.map((item) => `
+          <article class="adm-role">
+            <h3>${item.role}</h3>
+            <p class="adm-row-meta">${esc(item.who)}</p>
+            <ul>${item.can.map((permission) => `<li>${esc(permission)}</li>`).join("")}</ul>
+          </article>
+        `).join("")}
+      </div>
+      <p class="adm-row-meta">Vos decidís la distribución final. Otros paseadores figuran como “Paseador asignado”.</p>
+    `)}
+  `;
 }
 
-function PricesSection(open) {
-  return Section("adm-precios", open, {
-    title: "Planes y precios oficiales",
-    summary: `${REAL_PLANS.length} planes semanales · paseo suelto · descuentos`,
-    iconName: "creditCard",
-  }, `
-    <p class="adm-lead">Precio semanal por perro, según tamaño. Fuente: hoja Planes actualizados y Tabla de precios (10/11/2026).</p>
-    <div class="adm-table-wrap">
-      <table class="adm-table adm-prices">
-        <caption class="adm-sr-only">Planes semanales por tamaño</caption>
-        <thead>
-          <tr><th scope="col">Plan</th>${SIZES.map((size) => `<th scope="col">${size}</th>`).join("")}</tr>
-        </thead>
-        <tbody>
-          ${REAL_PLANS.map((plan) => `
-            <tr>
-              <th scope="row">${plan.name}<span class="adm-th-sub">${plan.walks} paseos por semana</span></th>
-              ${SIZES.map((size) => `<td>${formatPeso(plan.prices[size])}</td>`).join("")}
-            </tr>
+function CrearSheet() {
+  const d = drafts.crear;
+  const choice = ROLE_CHOICES.find((item) => item.rol === d.rol);
+  return Sheet("crear", "Nuevo usuario", `
+    <form class="adm-sheet-form" id="adm-create" data-adm-form="crear" novalidate aria-labelledby="adm-sheet-title">
+      <label class="adm-field" for="adm-crear-nombre">
+        <span>Nombre</span>
+        <input class="adm-input adm-input--big" id="adm-crear-nombre" name="nombre" autocomplete="off" maxlength="60" required placeholder="Ej. Sebastián" value="${esc(d.nombre)}" data-adm-draft="crear" data-adm-key="nombre" />
+      </label>
+      <fieldset class="adm-field">
+        <legend>Rol</legend>
+        <div class="adm-role-grid">
+          ${ROLE_CHOICES.map((item) => `
+            <label class="adm-choice ${item.rol === d.rol ? "is-on" : ""}">
+              <input type="radio" name="rol" value="${item.rol}" ${item.rol === d.rol ? "checked" : ""} data-adm-draft="crear" data-adm-key="rol" />
+              ${ico(item.icon)} <span>${esc(item.short)}</span>
+            </label>
           `).join("")}
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="adm-subtitle">Paseo suelto</h3>
-    <div class="adm-table-wrap">
-      <table class="adm-table adm-prices">
-        <caption class="adm-sr-only">Paseo suelto por tamaño</caption>
-        <thead>
-          <tr><th scope="col">Tipo</th>${SIZES.map((size) => `<th scope="col">${size}</th>`).join("")}</tr>
-        </thead>
-        <tbody>
-          <tr><th scope="row">Individual</th>${SIZES.map((size) => `<td>${formatPeso(REAL_SINGLE_WALK[size].individual)}</td>`).join("")}</tr>
-          <tr><th scope="row">En grupo</th>${SIZES.map((size) => `<td>${formatPeso(REAL_SINGLE_WALK[size].grupo)}</td>`).join("")}</tr>
-        </tbody>
-      </table>
-    </div>
-
-    <h3 class="adm-subtitle">Descuento por varios perros</h3>
-    <ul class="adm-discounts">
-      ${MULTI_DOG_DISCOUNTS.map((item) => `<li><strong>${item.discount}</strong><span>${item.dogs} perros</span></li>`).join("")}
-    </ul>
-    <p class="adm-note">En rutas hay planes que no están en esta tabla (por ejemplo “Plan 3 + individual” y “Plan 6 + 1”): su precio está ${PENDIENTE.toLowerCase()}.</p>
+        </div>
+        <p class="adm-row-meta" data-adm-role-hint aria-live="polite">${esc(choice?.line || "")}</p>
+      </fieldset>
+      <label class="adm-field" for="adm-crear-usuario">
+        <span>Usuario <small>para entrar</small></span>
+        <input class="adm-input" id="adm-crear-usuario" name="usuario" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="31" required placeholder="Ej. sebastian" value="${esc(d.usuario)}" data-adm-draft="crear" data-adm-key="usuario" />
+      </label>
+      <div class="adm-field">
+        <label for="adm-crear-pin"><span>PIN <small>6 a 8 números</small></span></label>
+        <div class="adm-pin-row">
+          <input class="adm-input adm-input--pin" id="adm-crear-pin" name="pin" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="8" required value="${esc(d.pin)}" data-adm-draft="crear" data-adm-key="pin" />
+          <button class="adm-btn adm-btn--ghost" type="button" data-adm-gen-pin="crear">${ico("key")} Generar PIN</button>
+        </div>
+      </div>
+      ${MsgRegion("users")}
+      <div class="adm-sheet-foot">
+        <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" type="submit">${ico("userPlus")} Crear</button>
+      </div>
+    </form>
   `);
 }
 
-/* ---------- Pagos (registro de apoyo, solo admin) ---------- */
+function Sheet(kind, title, body) {
+  return `
+    <div class="adm-sheet ${ui.sheetEnter ? "is-entering" : ""}" data-adm-sheet-backdrop>
+      <div class="adm-sheet-panel" role="dialog" aria-modal="true" aria-labelledby="adm-sheet-title">
+        <div class="adm-sheet-head">
+          <h2 id="adm-sheet-title">${esc(title)}</h2>
+          <button class="adm-btn adm-btn--ghost adm-btn--icon" id="adm-sheet-close" type="button" data-adm-sheet-close aria-label="Cerrar">${ico("x")}</button>
+        </div>
+        <div class="adm-sheet-body" data-adm-sheet-kind="${kind}">${body}</div>
+      </div>
+    </div>
+  `;
+}
 
-function monthLabel(ym) {
+/* ---------- Plata (pagos: registro de apoyo, solo admin) ---------- */
+
+function monthLabel(ym, short = false) {
   const [y, m] = String(ym).split("-").map(Number);
   if (!y || !m) return ym;
-  const text = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 15)));
+  const text = new Intl.DateTimeFormat("es-AR", { month: short ? "short" : "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 15)));
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -1749,157 +1815,354 @@ function PagoRow(pago) {
   const hasMonto = pago.monto !== "" && pago.monto !== null && pago.monto !== undefined && Number.isFinite(monto);
   return `
     <li class="adm-pago ${pago.pasadoAlLibro ? "" : "is-missing"}">
-      <div class="adm-pago-main">
-        <span class="adm-pago-date">${esc(ymdToAR(pago.fecha) || dateAR(pago.creadoEn) || PENDIENTE)}</span>
-        <strong class="adm-pago-concept">${esc(pago.concepto || "Sin concepto")}</strong>
-        <span class="adm-pago-amount">${hasMonto ? esc(formatPeso(monto)) : PENDIENTE}</span>
+      <div class="adm-pago-top">
+        <div class="adm-row-main">
+          <strong class="adm-row-title">${esc(pago.concepto || "Sin concepto")}</strong>
+          <span class="adm-row-meta">${esc(ymdToAR(pago.fecha) || dateAR(pago.creadoEn) || PENDIENTE)}${pago.medio ? ` · ${esc(pago.medio)}` : ""}</span>
+        </div>
+        <strong class="adm-pago-amount">${hasMonto ? esc(formatPeso(monto)) : PENDIENTE}</strong>
       </div>
-      <div class="adm-pago-meta">
-        <span class="adm-pill adm-pill--neutral">${esc(pago.medio || "Medio sin indicar")}</span>
-        <span class="adm-pill ${pago.pasadoAlLibro ? "adm-pill--ok" : "adm-pill--warning"}">${pago.pasadoAlLibro ? "Pasado al Libro" : "Falta pasar al Libro"}</span>
-        ${pago.comprobanteId
-          ? `<span class="adm-pill adm-pill--ok">${icon("fileCheck", "adm-icon-xs")} Con comprobante</span>`
-          : `<span class="adm-pill adm-pill--neutral adm-pill--dashed">Sin comprobante</span>`}
-        ${pago.pendiente ? `<span class="adm-pill adm-pill--info">Se enviará cuando haya señal</span>` : ""}
-        ${fromOther ? `<span class="adm-pill adm-pill--info">Lo cargó ${esc(ROLE_LABELS[creator.rol] || creator.rol)} antes del cambio</span>` : ""}
-      </div>
-      ${byLine(pago, true) ? `<p class="adm-note">${esc(byLine(pago, true))}.</p>` : ""}
-      <div class="adm-pago-actions">
+      ${pago.pendiente || fromOther ? `
+        <span class="adm-chips">
+          ${pago.pendiente ? `<span class="adm-chip adm-chip--blue">Sin enviar</span>` : ""}
+          ${fromOther ? `<span class="adm-chip adm-chip--blue" title="Lo cargó ${esc(ROLE_LABELS[creator.rol] || creator.rol)} antes del cambio de roles">Antes del cambio</span>` : ""}
+        </span>
+      ` : ""}
+      <div class="adm-btn-row">
+        <button class="adm-btn ${pago.pasadoAlLibro ? "adm-btn--done" : "adm-btn--soft"} adm-btn--sm" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
+          ${ico("check")} ${pago.pasadoAlLibro ? "En el Libro" : "Pasé al Libro"}
+        </button>
         ${pago.comprobanteId ? `
-          <button class="adm-button adm-button--ghost adm-button--sm" type="button" data-adm-archivo-abrir="${esc(pago.comprobanteId)}" data-adm-area="pagos">
-            ${icon("eye", "adm-icon-sm")} Ver comprobante
-          </button>
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(pago.comprobanteId)}" data-adm-area="pagos" aria-label="Ver comprobante de ${esc(pago.concepto || "este pago")}">${ico("fileCheck")} Ver comprobante</button>
         ` : pago.pendiente ? "" : `
-          <label class="adm-button adm-button--ghost adm-button--sm adm-file-button">
-            ${icon("fileUp", "adm-icon-sm")} Adjuntar comprobante
+          <label class="adm-btn adm-btn--ghost adm-btn--sm adm-file-button">
+            ${ico("camera")} <span>Comprobante</span>
             <input class="adm-file-input" type="file" accept="${ARCHIVO_ACCEPT}" data-adm-pago-adjuntar="${esc(pago.id)}" aria-label="Adjuntar comprobante a ${esc(pago.concepto || "este pago")}" />
           </label>
         `}
-        <button class="adm-link-button" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
-          ${pago.pasadoAlLibro ? "Desmarcar “pasado al Libro”" : "Marcar como pasado al Libro"}
-        </button>
       </div>
     </li>
   `;
+}
+
+function PlataTab(data) {
+  const mesText = data.mes === "todos" ? "Todos los meses" : monthLabel(data.mes);
+  const shown = ui.pagosTodos ? data.filtered.slice(0, 60) : data.filtered.slice(0, PAGOS_SHORT);
+  const chips = [...data.months.slice(0, 3), "todos"];
+  if (data.mes !== "todos" && !chips.includes(data.mes)) chips.splice(3, 0, data.mes);
+  return `
+    <div class="adm-title-row" id="adm-pagos" tabindex="-1">
+      <h1 id="adm-title" tabindex="-1">Plata</h1>
+      ${Help(`<p>Registro de apoyo para no olvidarte de nada. Fuente oficial: ${LIBRO}. Cada pago se pasa al Libro. Solo vos lo ves.</p>`, "Qué es Plata")}
+    </div>
+    <section class="adm-card adm-money" aria-label="Resumen de ${esc(mesText)}">
+      <p class="adm-money-label">${esc(mesText)}</p>
+      <p class="adm-money-total">${esc(formatPeso(data.total))}</p>
+      <span class="adm-chips">
+        <span class="adm-chip adm-chip--gray">${plural(data.filtered.length, "pago", "pagos")}</span>
+        ${data.faltanMes.length ? `<span class="adm-chip adm-chip--yellow" data-adm-pagos-faltan>${data.faltanMes.length} sin pasar al Libro</span>` : data.filtered.length ? `<span class="adm-chip adm-chip--green" data-adm-pagos-faltan>Todo en el Libro</span>` : ""}
+        ${data.sinComprobanteMes.length ? `<span class="adm-chip adm-chip--gray">${data.sinComprobanteMes.length} sin comprobante</span>` : ""}
+        ${data.mes !== "todos" && data.faltan.length > data.faltanMes.length ? `<span class="adm-chip adm-chip--yellow">${data.faltan.length - data.faltanMes.length} de otros meses</span>` : ""}
+      </span>
+    </section>
+    <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" id="adm-pago-abrir" type="button" data-adm-sheet="pago">${ico("plus", "adm-icon")} Cargar pago</button>
+    ${ui.sheet === "pago" ? "" : MsgRegion("pagos")}
+    <div class="adm-seg" role="group" aria-label="Mes">
+      ${chips.map((m) => `<button class="adm-seg-item ${m === data.mes ? "is-on" : ""}" type="button" data-adm-pagos-mes="${m}" aria-pressed="${m === data.mes}">${m === "todos" ? "Todos" : esc(monthLabel(m, true))}</button>`).join("")}
+    </div>
+    ${shown.length ? `
+      <ul class="adm-pagos" aria-label="Pagos de ${esc(mesText)}">${shown.map(PagoRow).join("")}</ul>
+      ${data.filtered.length > shown.length ? `<button class="adm-btn adm-btn--ghost adm-btn--block" type="button" data-adm-pagos-todos>Ver los ${data.filtered.length}</button>` : ""}
+    ` : `<p class="adm-empty">Sin pagos en ${esc(mesText.toLowerCase())}.</p>`}
+    ${data.deOtros.length ? `<p class="adm-row-meta">${plural(data.deOtros.length, "pago lo cargó", "pagos los cargó")} otro rol antes del cambio de roles (el coordinador ya no ve plata).</p>` : ""}
+    ${FinanceFold()}
+  `;
+}
+
+function FinanceFold() {
+  const billing = theoreticalBilling();
+  return Fold("finanzas", { title: "Facturación teórica", iconName: "chart", id: "adm-finanzas" }, `
+    <p class="adm-money-total adm-money-total--sm">${formatPeso(billing.total)} <small>por semana</small></p>
+    <span class="adm-chips"><span class="adm-chip adm-chip--yellow">Teórica · no es lo cobrado</span></span>
+    <ul class="adm-list adm-list--tight">
+      ${billing.byPlan.map((row) => `<li class="adm-row"><div class="adm-row-main"><strong class="adm-row-title">${row.plan.name}</strong><span class="adm-row-meta">${plural(row.count, "perro", "perros")}</span></div><strong>${formatPeso(row.subtotal)}</strong></li>`).join("")}
+    </ul>
+    ${Help(`<p>Suma del precio de tabla de ${plural(billing.included.length, "perro activo", "perros activos")} con Plan 1, 2 o 3 según su tamaño. Sin descuentos ni acuerdos personales. Lo cobrado está en el ${esc(BUSINESS_INFO.officialSources.money)}.</p>
+      ${billing.excluded.length ? `<p>No incluye ${plural(billing.excluded.length, "perro", "perros")} con planes fuera de la tabla (precio ${PENDIENTE.toLowerCase()}):</p><ul>${billing.excludedPlans.map((plan) => `<li>${esc(plan)}: ${listJoin(billing.excluded.filter((dog) => dog.plan === plan).map((dog) => esc(dog.name)))}.</li>`).join("")}</ul>` : ""}`, "Cómo se calcula")}
+  `);
+}
+
+function ayerAR() {
+  return hoyAR(new Date(Date.now() - DAY_MS));
 }
 
 // Comprobante elegido para el pago nuevo (sigue elegido aunque la página se vuelva a dibujar).
 function PagoArchivoField() {
   const file = drafts.pagoArchivo;
   const offline = isOffline();
+  if (file) {
+    return `
+      <p class="adm-file-chosen">
+        ${ico(file.type === "application/pdf" ? "fileText" : "fileCheck")}
+        <span><strong>${esc(file.name || "Comprobante")}</strong>${fileSize(file.size) ? ` · ${esc(fileSize(file.size))}` : ""}${drafts.pagoSubido ? " · ya subido" : ""}</span>
+        <button class="adm-btn adm-btn--ghost adm-btn--sm" id="adm-pago-archivo-quitar" type="button" data-adm-pago-quitar>${ico("x")} Quitar</button>
+      </p>
+    `;
+  }
   return `
-    <fieldset class="adm-file-field" aria-describedby="adm-pago-archivo-ayuda">
-      <legend>Comprobante <small>opcional · foto o PDF, hasta 3,5 MB</small></legend>
-      ${file ? `
-        <p class="adm-file-chosen" id="adm-pago-archivo-elegido">
-          ${icon(file.type === "application/pdf" ? "fileText" : "camera", "adm-icon-sm")}
-          <span><strong>${esc(file.name || "Comprobante")}</strong>${fileSize(file.size) ? ` · ${esc(fileSize(file.size))}` : ""}${drafts.pagoSubido ? " · ya subido" : ""}</span>
-          <button class="adm-link-button" id="adm-pago-archivo-quitar" type="button" data-adm-pago-quitar>Quitar</button>
-        </p>
-      ` : `
-        <div class="adm-file-choices">
-          <label class="adm-button adm-button--ghost adm-file-button">
-            ${icon("camera", "adm-icon-sm")} Sacar foto
-            <input class="adm-file-input" id="adm-pago-foto" type="file" accept="image/*" capture="environment" data-adm-pago-archivo />
-          </label>
-          <label class="adm-button adm-button--ghost adm-file-button">
-            ${icon("fileUp", "adm-icon-sm")} Elegir foto o PDF
-            <input class="adm-file-input" id="adm-pago-archivo" type="file" accept="${ARCHIVO_ACCEPT}" data-adm-pago-archivo />
-          </label>
-        </div>
-      `}
-      <p class="adm-note" id="adm-pago-archivo-ayuda">${offline
-        ? "Sin señal no se pueden subir archivos (no quedan en espera). Guardá el pago sin comprobante y adjuntalo desde la lista cuando vuelva la señal."
-        : "Sirve una captura de la transferencia de Naranja X o una foto del recibo. Lo ves solo vos."}</p>
-    </fieldset>
+    <label class="adm-btn adm-btn--soft adm-btn--block adm-file-button">
+      ${ico("camera")} <span>Sacar foto del comprobante</span>
+      <input class="adm-file-input" id="adm-pago-foto" type="file" accept="image/*" capture="environment" data-adm-pago-archivo />
+    </label>
+    <label class="adm-btn adm-btn--link adm-file-button">
+      ${ico("fileUp")} <span>Elegir archivo</span>
+      <input class="adm-file-input" id="adm-pago-archivo" type="file" accept="${ARCHIVO_ACCEPT}" data-adm-pago-archivo />
+    </label>
+    <p class="adm-row-meta">${offline ? "Sin señal no se sube: guardalo sin comprobante y adjuntalo después." : "Opcional. Foto o PDF, hasta 3,5 MB."}</p>
   `;
 }
 
-function PagosSection(open) {
-  const data = pagosData();
+function PagoSheet() {
   const d = drafts.pago;
-  const shown = data.filtered.slice(0, 20);
-  const mesText = data.mes === "todos" ? "todos los meses" : monthLabel(data.mes).toLowerCase();
-
-  return Section("adm-pagos", open, {
-    title: "Pagos · registro de apoyo",
-    summary: data.faltan.length ? `${plural(data.faltan.length, "pago falta", "pagos faltan")} pasar al Libro contable` : "Nada pendiente de pasar al Libro contable",
-    iconName: "receipt",
-  }, `
-    <div class="adm-official">
-      ${icon("fileCheck", "adm-icon")}
-      <div>
-        <strong>Fuente oficial: ${LIBRO}</strong>
-        <p>Esto es un registro de apoyo para no olvidarte de nada: cada pago se tiene que pasar al Libro contable. Solo el admin lo ve y lo carga.</p>
-      </div>
-    </div>
-
-    <form class="adm-form" id="adm-pago-form" data-adm-form="pago" novalidate aria-labelledby="adm-pago-title">
-      <h3 id="adm-pago-title">Cargar un pago</h3>
-      <div class="adm-form-grid">
-        <label class="adm-field" for="adm-pago-fecha">
-          <span>Fecha</span>
-          <input class="adm-input" id="adm-pago-fecha" type="date" required value="${esc(d.fecha)}" data-adm-draft="pago" data-adm-key="fecha" />
-        </label>
-        <label class="adm-field" for="adm-pago-monto">
-          <span>Monto <small>en pesos</small></span>
-          <input class="adm-input" id="adm-pago-monto" inputmode="decimal" autocomplete="off" maxlength="15" required placeholder="Ej. 35000" value="${esc(d.monto)}" data-adm-draft="pago" data-adm-key="monto" />
-        </label>
-        <label class="adm-field" for="adm-pago-concepto">
-          <span>Concepto</span>
-          <input class="adm-input" id="adm-pago-concepto" autocomplete="off" maxlength="120" required placeholder="Ej. Plan 2, semana del 09/11" value="${esc(d.concepto)}" data-adm-draft="pago" data-adm-key="concepto" />
-        </label>
-        <label class="adm-field" for="adm-pago-medio">
-          <span>Medio <small>elegí o escribí</small></span>
-          <input class="adm-input" id="adm-pago-medio" list="adm-pago-medios" autocomplete="off" maxlength="40" placeholder="Ej. Efectivo" value="${esc(d.medio)}" data-adm-draft="pago" data-adm-key="medio" />
-          <datalist id="adm-pago-medios">${PAGO_MEDIOS.map((medio) => `<option value="${esc(medio)}"></option>`).join("")}</datalist>
-        </label>
-      </div>
-      ${PagoArchivoField()}
-      <label class="adm-check" for="adm-pago-libro">
-        <input id="adm-pago-libro" type="checkbox" ${d.pasadoAlLibro ? "checked" : ""} data-adm-draft="pago" data-adm-key="pasadoAlLibro" />
-        <span>Ya lo pasé al Libro contable</span>
+  const hoy = hoyAR();
+  const ayer = ayerAR();
+  const monto = parseMonto(d.monto);
+  const medioOtro = d.medioSel === "Otro";
+  return Sheet("pago", "Cargar pago", `
+    <form class="adm-sheet-form" id="adm-pago-form" data-adm-form="pago" novalidate aria-labelledby="adm-sheet-title">
+      <label class="adm-field" for="adm-pago-monto">
+        <span>Monto</span>
+        <span class="adm-money-input">
+          <span aria-hidden="true">$</span>
+          <input class="adm-input adm-input--money" id="adm-pago-monto" inputmode="numeric" autocomplete="off" maxlength="15" required placeholder="0" value="${esc(d.monto)}" data-adm-draft="pago" data-adm-key="monto" aria-describedby="adm-monto-preview" />
+        </span>
+        <span class="adm-row-meta" id="adm-monto-preview" data-adm-monto-preview>${Number.isFinite(monto) && monto > 0 ? esc(formatPeso(monto)) : "Solo números"}</span>
       </label>
-      <div class="adm-form-actions">
-        <button class="adm-button adm-button--primary" id="adm-pago-guardar" type="submit" aria-disabled="${ui.savingPago}">
-          ${icon("plus", "adm-icon-sm")} ${ui.savingPago ? (drafts.pagoArchivo && !drafts.pagoSubido ? "Subiendo el comprobante…" : "Guardando…") : "Guardar pago"}
+      <fieldset class="adm-field">
+        <legend>Medio</legend>
+        <div class="adm-seg adm-seg--wrap">
+          ${[...PAGO_MEDIOS, "Otro"].map((medio) => `
+            <label class="adm-seg-item ${d.medioSel === medio ? "is-on" : ""}">
+              <input type="radio" name="medio" value="${esc(medio)}" ${d.medioSel === medio ? "checked" : ""} data-adm-draft="pago" data-adm-key="medioSel" />
+              ${esc(medio)}
+            </label>
+          `).join("")}
+        </div>
+        ${medioOtro ? `<label class="adm-sr-only" for="adm-pago-medio-otro">Otro medio</label><input class="adm-input" id="adm-pago-medio-otro" autocomplete="off" maxlength="40" placeholder="¿Cuál?" value="${esc(d.medioOtro)}" data-adm-draft="pago" data-adm-key="medioOtro" />` : ""}
+      </fieldset>
+      <div class="adm-field">
+        <label for="adm-pago-concepto"><span>Concepto</span></label>
+        <div class="adm-seg adm-seg--wrap" role="group" aria-label="Conceptos rápidos">
+          ${PAGO_CONCEPTOS.map((concepto) => `<button class="adm-seg-item ${d.concepto === concepto ? "is-on" : ""}" type="button" data-adm-concepto="${esc(concepto)}" aria-pressed="${d.concepto === concepto}">${esc(concepto)}</button>`).join("")}
+        </div>
+        <input class="adm-input" id="adm-pago-concepto" autocomplete="off" maxlength="120" required placeholder="Ej. Plan 2, semana del 09/11" value="${esc(d.concepto)}" data-adm-draft="pago" data-adm-key="concepto" />
+      </div>
+      <fieldset class="adm-field">
+        <legend>Fecha</legend>
+        <div class="adm-seg adm-seg--wrap">
+          <button class="adm-seg-item ${d.fecha === hoy ? "is-on" : ""}" type="button" data-adm-fecha="${hoy}" aria-pressed="${d.fecha === hoy}">Hoy</button>
+          <button class="adm-seg-item ${d.fecha === ayer ? "is-on" : ""}" type="button" data-adm-fecha="${ayer}" aria-pressed="${d.fecha === ayer}">Ayer</button>
+          <label class="adm-seg-item adm-date-pick ${d.fecha !== hoy && d.fecha !== ayer ? "is-on" : ""}" for="adm-pago-fecha">
+            ${ico("calendarCheck")} <span>${d.fecha !== hoy && d.fecha !== ayer && d.fecha ? esc(ymdToAR(d.fecha)) : "Otra"}</span>
+            <input class="adm-date-native" id="adm-pago-fecha" type="date" required value="${esc(d.fecha)}" data-adm-draft="pago" data-adm-key="fecha" aria-label="Otra fecha. Elegida: ${esc(ymdToAR(d.fecha) || "ninguna")}" />
+          </label>
+        </div>
+      </fieldset>
+      <div class="adm-field">
+        <span class="adm-field-label">Comprobante</span>
+        ${PagoArchivoField()}
+      </div>
+      <label class="adm-switch" for="adm-pago-libro">
+        <input id="adm-pago-libro" type="checkbox" ${d.pasadoAlLibro ? "checked" : ""} data-adm-draft="pago" data-adm-key="pasadoAlLibro" />
+        <span class="adm-switch-ui" aria-hidden="true"></span>
+        <span>Ya está en el Libro</span>
+      </label>
+      ${MsgRegion("pagos")}
+      <div class="adm-sheet-foot">
+        <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" id="adm-pago-guardar" type="submit" aria-disabled="${ui.savingPago}">
+          ${ico("check")} ${ui.savingPago ? (drafts.pagoArchivo && !drafts.pagoSubido ? "Subiendo…" : "Guardando…") : "Guardar pago"}
         </button>
       </div>
     </form>
-    ${MsgRegion("pagos")}
-
-    <div class="adm-pagos-head">
-      <label class="adm-field adm-field--inline" for="adm-pagos-mes">
-        <span>Mes</span>
-        <select class="adm-input adm-input--sm" id="adm-pagos-mes" data-adm-pagos-mes>
-          ${data.months.map((m) => `<option value="${m}" ${m === data.mes ? "selected" : ""}>${esc(monthLabel(m))}</option>`).join("")}
-          <option value="todos" ${data.mes === "todos" ? "selected" : ""}>Todos los meses</option>
-        </select>
-      </label>
-      ${data.filtered.length ? `
-        <p class="adm-pagos-summary">
-          <strong>${plural(data.filtered.length, "pago", "pagos")}</strong> en ${esc(mesText)} · suma ${esc(formatPeso(data.total))} ·
-          <strong class="${data.faltanMes.length ? "adm-text-warning" : ""}" data-adm-pagos-faltan>${data.faltanMes.length} sin pasar al Libro</strong>${data.mes !== "todos" && data.faltan.length !== data.faltanMes.length ? ` (${data.faltan.length} contando todos los meses)` : ""}${data.sinComprobanteMes.length ? ` · ${data.sinComprobanteMes.length} sin comprobante` : ""}
-        </p>
-      ` : data.faltan.length ? `
-        <p class="adm-pagos-summary"><strong class="adm-text-warning" data-adm-pagos-faltan>${plural(data.faltan.length, "pago", "pagos")} de otros meses sin pasar al Libro.</strong> Elegí “Todos los meses” para verlos.</p>
-      ` : ""}
-    </div>
-    ${data.deOtros.length ? `<p class="adm-note">${data.deOtros.length === 1 ? "1 pago lo cargó" : `${data.deOtros.length} pagos los cargó`} otro rol antes del cambio de roles (el coordinador ya no ve plata). Se ven acá con la marca “antes del cambio”.</p>` : ""}
-    ${shown.length ? `
-      <ul class="adm-pago-list" aria-label="Pagos de ${esc(mesText)}">${shown.map(PagoRow).join("")}</ul>
-      ${data.filtered.length > shown.length ? `<p class="adm-note">Se muestran los últimos ${shown.length}. Hay ${plural(data.filtered.length - shown.length, "pago más", "pagos más")} en ${esc(mesText)}.</p>` : ""}
-    ` : `<p class="adm-empty">No hay pagos cargados en ${esc(mesText)}. Cargalos con el formulario de arriba cuando te paguen.</p>`}
-    ${data.filtered.length ? `<p class="adm-note">La suma es solo de este registro de apoyo: no reemplaza al Libro contable.</p>` : ""}
   `);
+}
+
+/* ---------- Más ---------- */
+
+function fotosResumen() {
+  const conFoto = REAL_DOGS.filter((dog) => fotosPerros.de(dog.id)).length;
+  return { conFoto, total: REAL_DOGS.length };
+}
+
+function MasTab() {
+  if (ui.mas && MAS_VIEWS[ui.mas]) return MasView(ui.mas);
+  const fotos = fotosResumen();
+  const archivosNuevos = archivosData().nuevos.length;
+  const datos = reviewDogs().length;
+  const tiles = [
+    { id: "fotos", sub: `${fotos.conFoto} de ${fotos.total}`, tone: fotos.conFoto < fotos.total ? "yellow" : "green" },
+    { id: "carga", sub: `${weeklyLoad().weekTotal} salidas` },
+    { id: "planes", sub: `${REAL_PLANS.length} planes` },
+    { id: "archivos", sub: archivosNuevos ? `${archivosNuevos} nuevos` : `${archivosData().all.length}`, tone: archivosNuevos ? "blue" : "" },
+    { id: "datos", sub: `${datos} perros`, tone: datos ? "yellow" : "" },
+    { id: "clientes", sub: `${clientesResumen().totals.activo} activos` },
+    { id: "indicadores", sub: "Con fuente" },
+  ];
+  return `
+    <div class="adm-title-row">
+      <h1 id="adm-title" tabindex="-1">Más</h1>
+    </div>
+    <div class="adm-tiles">
+      ${tiles.map((tile) => `
+        <button class="adm-tile" type="button" data-adm-mas="${tile.id}">
+          <span class="adm-tile-icon">${ico(MAS_VIEWS[tile.id].icon, "adm-icon")}</span>
+          <strong>${esc(MAS_VIEWS[tile.id].title)}</strong>
+          <span class="${tile.tone ? `adm-chip adm-chip--${tile.tone}` : "adm-row-meta"}">${esc(tile.sub)}</span>
+        </button>
+      `).join("")}
+      <button class="adm-tile" type="button" data-a11y-toggle aria-controls="a11y-panel">
+        <span class="adm-tile-icon">${ico("eye", "adm-icon")}</span>
+        <strong>Tema y movimiento</strong>
+        <span class="adm-row-meta">Oscuro, calmo</span>
+      </button>
+      <button class="adm-tile" type="button" data-adm-copy>
+        <span class="adm-tile-icon">${ico("copy", "adm-icon")}</span>
+        <strong>Copiar resumen</strong>
+        <span class="adm-row-meta">Para WhatsApp</span>
+      </button>
+    </div>
+    <h2 class="adm-h2">Ver como</h2>
+    <div class="adm-btn-row adm-btn-row--3">
+      <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/coordinador" data-link>${ico("route")} Coordina</a>
+      <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/supervisor" data-link>${ico("radar")} Supervisa</a>
+      <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/paseador" data-link>${ico("pawPrint")} Pasea</a>
+    </div>
+    <div class="adm-btn-row">
+      <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/login" data-link>${ico("key")} Cambiar mi PIN</a>
+    </div>
+    <div class="adm-foot">Datos al ${DATA_UPDATED}. ${Help(`<p>Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Rutas: ${esc(BUSINESS_INFO.officialSources.routes)}. Plata: ${esc(BUSINESS_INFO.officialSources.money)}.</p><p>Esta página no muestra teléfonos ni domicilios de tutores. Los pagos anotados acá son un registro de apoyo (solo admin): la fuente oficial es el ${LIBRO}.</p>`, "Fuentes")}</div>
+  `;
+}
+
+function MasView(view) {
+  const info = MAS_VIEWS[view];
+  const body = {
+    fotos: FotosView,
+    carga: CargaView,
+    planes: PlanesView,
+    archivos: ArchivosView,
+    datos: DatosView,
+    clientes: ClientesView,
+    indicadores: IndicadoresView,
+  }[view]();
+  return `
+    <button class="adm-btn adm-btn--link adm-back" type="button" data-adm-mas-back>${ico("arrowLeft")} Más</button>
+    <section class="adm-view" id="adm-${view === "planes" ? "precios" : view}" tabindex="-1" aria-labelledby="adm-title">
+      <h1 id="adm-title" tabindex="-1">${esc(info.title)}</h1>
+      ${body}
+    </section>
+  `;
+}
+
+function FotosView() {
+  const { conFoto, total } = fotosResumen();
+  const faltan = REAL_DOGS.filter((dog) => !fotosPerros.de(dog.id));
+  const filtro = ui.fotosFiltro === "todos" || !faltan.length ? "todos" : "faltan";
+  const dogs = (filtro === "faltan" ? faltan : REAL_DOGS).slice()
+    .sort((a, b) => (a.status === "Activo" ? 0 : 1) - (b.status === "Activo" ? 0 : 1) || a.name.localeCompare(b.name));
+  return `
+    <div class="adm-photo-progress">
+      <p><strong>${conFoto} de ${total}</strong> con foto</p>
+      <span class="adm-progress" aria-hidden="true"><span style="--v:${(total ? conFoto / total : 0).toFixed(3)}"></span></span>
+    </div>
+    <p class="adm-row-meta">${ico("camera", "adm-icon-xs")} ${isOffline() ? "Sin señal: las fotos no se pueden subir ahora." : "Las fotos necesitan señal."}</p>
+    <div class="adm-seg" role="group" aria-label="Qué perros mostrar">
+      <button class="adm-seg-item ${filtro === "faltan" ? "is-on" : ""}" type="button" data-adm-fotos-filtro="faltan" aria-pressed="${filtro === "faltan"}" ${faltan.length ? "" : "disabled"}>Faltan (${faltan.length})</button>
+      <button class="adm-seg-item ${filtro === "todos" ? "is-on" : ""}" type="button" data-adm-fotos-filtro="todos" aria-pressed="${filtro === "todos"}">Todos (${total})</button>
+    </div>
+    ${MsgRegion("fotos")}
+    <ul class="adm-photo-grid">
+      ${dogs.map((dog) => {
+        const foto = fotoDe(dog.id);
+        const src = foto?.miniatura || null;
+        return `
+          <li class="adm-photo ${dog.status !== "Activo" ? "is-inactive" : ""}" data-adm-foto-card="${esc(dog.id)}">
+            ${src && foto?.archivoId
+              ? `<button class="adm-photo-img" type="button" data-adm-foto-ver="${esc(foto.archivoId)}" aria-label="Ver la foto grande de ${esc(dog.name)}"><img src="${esc(src)}" alt="" loading="lazy" /></button>`
+              : src
+                ? `<span class="adm-photo-img"><img src="${esc(src)}" alt="Foto de ${esc(dog.name)}" loading="lazy" /></span>`
+                : `<span class="adm-photo-img adm-photo-img--empty" aria-hidden="true">${esc(initial(dog.name))}</span>`}
+            <strong class="adm-photo-name">${esc(dog.name)}</strong>
+            ${dog.status !== "Activo" ? `<span class="adm-chip adm-chip--gray">${esc(dog.status)}</span>` : SafetyChips(dog)}
+            ${FotoButton(dog.id, dog.name, { change: Boolean(src) })}
+          </li>
+        `;
+      }).join("")}
+    </ul>
+    ${!dogs.length ? `<p class="adm-empty">Todos tienen foto.</p>` : ""}
+  `;
+}
+
+function CargaView() {
+  const load = weeklyLoad();
+  const busiestText = load.busiest.length ? listJoin(load.busiest) : "Sin datos";
+  return `
+    <span class="adm-chips"><span class="adm-chip adm-chip--blue">Más carga: ${esc(busiestText)} (${load.maxTotal})</span><span class="adm-chip adm-chip--gray">${load.weekTotal} salidas</span></span>
+    <div class="adm-load-legend" aria-hidden="true"><span class="adm-dot"></span> Mañana <span class="adm-dot adm-dot--tarde"></span> Tarde</div>
+    <ul class="adm-load" aria-label="Perros por día y turno">
+      ${load.rows.map((row) => {
+        const isBusiest = load.busiest.includes(row.day);
+        return `
+          <li class="adm-load-row ${isBusiest ? "is-busiest" : ""}">
+            <strong class="adm-load-day">${SHORT_DAYS[row.day]}<span class="adm-sr-only"> (${row.day})</span></strong>
+            <span class="adm-load-bars">
+              <span class="adm-bar-cell"><span class="adm-bar" style="--v:${(row.morning / load.maxShift).toFixed(3)}" aria-hidden="true"></span><span class="adm-bar-value"><span class="adm-sr-only">Mañana: </span>${row.morning}</span></span>
+              <span class="adm-bar-cell"><span class="adm-bar adm-bar--tarde" style="--v:${(row.afternoon / load.maxShift).toFixed(3)}" aria-hidden="true"></span><span class="adm-bar-value"><span class="adm-sr-only">Tarde: </span>${row.afternoon}</span></span>
+            </span>
+            <strong class="adm-load-total"><span class="adm-sr-only">Total: </span>${row.total || "—"}</strong>
+          </li>
+        `;
+      }).join("")}
+    </ul>
+    ${Help(`<p>Perros por día y turno, de BASE RUTAS (${DATA_UPDATED}). Solo perros activos.</p>
+      <p>${listJoin(load.twoShifts.map((dog) => esc(dog.name)))} ${load.twoShifts.length === 1 ? "sale" : "salen"} en los dos turnos: cuentan dos veces en el total.</p>
+      <p>Mañana: ruta ${SHIFTS.manana.route} (${SHIFTS.manana.from} a ${SHIFTS.manana.to}), supervisa ${SHIFTS.manana.supervisor}. Tarde: rutas ${SHIFTS.tarde.routes.join(" y ")} (${SHIFTS.tarde.from} a ${SHIFTS.tarde.to}), supervisa ${SHIFTS.tarde.supervisor}.</p>
+      <p>Máximo diario histórico: ${esc(BUSINESS_FACTS.find((f) => /máximo/i.test(f.label))?.value || PENDIENTE)} perros.</p>`, "Cómo se cuenta")}
+  `;
+}
+
+function PlanesView() {
+  return `
+    <ul class="adm-plans">
+      ${REAL_PLANS.map((plan) => `
+        <li class="adm-card adm-plan">
+          <div class="adm-plan-head"><strong>${plan.name}</strong><span class="adm-chip adm-chip--gray">${plan.walks} paseos/sem</span></div>
+          <dl class="adm-plan-prices">
+            ${SIZES.map((size) => `<div><dt>${size}</dt><dd>${formatPeso(plan.prices[size])}</dd></div>`).join("")}
+          </dl>
+        </li>
+      `).join("")}
+      <li class="adm-card adm-plan">
+        <div class="adm-plan-head"><strong>Paseo suelto</strong><span class="adm-chip adm-chip--gray">Individual / grupo</span></div>
+        <dl class="adm-plan-prices">
+          ${SIZES.map((size) => `<div><dt>${size}</dt><dd>${formatPeso(REAL_SINGLE_WALK[size].individual)}<small>${formatPeso(REAL_SINGLE_WALK[size].grupo)}</small></dd></div>`).join("")}
+        </dl>
+      </li>
+    </ul>
+    <h2 class="adm-h2">Varios perros</h2>
+    <div class="adm-chips adm-chips--wrap">
+      ${MULTI_DOG_DISCOUNTS.map((item) => `<span class="adm-chip adm-chip--green">${item.dogs} perros: −${item.discount}</span>`).join("")}
+    </div>
+    ${Help(`<p>Precio semanal por perro según tamaño. Fuente: hoja Planes actualizados y Tabla de precios (10/11/2026).</p><p>En rutas hay planes que no están en esta tabla (por ejemplo “Plan 3 + individual” y “Plan 6 + 1”): su precio está ${PENDIENTE.toLowerCase()}.</p>`, "Fuente de los precios")}
+  `;
 }
 
 /* ---------- Archivos recibidos (carnets, comprobantes, documentos) ---------- */
 
 const UBICACIONES = {
-  drive: "En tu Google Drive",
-  vercel: "Guardado en Vercel (provisorio)",
-  local: "Guardado en el servidor de prueba",
+  drive: "Drive",
+  vercel: "Vercel (provisorio)",
+  local: "Servidor de prueba",
 };
 
 function archivosData() {
@@ -1916,9 +2179,6 @@ function archivosData() {
 // A qué perro, cliente, pedido o pago corresponde un archivo (solo con lo que ya está en la página).
 function archivoLinks(archivo) {
   const links = [];
-  if (archivo.perroNombre || archivo.perroId) {
-    links.push(`Perro: ${archivo.perroNombre || archivo.perroId}${archivo.perroNombre && archivo.perroId ? ` (${archivo.perroId})` : ""}`);
-  }
   if (archivo.clienteId) {
     const cliente = registros.cached("clientes", liveOpts("clientes")).find((item) => item.id === archivo.clienteId);
     links.push(`Cliente: ${cliente?.nombre || archivo.clienteId}`);
@@ -1928,7 +2188,7 @@ function archivoLinks(archivo) {
     const estado = pedido ? { nuevo: "nuevo", "en-curso": "en curso", resuelto: "resuelto" }[pedido.estado || "nuevo"] || pedido.estado : "";
     links.push(pedido
       ? `Pedido: ${pedido.titulo || pedido.tipo || "sin título"}${estado ? ` (${estado})` : ""}`
-      : "Pedido del formulario web");
+      : "Pedido de la web");
   }
   const pago = pagoDeArchivo(archivo);
   if (pago) links.push(`Pago: ${pago.concepto || "sin concepto"}${pago.fecha ? ` del ${ymdToAR(pago.fecha)}` : ""}`);
@@ -1941,86 +2201,78 @@ function pagoDeArchivo(archivo) {
 }
 
 function ArchivoRow(archivo) {
-  const tipo = ARCHIVO_TIPOS[archivo.tipo] || { label: archivo.tipo || "Archivo", tone: "neutral" };
+  const tipo = ARCHIVO_TIPOS[archivo.tipo] || { label: archivo.tipo || "Archivo", tone: "gray" };
   const links = archivoLinks(archivo);
-  const who = archivo.creadoPorNombre || nameOf(archivo.creadoPor) || "";
-  const when = archivo.creadoEn ? `${dateAR(archivo.creadoEn)} a las ${timeAR(archivo.creadoEn)}` : ymdToAR(archivo.fecha);
+  const who = archivo.creadoPor === "web" ? "Web" : archivo.creadoPorNombre || nameOf(archivo.creadoPor) || "";
+  const when = archivo.creadoEn ? dateAR(archivo.creadoEn) : ymdToAR(archivo.fecha);
   const isNew = Date.now() - Date.parse(archivo.creadoEn || "") < DAY_MS;
-  const ubicacion = UBICACIONES[archivo.ubicacion] || "Lugar de guardado sin indicar";
-  const kind = archivo.mime === "application/pdf" ? "PDF" : /^image\//.test(archivo.mime || "") ? "Foto" : "";
   const label = `${tipo.label}${archivo.perroNombre ? ` de ${archivo.perroNombre}` : ""}`;
   const driveUrl = /^https:\/\//i.test(archivo.driveUrl || "") ? archivo.driveUrl : "";
+  const dog = dogById(archivo.perroId, archivo.perroNombre);
   return `
-    <li class="adm-archivo adm-archivo--${tipo.tone}">
-      <div class="adm-archivo-head">
-        <span class="adm-pill adm-pill--${tipo.tone}">${esc(tipo.label)}</span>
-        ${isNew ? `<span class="adm-pill adm-pill--info">Nuevo</span>` : ""}
-        <strong class="adm-archivo-title">${esc(archivo.perroNombre || pagoDeArchivo(archivo)?.concepto || archivo.nombreOriginal || archivo.nombreArchivo || tipo.label)}</strong>
-      </div>
-      <p class="adm-archivo-links">${links.length ? esc(links.join(" · ")) : "Sin vincular a un perro, cliente o pedido."}</p>
-      <p class="adm-note">${archivo.creadoPor === "web" ? "Llegó por el formulario de la web" : `Subido por ${esc(who || "alguien sin nombre")}`}${when ? ` el ${esc(when)}` : ""}${kind ? ` · ${kind}` : ""}${fileSize(archivo.tamano) ? ` · ${esc(fileSize(archivo.tamano))}` : ""}</p>
-      <div class="adm-archivo-foot">
-        <span class="adm-archivo-where ${archivo.ubicacion === "drive" ? "is-drive" : "is-temp"}">
-          ${icon(archivo.ubicacion === "drive" ? "checkCircle" : "database", "adm-icon-sm")}
-          ${archivo.ubicacion === "drive" && driveUrl
-            ? `<a class="adm-inline-link" href="${esc(driveUrl)}" target="_blank" rel="noopener noreferrer">${ubicacion}<span class="adm-sr-only"> (se abre en otra pestaña)</span></a>`
-            : esc(ubicacion)}
+    <li class="adm-row adm-archivo">
+      ${archivo.perroId || archivo.perroNombre ? DogAvatar(dog?.id || archivo.perroId, archivo.perroNombre || "?", "md") : `<span class="adm-avatar adm-avatar--md adm-avatar--empty" aria-hidden="true">${ico(archivo.mime === "application/pdf" ? "fileText" : "fileUp")}</span>`}
+      <div class="adm-row-main">
+        <strong class="adm-row-title">${esc(archivo.perroNombre || pagoDeArchivo(archivo)?.concepto || archivo.nombreOriginal || archivo.nombreArchivo || tipo.label)}</strong>
+        <span class="adm-chips">
+          <span class="adm-chip adm-chip--${tipo.tone}">${esc(tipo.label)}</span>
+          ${isNew ? `<span class="adm-chip adm-chip--blue">Nuevo</span>` : ""}
+          ${archivo.ubicacion && archivo.ubicacion !== "drive" ? `<span class="adm-chip adm-chip--gray">${esc(UBICACIONES[archivo.ubicacion] || archivo.ubicacion)}</span>` : ""}
         </span>
-        <button class="adm-button adm-button--ghost adm-button--sm" type="button" data-adm-archivo-abrir="${esc(archivo.id)}" data-adm-area="archivos" aria-label="Abrir ${esc(label)}">
-          ${icon("eye", "adm-icon-sm")} Abrir
-        </button>
+        <span class="adm-row-meta">${esc([who, when, fileSize(archivo.tamano), ...links].filter(Boolean).join(" · "))}${driveUrl ? ` · <a class="adm-link" href="${esc(driveUrl)}" target="_blank" rel="noopener noreferrer">Drive<span class="adm-sr-only"> (se abre en otra pestaña)</span></a>` : ""}</span>
       </div>
+      <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(archivo.id)}" data-adm-area="archivos" aria-label="Abrir ${esc(label)}">${ico("eye")} Abrir</button>
     </li>
   `;
 }
 
-function ArchivosSection(open) {
+function ArchivosView() {
   const data = archivosData();
   const shown = data.filtered.slice(0, ARCHIVOS_SHOWN);
   const tipoText = data.tipo === "todos" ? "" : ` de tipo “${ARCHIVO_TIPOS[data.tipo].label.toLowerCase()}”`;
-  const summary = data.all.length
-    ? `${plural(data.all.length, "archivo", "archivos")}${data.nuevos.length ? ` · ${plural(data.nuevos.length, "nuevo", "nuevos")} en las últimas 24 h` : ""}`
-    : "Todavía no llegó ningún archivo";
-
-  return Section("adm-archivos", open, {
-    title: "Archivos recibidos",
-    summary,
-    iconName: "fileUp",
-  }, `
-    <p class="adm-lead">Carnets de vacunas, comprobantes y documentos que manda la gente desde el formulario de la web o que sube el equipo. Cada uno dice a qué perro, cliente o pedido corresponde. Los comprobantes de pago los abrís solo vos.</p>
-    ${isOffline() ? `<p class="adm-msg is-error">Sin señal: ves la lista que ya tenías. Para abrir o subir archivos hace falta señal.</p>` : ""}
-    ${data.enVercel || data.enPrueba ? `
-      <p class="adm-warn-box">${icon("alertCircle", "adm-icon-sm")} <span>${listJoin([
-        data.enVercel ? `${data.enVercel === 1 ? "1 archivo está guardado" : `${data.enVercel} archivos están guardados`} en Vercel (provisorio)` : "",
-        data.enPrueba ? `${data.enPrueba === 1 ? "1 archivo está" : `${data.enPrueba} archivos están`} en el servidor de prueba` : "",
-      ].filter(Boolean))}. Cuando se conecte la planilla, los archivos nuevos van a ir a tu Google Drive; los que ya llegaron quedan donde están.</span></p>
-    ` : ""}
+  return `
+    ${isOffline() ? `<p class="adm-warn-line">${ico("alertCircle")} <span>Sin señal: para abrir archivos hace falta señal.</span></p>` : ""}
+    ${data.enVercel || data.enPrueba ? `<div class="adm-warn-line">${ico("alertCircle")} <span>${data.enVercel + data.enPrueba} fuera de Drive.</span> ${Help(`<p>${listJoin([
+      data.enVercel ? `${data.enVercel === 1 ? "1 archivo está guardado" : `${data.enVercel} archivos están guardados`} en Vercel (provisorio)` : "",
+      data.enPrueba ? `${data.enPrueba === 1 ? "1 archivo está" : `${data.enPrueba} archivos están`} en el servidor de prueba` : "",
+    ].filter(Boolean))}. Cuando se conecte la planilla, los nuevos van a tu Google Drive; los que ya llegaron quedan donde están.</p>`, "Dónde están los archivos")}</div>` : ""}
     ${data.all.length ? `
-      <div class="adm-pagos-head">
-        <label class="adm-field adm-field--inline" for="adm-archivos-tipo">
-          <span>Tipo</span>
-          <select class="adm-input adm-input--sm" id="adm-archivos-tipo" data-adm-archivos-tipo>
-            <option value="todos" ${data.tipo === "todos" ? "selected" : ""}>Todos (${data.all.length})</option>
-            ${Object.entries(ARCHIVO_TIPOS).map(([key, item]) => `<option value="${esc(key)}" ${data.tipo === key ? "selected" : ""}>${esc(item.label)} (${data.counts[key]})</option>`).join("")}
-          </select>
-        </label>
+      <div class="adm-seg adm-seg--wrap" role="group" aria-label="Tipo de archivo">
+        <button class="adm-seg-item ${data.tipo === "todos" ? "is-on" : ""}" type="button" data-adm-archivos-tipo="todos" aria-pressed="${data.tipo === "todos"}">Todos (${data.all.length})</button>
+        ${Object.entries(ARCHIVO_TIPOS).filter(([key]) => data.counts[key]).map(([key, item]) => `<button class="adm-seg-item ${data.tipo === key ? "is-on" : ""}" type="button" data-adm-archivos-tipo="${esc(key)}" aria-pressed="${data.tipo === key}">${esc(item.label)} (${data.counts[key]})</button>`).join("")}
       </div>
     ` : ""}
     ${MsgRegion("archivos")}
     ${shown.length ? `
-      <ul class="adm-archivo-list" aria-label="Archivos recibidos${esc(tipoText)}">${shown.map(ArchivoRow).join("")}</ul>
-      ${data.filtered.length > shown.length ? `<p class="adm-note">Se muestran los últimos ${shown.length}. Hay ${plural(data.filtered.length - shown.length, "archivo más", "archivos más")}${esc(tipoText)}.</p>` : ""}
-    ` : data.all.length ? `
-      <p class="adm-empty">No hay archivos${esc(tipoText)}. Elegí “Todos” para ver el resto.</p>
-    ` : `
-      <p class="adm-empty">Todavía no llegó ningún archivo. Aparecen acá cuando un tutor manda el carnet desde el formulario de la web, cuando el equipo sube uno o cuando adjuntás un comprobante a un pago.</p>
-    `}
-  `);
+      <ul class="adm-list" aria-label="Archivos${esc(tipoText)}">${shown.map(ArchivoRow).join("")}</ul>
+      ${data.filtered.length > shown.length ? `<p class="adm-row-meta">Últimos ${shown.length} de ${data.filtered.length}.</p>` : ""}
+    ` : `<p class="adm-empty">${data.all.length ? "No hay archivos de este tipo." : "Todavía no llegó ningún archivo."}</p>`}
+    ${Help(`<p>Carnets de vacunas, comprobantes y documentos que manda la gente desde el formulario de la web o que sube el equipo. Los comprobantes de pago los abrís solo vos.</p>`, "Qué hay acá")}
+  `;
+}
+
+function DatosView() {
+  const dogs = reviewDogs().sort((a, b) => (a.status === "Activo") - (b.status === "Activo"));
+  return `
+    <ul class="adm-list">
+      ${dogs.map((dog) => `
+        <li class="adm-row">
+          ${DogAvatar(dog.id, dog.name, "md")}
+          <div class="adm-row-main">
+            <span class="adm-chips"><strong class="adm-row-title">${esc(dog.name)}</strong><span class="adm-chip ${dog.status === "Activo" ? "adm-chip--gray" : "adm-chip--yellow"}">${esc(dog.status)}</span></span>
+            <span>${esc(dog.review || PENDIENTE)}</span>
+            <span class="adm-row-meta">${esc(dog.id)} · ${esc(dog.plan)}</span>
+          </div>
+        </li>
+      `).join("")}
+    </ul>
+    ${Help(`<p>Inconsistencias entre BASE RUTAS, la tabla de precios y Perros paseados. Se corrigen en la planilla (fuente oficial: ${esc(BUSINESS_INFO.officialSources.dogs)}).</p>`, "De dónde salen")}
+  `;
 }
 
 /* ---------- Clientes (resumen de solo lectura) ---------- */
 
-const CLIENT_STATES = [["activo", "Activos"], ["pausa", "En pausa"], ["baja", "Baja"]];
+const CLIENT_STATES = [["activo", "Activos"], ["pausa", "Pausa"], ["baja", "Baja"]];
 
 // Solo cuenta por barrio y estado: no se lee ni se muestra ningún dato de contacto.
 function clientesResumen() {
@@ -2040,86 +2292,66 @@ function clientesResumen() {
   return { total: list.length, rows: sorted, totals };
 }
 
-function ClientesSection(open) {
+function ClientesView() {
   const data = clientesResumen();
   const withOther = data.totals.otro > 0;
-  return Section("adm-clientes", open, {
-    title: "Clientes por barrio",
-    summary: data.total ? `${plural(data.totals.activo, "activo", "activos")} · ${data.totals.pausa} en pausa · ${data.totals.baja} de baja` : "Todavía no hay clientes cargados en la app",
-    iconName: "mapPin",
-  }, `
-    <p class="adm-lead">Resumen de solo lectura de lo que carga el coordinador. Sin teléfonos ni domicilios.</p>
-    ${data.total ? `
-      <div class="adm-table-wrap">
-        <table class="adm-table adm-clients">
-          <caption class="adm-sr-only">Clientes por barrio y estado</caption>
-          <thead>
-            <tr><th scope="col">Barrio</th>${CLIENT_STATES.map(([, label]) => `<th scope="col">${label}</th>`).join("")}${withOther ? `<th scope="col">Sin estado</th>` : ""}</tr>
-          </thead>
-          <tbody>
-            ${data.rows.map((row) => `
-              <tr><th scope="row">${esc(row.barrio)}</th>${CLIENT_STATES.map(([key]) => `<td>${row[key]}</td>`).join("")}${withOther ? `<td>${row.otro}</td>` : ""}</tr>
-            `).join("")}
-          </tbody>
-          <tfoot>
-            <tr><th scope="row">Total</th>${CLIENT_STATES.map(([key]) => `<td>${data.totals[key]}</td>`).join("")}${withOther ? `<td>${data.totals.otro}</td>` : ""}</tr>
-          </tfoot>
-        </table>
-      </div>
-    ` : `<p class="adm-empty">El coordinador todavía no cargó clientes en la app.</p>`}
-  `);
-}
-
-function FinanceSection(open) {
-  const billing = theoreticalBilling();
-
-  return Section("adm-finanzas", open, {
-    title: "Finanzas",
-    summary: `Fuente oficial: Libro contable`,
-    iconName: "wallet",
-  }, `
-    <div class="adm-official">
-      ${icon("fileCheck", "adm-icon")}
-      <div>
-        <strong>Fuente oficial: Libro contable</strong>
-        <p>Lo cobrado, lo pendiente, las deudas y los costos están en el ${esc(BUSINESS_INFO.officialSources.money)}. Esta sección no muestra montos cobrados: los pagos que anotes de apoyo están en <a class="adm-inline-link" href="#adm-pagos" data-adm-goto="adm-pagos">Pagos</a>.</p>
-      </div>
-    </div>
-
-    <div class="adm-theory">
-      <p class="adm-tag adm-tag--warning">Teórica · sin descuentos · no es lo cobrado</p>
-      <p class="adm-theory-label">Facturación teórica semanal</p>
-      <p class="adm-theory-value">${formatPeso(billing.total)}</p>
-      <p class="adm-theory-help">Suma del precio de tabla de ${plural(billing.included.length, "perro activo", "perros activos")} con Plan 1, 2 o 3 según su tamaño. No aplica descuentos por varios perros ni acuerdos personales.</p>
-      <div class="adm-table-wrap">
-        <table class="adm-table adm-billing">
-          <caption class="adm-sr-only">Cálculo de la facturación teórica por plan</caption>
-          <thead><tr><th scope="col">Plan</th><th scope="col">Perros</th><th scope="col">Subtotal teórico</th></tr></thead>
-          <tbody>
-            ${billing.byPlan.map((row) => `
-              <tr><th scope="row">${row.plan.name}</th><td>${row.count}</td><td>${formatPeso(row.subtotal)}</td></tr>
-            `).join("")}
-          </tbody>
-          <tfoot><tr><th scope="row">Total teórico</th><td>${billing.included.length}</td><td>${formatPeso(billing.total)}</td></tr></tfoot>
-        </table>
-      </div>
-      ${billing.excluded.length ? `
-        <p class="adm-note">No incluye ${plural(billing.excluded.length, "perro", "perros")} con planes fuera de la tabla (precio ${PENDIENTE.toLowerCase()}):</p>
-        <ul class="adm-footnotes">
-          ${billing.excludedPlans.map((plan) => `<li>${esc(plan)}: ${listJoin(billing.excluded.filter((dog) => dog.plan === plan).map((dog) => esc(dog.name)))}.</li>`).join("")}
-        </ul>
-      ` : ""}
-    </div>
-  `);
-}
-
-function SourcesFooter() {
-  const sources = BUSINESS_INFO.officialSources;
+  if (!data.total) return `<p class="adm-empty">El coordinador todavía no cargó clientes.</p>`;
   return `
-    <footer class="adm-sources">
-      <p><strong>Datos actualizados al ${DATA_UPDATED}.</strong> Perros: ${esc(sources.dogs)}. Rutas: ${esc(sources.routes)}. Plata: ${esc(sources.money)}.</p>
-      <p>Esta página no muestra teléfonos ni domicilios de tutores. Los pagos anotados acá son un registro de apoyo (solo admin): la fuente oficial es el ${LIBRO}.</p>
-    </footer>
+    <span class="adm-chips">
+      <span class="adm-chip adm-chip--green">${data.totals.activo} activos</span>
+      <span class="adm-chip adm-chip--yellow">${data.totals.pausa} en pausa</span>
+      <span class="adm-chip adm-chip--gray">${data.totals.baja} de baja</span>
+    </span>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <caption class="adm-sr-only">Clientes por barrio y estado</caption>
+        <thead>
+          <tr><th scope="col">Barrio</th>${CLIENT_STATES.map(([, label]) => `<th scope="col">${label}</th>`).join("")}${withOther ? `<th scope="col">Otro</th>` : ""}</tr>
+        </thead>
+        <tbody>
+          ${data.rows.map((row) => `
+            <tr><th scope="row">${esc(row.barrio)}</th>${CLIENT_STATES.map(([key]) => `<td>${row[key]}</td>`).join("")}${withOther ? `<td>${row.otro}</td>` : ""}</tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    ${Help("<p>Resumen de solo lectura de lo que carga el coordinador. Sin teléfonos ni domicilios.</p>", "Qué es")}
+  `;
+}
+
+function kindTone(kind) {
+  if (/meta/i.test(kind)) return "blue";
+  if (/hist/i.test(kind)) return "gray";
+  if (/calc/i.test(kind)) return "yellow";
+  return "green";
+}
+
+function IndicadoresView() {
+  const active = activeDogs();
+  const load = weeklyLoad();
+  const unevaluated = active.filter((dog) => dog.category === "SIN EVALUAR").length;
+  const computed = [
+    { label: "Perros con ruta activa", value: String(active.length), source: `Calculado de BASE RUTAS, ${DATA_UPDATED}`, kind: "Calculado" },
+    { label: "Salidas por semana", value: String(load.weekTotal), source: `Calculado de BASE RUTAS, ${DATA_UPDATED}`, kind: "Calculado" },
+    { label: "Perros evaluados", value: `${active.length - unevaluated} de ${active.length}`, source: "Registro maestro, 14/08/2026", kind: "Dato" },
+  ];
+  const facts = [...BUSINESS_FACTS, ...computed];
+  return `
+    <ul class="adm-facts">
+      ${facts.map((fact) => `
+        <li class="adm-fact">
+          <strong class="adm-fact-value">${esc(fact.value)}</strong>
+          <span class="adm-fact-label">${esc(fact.label)}</span>
+          <span class="adm-chip adm-chip--${kindTone(fact.kind)}" title="Fuente: ${esc(fact.source)}">${esc(fact.kind)}</span>
+          <span class="adm-row-meta">${esc(fact.source)}</span>
+        </li>
+      `).join("")}
+    </ul>
+    ${Fold("categorias", { title: "Categorías de conducta", iconName: "help" }, `
+      <dl class="adm-categories">
+        ${Object.entries(CATEGORIES).map(([name, text]) => `<div><dt><span class="adm-cat adm-cat--${name.toLowerCase().replace(/\s+/g, "-")}">${name}</span></dt><dd>${esc(text)}</dd></div>`).join("")}
+      </dl>
+    `)}
   `;
 }
 
@@ -2193,19 +2425,33 @@ function announce(message) {
   }, 60);
 }
 
-function rememberSections() {
-  const ids = [...document.querySelectorAll("[data-adm-section]")]
-    .filter((section) => section.open)
-    .map((section) => section.dataset.admSection);
-  writeStored(OPEN_KEY, ids);
+function scrollTop() {
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
+function focusTitle() {
+  requestAnimationFrame(() => (document.getElementById("adm-title") || document.getElementById("adm-main"))?.focus({ preventScroll: true }));
+}
+
+function setTab(tab, mas = null) {
+  ui.tab = tab;
+  ui.mas = tab === "mas" ? mas : null;
+  ui.sheet = null;
+  storeTab();
+}
+
+// Lleva al destino de un botón "Ver": cambia de pestaña si hace falta, abre el plegable y lo enfoca.
 function goTo(targetId) {
-  const target = document.getElementById(targetId);
+  const [tab, mas = null] = TARGETS[targetId] || ["inicio"];
+  if (ui.tab !== tab || ui.mas !== mas) {
+    setTab(tab, mas);
+    render();
+  }
+  const target = document.getElementById(targetId) || document.getElementById("adm-main");
   if (!target) return;
-  if (target.tagName === "DETAILS") {
+  if (target.tagName === "DETAILS" && !target.open) {
     target.open = true;
-    rememberSections();
+    if (target.dataset.admFold) rememberFold(target.dataset.admFold, true);
   }
   const calm = document.documentElement.dataset.motion === "calm";
   target.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
@@ -2213,23 +2459,33 @@ function goTo(targetId) {
   focusable?.focus({ preventScroll: true });
 }
 
+function resetSession() {
+  ui.credential = null;
+  ui.users = null;
+  ui.usersError = "";
+  ui.sheet = null;
+  ui.undo = null;
+  clearTimeout(undoTimer);
+  // Al volver a entrar se piden de nuevo los datos (y no queda un pago a medio escribir).
+  ui.liveDay = null;
+  ui.adminLoaded = false;
+  ui.pagosMes = null;
+  ui.archivosTipo = "todos";
+  drafts.pago = emptyPago();
+  drafts.pagoArchivo = null;
+  drafts.pagoSubido = null;
+  drafts.crear = emptyCrear();
+}
+
 // Clicks que tienen que cortar la cadena (por ejemplo, antes de la navegación por data-link).
 function handleAdminClick(event) {
   if (event.target.closest("[data-admin-logout]")) {
-    ui.credential = null;
-    ui.users = null;
-    ui.usersError = "";
-    // Al volver a entrar se piden de nuevo los datos (y no queda un pago a medio escribir).
-    ui.liveDay = null;
-    ui.adminLoaded = false;
-    ui.pagosMes = null;
-    ui.archivosTipo = "todos";
-    drafts.pago = emptyPago();
-    drafts.pagoArchivo = null;
-    drafts.pagoSubido = null;
+    resetSession();
     navigate("/salir");
     return true;
   }
+  // Ir a otro panel con una hoja abierta: se cierra la hoja.
+  if (event.target.closest(".adm-shell [data-link]")) ui.sheet = null;
   return false;
 }
 
@@ -2242,6 +2498,29 @@ function setBusy(form, busy) {
   form?.querySelectorAll("button").forEach((button) => {
     button.disabled = busy;
   });
+}
+
+function openSheet(kind, opener) {
+  ui.sheet = kind;
+  ui.sheetReturn = opener?.id ? `#${CSS.escape(opener.id)}` : kind === "pago" ? "#adm-pago-abrir" : "#adm-crear-abrir";
+  if (kind === "crear") {
+    ui.credential = null;
+    if (!drafts.crear.pin) drafts.crear.pin = randomPin();
+    setMsg("users", "");
+  }
+  if (kind === "pago") setMsg("pagos", "");
+  // La animación de entrada va solo al abrir (no en cada redibujo).
+  ui.sheetEnter = true;
+  render();
+  ui.sheetEnter = false;
+  focusLater(kind === "pago" ? "#adm-pago-monto" : "#adm-crear-nombre");
+}
+
+function closeSheet() {
+  const back = ui.sheetReturn;
+  ui.sheet = null;
+  render();
+  if (back) focusLater(back);
 }
 
 async function handleUsersSubmit(event) {
@@ -2262,23 +2541,25 @@ async function handleUsersSubmit(event) {
     const usuario = normalizeUsuario(d.usuario);
     const pin = d.pin.trim();
     let problem = "";
-    if (nombre.length < 2) problem = "Escribí el nombre.";
-    else if (!/^[a-z][a-z0-9._-]{2,30}$/.test(usuario)) problem = "El usuario tiene que tener entre 3 y 31 letras o números, sin espacios, y empezar con una letra.";
-    else if (ui.users?.some((user) => user.usuario === usuario)) problem = `Ya existe el usuario “${usuario}”. Si querés cambiarle el PIN, usá “Resetear PIN” en la lista.`;
+    let field = "";
+    if (nombre.length < 2) [problem, field] = ["Escribí el nombre.", "#adm-crear-nombre"];
+    else if (!/^[a-z][a-z0-9._-]{2,30}$/.test(usuario)) [problem, field] = ["Usuario: 3 a 31 letras o números, sin espacios, empezando con letra.", "#adm-crear-usuario"];
+    else if (ui.users?.some((user) => user.usuario === usuario)) [problem, field] = [`Ya existe “${usuario}”. Elegí otro usuario.`, "#adm-crear-usuario"];
     else if (!ROLE_LABELS[d.rol]) problem = "Elegí un rol.";
-    else problem = pinProblem(pin);
+    else [problem, field] = [pinProblem(pin), "#adm-crear-pin"];
     if (problem) {
       setMsg("users", problem, true);
       rerender();
+      if (field) focusLater(field);
       return;
     }
     setBusy(form, true);
     try {
       const saved = await usuarios.save({ nombre, usuario, rol: d.rol, pin, crear: true });
       ui.credential = { tipo: "alta", usuario: saved.usuario, nombre: saved.nombre, pin };
-      drafts.crear = { nombre: "", usuario: "", rol: "paseador", pin: "" };
-      ui.showCreate = false;
-      setMsg("users", `Listo: se creó el usuario ${saved.usuario}. Mandale el mensaje.`);
+      drafts.crear = emptyCrear();
+      ui.sheet = null;
+      setMsg("users", `Listo: se creó ${saved.usuario}.`);
       ui.busy = false;
       await loadUsers();
       focusLater("#adm-cred");
@@ -2307,9 +2588,10 @@ async function handleUsersSubmit(event) {
       ui.credential = { tipo: "reset", usuario, nombre: user.nombre, pin };
       ui.resetFor = null;
       drafts.reset.pin = "";
-      setMsg("users", reactivar ? `Listo: ${user.nombre} quedó activo con un PIN nuevo.` : `Listo: ${user.nombre} tiene PIN nuevo y se cerró su sesión.`);
+      setMsg("users", reactivar ? `Listo: ${user.nombre} quedó activo.` : `Listo: ${user.nombre} tiene PIN nuevo.`);
       ui.busy = false;
       await loadUsers();
+      scrollTop();
       focusLater("#adm-cred");
     } catch (error) {
       setMsg("users", error.message || "No se pudo cambiar el PIN.", true);
@@ -2322,19 +2604,21 @@ async function handleUsersSubmit(event) {
 async function savePago() {
   const d = drafts.pago;
   const concepto = d.concepto.trim();
-  const medio = d.medio.trim();
+  const medio = (d.medioSel === "Otro" ? d.medioOtro : d.medioSel || "").trim();
   const monto = parseMonto(d.monto);
   const file = drafts.pagoArchivo;
   let problem = "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha)) problem = "Elegí la fecha del pago.";
-  else if (concepto.length < 2) problem = "Escribí el concepto (por ejemplo, el plan y la semana).";
-  else if (!Number.isFinite(monto) || monto <= 0) problem = "Escribí el monto en pesos, solo números (por ejemplo 35000).";
+  let field = "";
+  if (!Number.isFinite(monto) || monto <= 0) [problem, field] = ["Escribí el monto (solo números).", "#adm-pago-monto"];
+  else if (concepto.length < 2) [problem, field] = ["Elegí o escribí el concepto.", "#adm-pago-concepto"];
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha)) [problem, field] = ["Elegí la fecha.", "#adm-pago-fecha"];
   else if (file && !drafts.pagoSubido && isOffline()) {
-    problem = "Sin señal no se puede subir el comprobante (los archivos no quedan en espera). Tocá “Quitar” para guardar el pago sin comprobante y adjuntarlo después, o esperá a tener señal.";
+    [problem, field] = ["Sin señal no se sube el comprobante. Tocá “Quitar” y adjuntalo después.", "#adm-pago-archivo-quitar"];
   }
   if (problem) {
     setMsg("pagos", problem, true);
     rerender();
+    if (field) focusLater(field);
     return;
   }
   ui.busy = true;
@@ -2349,7 +2633,7 @@ async function savePago() {
       comprobanteId = registro.id;
       drafts.pagoSubido = { id: registro.id };
     } catch (error) {
-      setMsg("pagos", `No se pudo subir el comprobante: ${error.message || "error del servidor."} El pago todavía no se guardó: probá de nuevo o tocá “Quitar” para guardarlo sin comprobante.`, true);
+      setMsg("pagos", `No se pudo subir el comprobante: ${error.message || "error del servidor."} El pago no se guardó: probá de nuevo o tocá “Quitar”.`, true);
       ui.busy = false;
       ui.savingPago = false;
       rerender();
@@ -2369,12 +2653,13 @@ async function savePago() {
     drafts.pagoArchivo = null;
     drafts.pagoSubido = null;
     ui.pagosMes = d.fecha.slice(0, 7);
-    const conComprobante = comprobanteId ? " con su comprobante" : "";
+    ui.sheet = null;
     setMsg("pagos", saved.pendiente
-      ? `Se enviará cuando haya señal. Queda anotado en este dispositivo${conComprobante ? " (el comprobante ya se subió)" : ""}.`
-      : `Listo: pago de ${formatPeso(monto)} guardado${conComprobante}${d.pasadoAlLibro ? "" : ". Acordate de pasarlo al Libro contable"}.`);
+      ? "Se enviará cuando haya señal."
+      : `Listo: ${formatPeso(monto)} guardado${comprobanteId ? " con comprobante" : ""}${d.pasadoAlLibro ? "" : ". Falta pasarlo al Libro"}.`);
+    focusLater("#adm-pago-abrir");
   } catch (error) {
-    setMsg("pagos", `${error.message || "No se pudo guardar el pago."}${comprobanteId ? " El comprobante ya se subió: al tocar “Guardar pago” de nuevo no se sube otra vez." : ""}`, true);
+    setMsg("pagos", `${error.message || "No se pudo guardar el pago."}${comprobanteId ? " El comprobante ya se subió: no se sube otra vez." : ""}`, true);
   } finally {
     ui.busy = false;
     ui.savingPago = false;
@@ -2388,18 +2673,18 @@ function choosePagoArchivo(input) {
   input.value = "";
   if (!file) return;
   if (!ARCHIVO_MIME.test(file.type)) {
-    setMsg("pagos", "Ese archivo no sirve: solo fotos (JPG, PNG, WEBP) o PDF.", true);
+    setMsg("pagos", "Solo fotos (JPG, PNG, WEBP) o PDF.", true);
     rerender();
     return;
   }
   if (file.type === "application/pdf" && file.size > 3.5 * 1024 * 1024) {
-    setMsg("pagos", "El PDF es muy pesado (máximo 3,5 MB). Probá con una captura de pantalla.", true);
+    setMsg("pagos", "El PDF pesa mucho (máximo 3,5 MB). Probá con una captura.", true);
     rerender();
     return;
   }
   drafts.pagoArchivo = file;
   drafts.pagoSubido = null;
-  setMsg("pagos", `Comprobante elegido: ${file.name || "archivo"}. Se sube al tocar “Guardar pago”.`);
+  setMsg("pagos", "Comprobante listo. Se sube al guardar.");
   rerender();
   focusLater("#adm-pago-archivo-quitar");
 }
@@ -2413,9 +2698,9 @@ async function adjuntarComprobante(input) {
   if (!file || !pago) return;
   const what = `${pago.concepto || "el pago"}${pago.fecha ? ` del ${ymdToAR(pago.fecha)}` : ""}`;
   let problem = "";
-  if (ui.busy) problem = "Esperá a que termine lo que se está guardando y probá de nuevo.";
-  else if (!ARCHIVO_MIME.test(file.type)) problem = "Ese archivo no sirve: solo fotos (JPG, PNG, WEBP) o PDF.";
-  else if (isOffline()) problem = "Sin señal no se puede subir el comprobante (los archivos no quedan en espera). Probá cuando vuelva la señal.";
+  if (ui.busy) problem = "Esperá a que termine lo que se está guardando.";
+  else if (!ARCHIVO_MIME.test(file.type)) problem = "Solo fotos (JPG, PNG, WEBP) o PDF.";
+  else if (isOffline()) problem = "Sin señal no se sube el comprobante. Probá cuando vuelva.";
   if (problem) {
     setMsg("pagos", problem, true);
     rerender();
@@ -2429,8 +2714,8 @@ async function adjuntarComprobante(input) {
     registro = await archivos.subir("comprobante de pago", file);
     const saved = await registros.save("pagos", { id, fecha: pago.fecha, comprobanteId: registro.id });
     setMsg("pagos", saved.pendiente
-      ? "El comprobante se subió. El cambio del pago se enviará cuando haya señal."
-      : `Listo: ${what} ya tiene su comprobante.`);
+      ? "Comprobante subido. El cambio se enviará cuando haya señal."
+      : `Listo: ${what} tiene comprobante.`);
   } catch (error) {
     setMsg("pagos", `${registro ? "El comprobante se subió pero no se pudo vincular al pago" : "No se pudo subir el comprobante"}: ${error.message || "error del servidor."}`, true);
   } finally {
@@ -2440,37 +2725,67 @@ async function adjuntarComprobante(input) {
   }
 }
 
+// Saca o elige la foto de un perro y la sube (la grande va a archivos, la miniatura a "fotos").
+async function subirFoto(input) {
+  const perroId = input.dataset.admFoto;
+  const nombre = input.dataset.admFotoNombre || perroId;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || !perroId) return;
+  // El mensaje va a Fotos si se está ahí; si no, a la zona del día.
+  const area = ui.tab === "mas" && ui.mas === "fotos" ? "fotos" : "live";
+  let problem = "";
+  if (isOffline()) problem = "Sin señal: la foto no se pudo subir. Probá cuando vuelva.";
+  else if (!/^image\//.test(file.type)) problem = "Eso no es una foto.";
+  if (problem) {
+    setMsg(area, problem, true);
+    rerender();
+    return;
+  }
+  ui.fotosSubiendo.add(perroId);
+  setMsg(area, `Subiendo la foto de ${nombre}…`);
+  rerender();
+  try {
+    const saved = await fotosPerros.subir(perroId, nombre, file);
+    setMsg(area, saved?.pendiente ? `Foto de ${nombre} subida. Se termina de guardar cuando haya señal.` : `Listo: foto de ${nombre}.`);
+  } catch (error) {
+    setMsg(area, `No se pudo subir la foto de ${nombre}: ${error.message || "error del servidor."}`, true);
+  } finally {
+    ui.fotosSubiendo.delete(perroId);
+    rerender();
+    focusLater(`[data-adm-foto="${CSS.escape(perroId)}"]`);
+  }
+}
+
 // Abre un archivo con la sesión (pestaña nueva). Los errores van a la región de la sección.
-function abrirArchivo(button) {
-  const id = button.dataset.admArchivoAbrir;
-  const area = ui.msgs[button.dataset.admArea] !== undefined ? button.dataset.admArea : "archivos";
+function abrirArchivo(id, areaName) {
+  const area = ui.msgs[areaName] !== undefined ? areaName : "archivos";
   if (isOffline()) {
-    setMsg(area, "Sin señal no se puede abrir el archivo. Probá cuando vuelva la señal.", true);
+    setMsg(area, "Sin señal no se puede abrir. Probá cuando vuelva.", true);
     rerender();
     return;
   }
   archivos.abrir(id).catch((error) => {
     const text = error.status === 403
-      ? "Tu usuario no puede abrir este archivo. Los comprobantes de pago los abre solo el admin."
+      ? "Tu usuario no puede abrir este archivo."
       : error.status === 404
-        ? "No se encontró el archivo guardado. Puede que lo hayan borrado de Drive."
-        : `No se pudo abrir el archivo: ${error.message || "error del servidor."}`;
+        ? "No se encontró el archivo. Puede que lo hayan borrado de Drive."
+        : `No se pudo abrir: ${error.message || "error del servidor."}`;
     setMsg(area, text, true);
     rerender();
   });
 }
 
-async function togglePagoLibro(id) {
+async function setPagoLibro(id, value, withUndo = true) {
   const pago = registros.cached("pagos", liveOpts("pagos")).find((item) => item.id === id);
   if (!pago || ui.busy) return;
   ui.busy = true;
-  const next = !pago.pasadoAlLibro;
   try {
-    const saved = await registros.save("pagos", { id, fecha: pago.fecha, pasadoAlLibro: next });
-    const what = `${pago.concepto || "El pago"}${pago.fecha ? ` del ${ymdToAR(pago.fecha)}` : ""}`;
-    setMsg("pagos", saved.pendiente
-      ? "Se enviará cuando haya señal."
-      : next ? `Listo: ${what} quedó como pasado al Libro.` : `Listo: ${what} quedó como pendiente de pasar al Libro.`);
+    const saved = await registros.save("pagos", { id, fecha: pago.fecha, pasadoAlLibro: value });
+    if (saved.pendiente) setMsg("pagos", "Se enviará cuando haya señal.");
+    if (withUndo) {
+      offerUndo(value ? "Marcado: en el Libro." : "Desmarcado del Libro.", () => setPagoLibro(id, !value, false));
+    }
   } catch (error) {
     setMsg("pagos", error.message || "No se pudo cambiar la marca.", true);
   } finally {
@@ -2481,38 +2796,44 @@ async function togglePagoLibro(id) {
 }
 
 async function runUserAction(work, okMessage, errorMessage) {
-  if (ui.busy) return;
+  if (ui.busy) return false;
   ui.busy = true;
   try {
     await work();
-    setMsg("users", okMessage);
+    if (okMessage) setMsg("users", okMessage);
     ui.busy = false;
     await loadUsers();
+    return true;
   } catch (error) {
     setMsg("users", error.message || errorMessage, true);
     ui.busy = false;
     rerender();
+    return false;
   }
 }
 
-function handleUsersClick(event) {
-  if (event.target.closest("[data-adm-create-toggle]")) {
-    ui.showCreate = !ui.showCreate;
-    ui.resetFor = null;
-    ui.confirmOff = null;
+function changeRole(usuario, rol, withUndo = true) {
+  const user = ui.users?.find((item) => item.usuario === usuario);
+  if (!user || rol === user.rol) {
+    ui.roleFor = null;
     render();
-    focusLater(ui.showCreate ? "#adm-crear-nombre" : "[data-adm-create-toggle]");
-    return true;
+    return;
   }
+  const before = user.rol;
+  ui.roleFor = null;
+  runUserAction(() => usuarios.save({ usuario, rol }), "", "No se pudo cambiar el rol.").then((ok) => {
+    if (!ok) return;
+    if (withUndo) offerUndo(`${user.nombre}: ${roleShort(rol)}.`, () => changeRole(usuario, before, false));
+    else setMsg("users", `${user.nombre} volvió a ${roleShort(before)}.`);
+    rerender();
+    focusLater(`[data-adm-rolefor="${CSS.escape(usuario)}"]`);
+  });
+}
 
+function handleUsersClick(event) {
   if (event.target.closest("[data-adm-users-refresh]")) {
     ui.usersError = "";
-    loadUsers().then(() => {
-      if (!ui.usersError) {
-        setMsg("users", "Lista de usuarios actualizada.");
-        rerender();
-      }
-    });
+    loadUsers();
     return true;
   }
 
@@ -2526,21 +2847,20 @@ function handleUsersClick(event) {
     return true;
   }
 
-  const roleSave = event.target.closest("[data-adm-role-save]");
-  if (roleSave) {
-    const usuario = roleSave.dataset.admRoleSave;
-    const user = ui.users?.find((item) => item.usuario === usuario);
-    if (!user) return true;
-    const rol = drafts.roles[usuario] || user.rol;
-    if (rol === user.rol) {
-      setMsg("users", `${user.nombre} ya tiene el rol ${ROLE_LABELS[rol]}. Elegí otro en la lista y tocá “Cambiar rol”.`, true);
-      rerender();
-      return true;
-    }
-    runUserAction(async () => {
-      await usuarios.save({ usuario, rol });
-      delete drafts.roles[usuario];
-    }, `Listo: ${user.nombre} ahora tiene el rol ${ROLE_LABELS[rol]}.`, "No se pudo cambiar el rol.");
+  const roleFor = event.target.closest("[data-adm-rolefor]");
+  if (roleFor) {
+    const usuario = roleFor.dataset.admRolefor;
+    ui.roleFor = ui.roleFor === usuario ? null : usuario;
+    ui.resetFor = null;
+    ui.confirmOff = null;
+    render();
+    focusLater(ui.roleFor ? `[data-adm-role-set="${CSS.escape(usuario)}"].is-on` : `[data-adm-rolefor="${CSS.escape(usuario)}"]`);
+    return true;
+  }
+
+  const roleSet = event.target.closest("[data-adm-role-set]");
+  if (roleSet) {
+    changeRole(roleSet.dataset.admRoleSet, roleSet.dataset.admRol);
     return true;
   }
 
@@ -2549,7 +2869,8 @@ function handleUsersClick(event) {
     const usuario = reset.dataset.admReset;
     ui.resetFor = ui.resetFor === usuario ? null : usuario;
     ui.confirmOff = null;
-    drafts.reset.pin = "";
+    ui.roleFor = null;
+    drafts.reset.pin = ui.resetFor ? randomPin() : "";
     render();
     if (ui.resetFor) focusLater("#adm-reset-pin");
     return true;
@@ -2568,6 +2889,7 @@ function handleUsersClick(event) {
   if (off) {
     ui.confirmOff = off.dataset.admOff;
     ui.resetFor = null;
+    ui.roleFor = null;
     render();
     focusLater("#adm-confirm");
     return true;
@@ -2578,7 +2900,7 @@ function handleUsersClick(event) {
     ui.confirmOff = null;
     render();
     focusLater(`[data-adm-off="${CSS.escape(usuario)}"]`);
-    announce("Cancelado: no se desactivó a nadie.");
+    announce("Cancelado.");
     return true;
   }
 
@@ -2587,14 +2909,14 @@ function handleUsersClick(event) {
     const usuario = offConfirm.dataset.admOffConfirm;
     const user = ui.users?.find((item) => item.usuario === usuario);
     ui.confirmOff = null;
-    runUserAction(() => usuarios.deactivate(usuario), `Listo: ${user?.nombre || usuario} quedó desactivado y ya no puede entrar.`, "No se pudo desactivar.");
+    runUserAction(() => usuarios.deactivate(usuario), `Listo: ${user?.nombre || usuario} ya no puede entrar.`, "No se pudo desactivar.");
     return true;
   }
 
   if (event.target.closest("[data-adm-cred-copy]")) {
     if (ui.credential) {
       copyText(credentialText(ui.credential)).then((ok) => {
-        announce(ok ? "Mensaje copiado. Pegalo en WhatsApp." : "No se pudo copiar. Seleccioná el texto y copialo a mano.");
+        announce(ok ? "Mensaje copiado." : "No se pudo copiar. Abrí “Ver el mensaje” y copialo a mano.");
       });
     }
     return true;
@@ -2603,34 +2925,8 @@ function handleUsersClick(event) {
   if (event.target.closest("[data-adm-cred-hide]")) {
     ui.credential = null;
     render();
-    focusLater("#adm-usuarios");
+    focusLater("#adm-crear-abrir");
     announce("Listo. El PIN ya no se muestra.");
-    return true;
-  }
-
-  if (event.target.closest("[data-adm-live-refresh]")) {
-    refreshLive(true);
-    return true;
-  }
-
-  const libro = event.target.closest("[data-adm-pago-libro]");
-  if (libro) {
-    togglePagoLibro(libro.dataset.admPagoLibro);
-    return true;
-  }
-
-  const abrir = event.target.closest("[data-adm-archivo-abrir]");
-  if (abrir) {
-    abrirArchivo(abrir);
-    return true;
-  }
-
-  if (event.target.closest("[data-adm-pago-quitar]")) {
-    drafts.pagoArchivo = null;
-    drafts.pagoSubido = null;
-    setMsg("pagos", "Comprobante quitado. El pago se guarda sin comprobante.");
-    rerender();
-    focusLater("#adm-pago-archivo");
     return true;
   }
 
@@ -2638,63 +2934,149 @@ function handleUsersClick(event) {
 }
 
 function handleDraftInput(event) {
+  if (!event.target.closest?.(".adm-shell")) return;
+  if (event.target.matches?.("[data-adm-foto]")) {
+    if (event.type === "change") subirFoto(event.target);
+    return;
+  }
   if (event.target.matches?.("[data-adm-pago-archivo], [data-adm-pago-adjuntar]")) {
     if (event.type !== "change") return;
     if (event.target.dataset.admPagoAdjuntar !== undefined) adjuntarComprobante(event.target);
     else choosePagoArchivo(event.target);
     return;
   }
-  const tipo = event.target.closest?.("[data-adm-archivos-tipo]");
-  if (tipo) {
-    if (event.type === "change" && ui.archivosTipo !== tipo.value) {
-      ui.archivosTipo = tipo.value;
-      rerender();
-      announce(tipo.value === "todos" ? "Se muestran todos los archivos." : `Se muestran los archivos de tipo ${(ARCHIVO_TIPOS[tipo.value]?.label || tipo.value).toLowerCase()}.`);
-    }
-    return;
-  }
-  const month = event.target.closest?.("[data-adm-pagos-mes]");
-  if (month) {
-    if (event.type === "change" && ui.pagosMes !== month.value) {
-      ui.pagosMes = month.value;
-      rerender();
-      announce(`Pagos de ${month.value === "todos" ? "todos los meses" : monthLabel(month.value).toLowerCase()}.`);
-    }
-    return;
-  }
   const field = event.target.closest?.("[data-adm-draft]");
   if (!field) return;
   const form = field.dataset.admDraft;
   const key = field.dataset.admKey;
+  if (field.type === "radio" && !field.checked) return;
   const value = field.type === "checkbox" ? field.checked : field.value;
-  if (form === "roles") drafts.roles[key] = value;
-  else drafts[form][key] = value;
-  if (form === "crear" && key === "rol") {
-    const hint = document.querySelector("[data-adm-role-hint]");
-    if (hint) hint.innerHTML = `<strong>${esc(ROLE_LABELS[field.value] || field.value)}:</strong> ${esc(roleLine(field.value))}`;
+  drafts[form][key] = value;
+
+  if (form === "crear" && key === "nombre" && !drafts.crear.usuarioTocado) {
+    drafts.crear.usuario = suggestUsuario(value);
+    const input = document.getElementById("adm-crear-usuario");
+    if (input) input.value = drafts.crear.usuario;
   }
+  if (form === "crear" && key === "usuario") drafts.crear.usuarioTocado = value.trim() !== "";
+  if (form === "crear" && key === "rol") {
+    document.querySelectorAll('.adm-role-grid .adm-choice').forEach((label) => {
+      label.classList.toggle("is-on", label.querySelector("input")?.checked === true);
+    });
+    const hint = document.querySelector("[data-adm-role-hint]");
+    if (hint) hint.textContent = ROLE_CHOICES.find((item) => item.rol === value)?.line || "";
+  }
+  if (form === "pago" && key === "monto") {
+    const preview = document.querySelector("[data-adm-monto-preview]");
+    const monto = parseMonto(value);
+    if (preview) preview.textContent = Number.isFinite(monto) && monto > 0 ? formatPeso(monto) : "Solo números";
+  }
+  // Elegir un medio, la fecha o el concepto cambia qué botón queda marcado: se redibuja.
+  if (form === "pago" && (key === "medioSel" || (key === "fecha" && event.type === "change") || (key === "concepto" && event.type === "change"))) {
+    rerender();
+    if (key === "medioSel" && value === "Otro") focusLater("#adm-pago-medio-otro");
+  }
+}
+
+function toggleDone(id, label) {
+  const done = readDone();
+  const isDone = done.includes(id);
+  writeStored(DONE_KEY, isDone ? done.filter((item) => item !== id) : [...done, id]);
+  if (!isDone) {
+    offerUndo(`Listo: ${label}.`, () => {
+      writeStored(DONE_KEY, readDone().filter((item) => item !== id));
+    });
+  } else {
+    ui.undo = null;
+  }
+  render();
+  (document.querySelector(`.adm-prio [data-adm-done="${CSS.escape(id)}"]`) || document.querySelector(`[data-adm-done="${CSS.escape(id)}"]`) || document.querySelector("#adm-title"))?.focus({ preventScroll: true });
+  announce(isDone ? "Prioridad desmarcada." : "Hecho. Cambió el próximo paso.");
 }
 
 // Acciones de la página. Corre después del control de accesibilidad.
 function handleAdminActionClick(event) {
   if (!event.target.closest(".adm-shell")) return false;
 
-  const a11y = event.target.closest("[data-adm-a11y]");
-  if (a11y) {
-    document.querySelector(".a11y-toggle")?.click();
+  // "Otra fecha": el calendario nativo queda invisible encima del botón (así la fecha se ve
+  // siempre DD/MM/AAAA, sin importar el idioma del navegador). En compu se abre con showPicker.
+  const datePick = event.target.closest(".adm-date-native");
+  if (datePick) {
+    try {
+      datePick.showPicker?.();
+    } catch {
+      // Si el navegador ya lo abrió solo, no pasa nada.
+    }
+    return false;
+  }
+
+  // Tocar el fondo oscuro cierra la hoja.
+  const backdrop = event.target.closest("[data-adm-sheet-backdrop]");
+  if (backdrop && event.target === backdrop) {
+    closeSheet();
+    return true;
+  }
+  if (event.target.closest("[data-adm-sheet-close]")) {
+    closeSheet();
+    return true;
+  }
+  const sheetOpen = event.target.closest("[data-adm-sheet]");
+  if (sheetOpen) {
+    openSheet(sheetOpen.dataset.admSheet, sheetOpen);
+    return true;
+  }
+
+  const tab = event.target.closest("[data-adm-tab]");
+  if (tab) {
+    const same = ui.tab === tab.dataset.admTab;
+    setTab(tab.dataset.admTab);
+    render();
+    scrollTop();
+    if (!same) focusTitle();
+    else document.querySelector(`[data-adm-tab="${tab.dataset.admTab}"]`)?.focus({ preventScroll: true });
+    return true;
+  }
+
+  const mas = event.target.closest("[data-adm-mas]");
+  if (mas) {
+    setTab("mas", mas.dataset.admMas);
+    render();
+    scrollTop();
+    focusTitle();
+    return true;
+  }
+
+  if (event.target.closest("[data-adm-mas-back]")) {
+    const from = ui.mas;
+    setTab("mas");
+    render();
+    scrollTop();
+    focusLater(`[data-adm-mas="${from}"]`);
+    return true;
+  }
+
+  const undo = event.target.closest("[data-adm-undo]");
+  if (undo) {
+    const action = ui.undo;
+    ui.undo = null;
+    clearTimeout(undoTimer);
+    action?.run?.();
+    render();
+    announce("Deshecho.");
+    return true;
+  }
+
+  if (event.target.closest("[data-adm-refresh]")) {
+    refreshLive(true);
+    refreshAdminData();
+    if (ui.tab === "equipo") loadUsers();
+    announce("Actualizando…");
     return true;
   }
 
   const doneButton = event.target.closest("[data-adm-done]");
   if (doneButton) {
-    const id = doneButton.dataset.admDone;
-    const done = readDone();
-    const isDone = done.includes(id);
-    writeStored(DONE_KEY, isDone ? done.filter((item) => item !== id) : [...done, id]);
-    render();
-    const nextFocus = document.querySelector(`.adm-priority [data-adm-done="${id}"]`);
-    nextFocus?.focus({ preventScroll: true });
-    announce(isDone ? "Prioridad desmarcada." : "Prioridad marcada como hecha. Se actualizó el próximo paso.");
+    toggleDone(doneButton.dataset.admDone, doneButton.dataset.admDoneLabel || "prioridad");
     return true;
   }
 
@@ -2705,22 +3087,84 @@ function handleAdminActionClick(event) {
     return true;
   }
 
-  if (handleUsersClick(event)) return true;
-
-  const expand = event.target.closest("[data-adm-expand]");
-  if (expand) {
-    const shouldOpen = expand.dataset.admExpand === "open";
-    document.querySelectorAll("[data-adm-section]").forEach((section) => {
-      section.open = shouldOpen;
-    });
-    rememberSections();
-    announce(shouldOpen ? "Secciones abiertas." : "Secciones cerradas.");
+  const abrir = event.target.closest("[data-adm-archivo-abrir]");
+  if (abrir) {
+    abrirArchivo(abrir.dataset.admArchivoAbrir, abrir.dataset.admArea);
     return true;
   }
 
+  const fotoVer = event.target.closest("[data-adm-foto-ver]");
+  if (fotoVer) {
+    abrirArchivo(fotoVer.dataset.admFotoVer, "fotos");
+    return true;
+  }
+
+  const filtro = event.target.closest("[data-adm-fotos-filtro]");
+  if (filtro) {
+    ui.fotosFiltro = filtro.dataset.admFotosFiltro;
+    rerender();
+    return true;
+  }
+
+  const libro = event.target.closest("[data-adm-pago-libro]");
+  if (libro) {
+    const pago = registros.cached("pagos", liveOpts("pagos")).find((item) => item.id === libro.dataset.admPagoLibro);
+    if (pago) setPagoLibro(pago.id, !pago.pasadoAlLibro);
+    return true;
+  }
+
+  const mes = event.target.closest("[data-adm-pagos-mes]");
+  if (mes) {
+    ui.pagosMes = mes.dataset.admPagosMes;
+    ui.pagosTodos = false;
+    rerender();
+    announce(`Pagos de ${ui.pagosMes === "todos" ? "todos los meses" : monthLabel(ui.pagosMes).toLowerCase()}.`);
+    return true;
+  }
+
+  if (event.target.closest("[data-adm-pagos-todos]")) {
+    ui.pagosTodos = true;
+    rerender();
+    return true;
+  }
+
+  const tipo = event.target.closest("[data-adm-archivos-tipo]");
+  if (tipo) {
+    ui.archivosTipo = tipo.dataset.admArchivosTipo;
+    rerender();
+    return true;
+  }
+
+  const fecha = event.target.closest("[data-adm-fecha]");
+  if (fecha) {
+    drafts.pago.fecha = fecha.dataset.admFecha;
+    rerender();
+    return true;
+  }
+
+  const concepto = event.target.closest("[data-adm-concepto]");
+  if (concepto) {
+    drafts.pago.concepto = concepto.dataset.admConcepto;
+    rerender();
+    return true;
+  }
+
+  if (event.target.closest("[data-adm-pago-quitar]")) {
+    drafts.pagoArchivo = null;
+    drafts.pagoSubido = null;
+    setMsg("pagos", "Comprobante quitado.");
+    rerender();
+    focusLater("#adm-pago-foto");
+    return true;
+  }
+
+  if (handleUsersClick(event)) return true;
+
   if (event.target.closest("[data-adm-copy]")) {
     copyText(summaryText()).then((ok) => {
-      announce(ok ? "Resumen copiado. Pegalo en WhatsApp o en tus notas." : "No se pudo copiar. Probá de nuevo.");
+      announce(ok ? "Resumen copiado." : "No se pudo copiar. Probá de nuevo.");
+      if (ok) offerUndo("Resumen copiado.", null);
+      rerender();
     });
     return true;
   }
@@ -2728,25 +3172,30 @@ function handleAdminActionClick(event) {
   return false;
 }
 
-function handleSectionToggle(event) {
-  if (event.target.matches?.("[data-adm-section]")) rememberSections();
-  // Listas y ayudas plegables de adentro: se recuerda si están abiertas para no cerrarlas al redibujar.
-  if (event.target.matches?.("[data-adm-dogs], [data-adm-inner]")) {
-    const key = event.target.dataset.admDogs || event.target.dataset.admInner;
-    if (event.target.open) ui.openDogs.add(key);
-    else ui.openDogs.delete(key);
-  }
+function handleToggle(event) {
+  const el = event.target;
+  if (!el.closest?.(".adm-shell")) return;
+  const key = el.dataset?.admFold || el.dataset?.admFoldInner;
+  if (key) rememberFold(key, el.open);
+}
+
+function handleKeydown(event) {
+  if (event.key !== "Escape" || !ui.sheet || !isAdminPage()) return;
+  if (document.querySelector("#a11y-panel:not([hidden])")) return;
+  event.preventDefault();
+  closeSheet();
 }
 
 export function registerAdminEvents() {
   clickHandlers.push(handleAdminClick);
   actionClickHandlers.push(handleAdminActionClick);
   // El evento toggle no burbujea: se escucha en captura.
-  document.addEventListener("toggle", handleSectionToggle, true);
+  document.addEventListener("toggle", handleToggle, true);
   document.addEventListener("submit", handleUsersSubmit);
   document.addEventListener("input", handleDraftInput);
   document.addEventListener("change", handleDraftInput);
-  // Una sola vez: cuando llegan datos nuevos del día, se vuelve a dibujar el panel.
+  document.addEventListener("keydown", handleKeydown);
+  // Una sola vez: cuando llegan datos nuevos, se vuelve a dibujar el panel.
   onDataChange((col) => {
     if (LIVE_COLS.includes(col) || ADMIN_COLS.includes(col)) rerender();
   });
