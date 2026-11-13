@@ -1247,6 +1247,151 @@ html[data-theme="dark"] .sv-logo-dark {
   content: "· ";
 }
 
+/* ---------- Usuario con sesión (encabezado) ---------- */
+
+.sv-header-end {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.sv-user {
+  display: none;
+  min-width: 0;
+  margin: 0;
+  text-align: right;
+}
+
+.sv-user strong,
+.sv-user small {
+  display: block;
+  overflow: hidden;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-user strong {
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.sv-user small {
+  color: var(--sv-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+@media (min-width: 420px) {
+  .sv-user {
+    display: block;
+  }
+}
+
+/* ---------- Estado de los datos compartidos ---------- */
+
+.sv-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  border: 1.5px solid var(--sv-ok-line);
+  border-radius: 16px;
+  background: var(--sv-ok-bg);
+  color: var(--sv-ok-ink);
+  padding: 6px 8px 6px 14px;
+}
+
+.sv-sync.is-warn {
+  border-color: var(--sv-warn-line);
+  background: var(--sv-warn-bg);
+  color: var(--sv-warn-ink);
+}
+
+.sv-sync-text {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 220px;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.sv-sync .sv-button {
+  min-height: 44px;
+  border-color: currentColor;
+  color: inherit;
+}
+
+.sv-sync .sv-status {
+  flex: 1 1 100%;
+  border: 1.5px solid var(--sv-line);
+  background: var(--sv-card);
+}
+
+.sv-sync .sv-status.is-error {
+  border-color: var(--sv-danger-line);
+  background: var(--sv-danger-bg);
+}
+
+/* ---------- Incidentes del día ---------- */
+
+.sv-incidents {
+  border: 2px solid var(--sv-danger-line);
+  border-top-width: 6px;
+  background: var(--sv-danger-bg);
+}
+
+.sv-incidents .sv-title,
+.sv-incidents .sv-section-head p {
+  color: var(--sv-danger-ink);
+}
+
+.sv-incident-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sv-incident {
+  display: grid;
+  gap: 8px;
+  border: 1.5px solid var(--sv-danger-line);
+  border-radius: 16px;
+  background: var(--sv-card);
+  padding: 12px;
+}
+
+.sv-incident .sv-chips {
+  margin-top: 0 !important;
+}
+
+/* ---------- Checklist del paseador y marcas del paseo ---------- */
+
+.sv-team-check {
+  display: grid;
+  gap: 8px;
+}
+
+.sv-team-check small {
+  font-weight: 700;
+}
+
+.sv-dog-meta {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 4px;
+  color: var(--sv-ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sv-dog-meta .sv-tag {
+  justify-self: start;
+}
+
 /* ---------- Pantallas medianas y grandes ---------- */
 
 @media (min-width: 720px) {
@@ -1310,8 +1455,13 @@ html[data-theme="dark"] .sv-logo-dark {
   }
 
   .sv-hero-top,
-  .sv-hero > .sv-note {
+  .sv-hero > .sv-note,
+  .sv-hero > .sv-team-check {
     grid-column: 1 / -1;
+  }
+
+  .sv-incident-list {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   }
 
   .sv-route-list {
