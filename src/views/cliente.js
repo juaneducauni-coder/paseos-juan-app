@@ -1,241 +1,1140 @@
-// Vista del rol Cliente.
-import { openModal } from "../store/paseosJuanStore.js";
-import { DOGS, PRODUCTS, PLANS } from "../data/mock.js";
+// Vista del rol Cliente (tutor de un perro).
+//
+// Es la cara del servicio: arranca por lo más importante del día (el paseo de hoy y el
+// próximo), muestra el plan con los precios oficiales y deja que el tutor complete la ficha
+// de su perro. Todo lo que el tutor carga se guarda solo en su dispositivo (localStorage).
+//
+// Para la demo se usa un perro de ejemplo ("Tu perro") con un plan real. No se usan perros
+// reales, ni nombres de tutores, ni alias o datos de pago.
 import {
-  icon,
-  getDemoClient,
-  compactPlanCard,
-  dogCard,
-  actionClickHandlers,
-  changeHandlers,
-  clickHandlers,
-} from "../ui/shared.js";
-import { render } from "../app.js";
+  BUSINESS_INFO,
+  CATEGORIES,
+  MULTI_DOG_DISCOUNTS,
+  PENDIENTE,
+  REAL_PLANS,
+  REAL_SINGLE_WALK,
+  SHIFTS,
+  WEEK_DAYS,
+  formatPeso,
+} from "../data/realData.js";
+import { PROMO } from "../data/mock.js";
+import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
+import { isCalmMotion, isDarkTheme, onAccessibilityChange } from "../ui/accesibilidad.js";
 
-function getVaccineDocument() {
-  return {
-    fileName: localStorage.getItem("paseosJuanVaccineFile"),
-    status: localStorage.getItem("paseosJuanVaccineStatus") || "Pendiente de revisión",
-  };
+// ---------------------------------------------------------------------------
+// Datos guardados en el dispositivo del tutor
+// ---------------------------------------------------------------------------
+
+const KEYS = {
+  plan: "paseosJuan_cliente_plan",
+  ficha: "paseosJuan_cliente_ficha",
+  ausencias: "paseosJuan_cliente_ausencias",
+  carnet: "paseosJuan_cliente_carnet",
+  comprobantes: "paseosJuan_cliente_comprobantes",
+};
+
+const DEFAULT_DOG_NAME = "Tu perro";
+
+// Plan de ejemplo: Plan 2 (5 paseos por semana), de lunes a viernes, turno mañana.
+const DEFAULT_PLAN = {
+  planId: "plan2",
+  size: "Mediano",
+  shift: "Mañana",
+  days: ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"],
+};
+
+const SIZES = ["Pequeño", "Mediano", "Grande"];
+// Días que hoy figuran en las rutas (no hay rutas cargadas los domingos).
+const PLAN_DAYS = WEEK_DAYS.filter((day) => day !== "Domingo");
+const SHIFT_BY_LABEL = { Mañana: SHIFTS.manana, Tarde: SHIFTS.tarde };
+
+function readJSON(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key));
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
+
+function writeJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getPlanSettings() {
+  const saved = readJSON(KEYS.plan, null);
+  if (!saved || typeof saved !== "object") return { ...DEFAULT_PLAN };
+  const plan = REAL_PLANS.find((item) => item.id === saved.planId) ? saved.planId : DEFAULT_PLAN.planId;
+  const size = SIZES.includes(saved.size) ? saved.size : DEFAULT_PLAN.size;
+  const shift = SHIFT_BY_LABEL[saved.shift] ? saved.shift : DEFAULT_PLAN.shift;
+  const days = Array.isArray(saved.days) ? PLAN_DAYS.filter((day) => saved.days.includes(day)) : DEFAULT_PLAN.days;
+  return { planId: plan, size, shift, days: days.length ? days : DEFAULT_PLAN.days };
+}
+
+function getFicha() {
+  const saved = readJSON(KEYS.ficha, {});
+  return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+}
+
+function getAbsences() {
+  const saved = readJSON(KEYS.ausencias, []);
+  return Array.isArray(saved) ? saved.filter((item) => item && typeof item.date === "string") : [];
+}
+
+function getFileList(key) {
+  const saved = readJSON(key, []);
+  return Array.isArray(saved) ? saved.filter((item) => item && typeof item.name === "string") : [];
+}
+
+function getCarnet() {
+  const saved = readJSON(KEYS.carnet, null);
+  return saved && typeof saved.name === "string" ? saved : null;
+}
+
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
+
+function esc(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function waLink(message) {
+  return `https://wa.me/${BUSINESS_INFO.whatsapp}?text=${encodeURIComponent(message)}`;
+}
+
+// Fecha y hora actuales en Argentina, sin depender de la zona horaria del dispositivo.
+function argentinaNow() {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date())
+      .map((part) => [part.type, part.value]),
+  );
+  const date = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)));
+  return { date, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+}
+
+function addDays(date, amount) {
+  return new Date(date.getTime() + amount * 86400000);
+}
+
+function dayName(date) {
+  return WEEK_DAYS[(date.getUTCDay() + 6) % 7];
+}
+
+function isoDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDate(date) {
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${date.getUTCFullYear()}`;
+}
+
+function formatIso(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return formatDate(new Date(Date.UTC(y, m - 1, d)));
+}
+
+function dateFromIso(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+function toMinutes(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function shortDay(day) {
+  return { Lunes: "Lun", Martes: "Mar", Miércoles: "Mié", Jueves: "Jue", Viernes: "Vie", Sábado: "Sáb", Domingo: "Dom" }[day];
+}
+
+function listJoin(items) {
+  return items.length > 1 ? `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}` : items.join("");
+}
+
+function plural(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+// ---------------------------------------------------------------------------
+// Cálculos del día y del plan
+// ---------------------------------------------------------------------------
+
+function getContext() {
+  const settings = getPlanSettings();
+  const plan = REAL_PLANS.find((item) => item.id === settings.planId);
+  const shift = SHIFT_BY_LABEL[settings.shift];
+  const ficha = getFicha();
+  const now = argentinaNow();
+  const todayIso = isoDate(now.date);
+  const absences = getAbsences().filter((item) => item.date >= todayIso).sort((a, b) => a.date.localeCompare(b.date));
+  const absentDates = new Set(absences.map((item) => item.date));
+  const dogName = (ficha.nombre || "").trim() || DEFAULT_DOG_NAME;
+  return { settings, plan, shift, ficha, now, todayIso, absences, absentDates, dogName };
+}
+
+function todayStatus(ctx) {
+  const { settings, shift, now, todayIso, absentDates } = ctx;
+  const today = dayName(now.date);
+  const from = toMinutes(shift.from);
+  const to = toMinutes(shift.to);
+
+  if (!settings.days.includes(today)) {
+    return { kind: "libre", title: "Hoy no tiene paseo", step: -1 };
+  }
+  if (absentDates.has(todayIso)) {
+    return { kind: "ausente", title: "Hoy no sale: avisaste una ausencia", step: -1 };
+  }
+  if (now.minutes < from) return { kind: "programado", title: "Hoy sale a pasear", step: 0 };
+  if (now.minutes <= to) return { kind: "en-curso", title: "Hoy sale a pasear", step: 1 };
+  return { kind: "terminado", title: "El paseo de hoy ya pasó", step: 2 };
+}
+
+// Próximas fechas de paseo según los días del plan. Si el turno de hoy ya terminó, no cuenta.
+function upcomingWalks(ctx, count = 10, skipAbsent = true) {
+  const { settings, shift, now, absentDates } = ctx;
+  const result = [];
+  for (let offset = 0; offset < 70 && result.length < count; offset += 1) {
+    const date = addDays(now.date, offset);
+    if (!settings.days.includes(dayName(date))) continue;
+    if (offset === 0 && now.minutes > toMinutes(shift.to)) continue;
+    if (skipAbsent && absentDates.has(isoDate(date))) continue;
+    result.push(date);
+  }
+  return result;
+}
+
+const FICHA_GROUPS = [
+  {
+    id: "identificacion",
+    title: "Identificación",
+    iconName: "pawPrint",
+    fields: [
+      { key: "nombre", label: "Nombre", placeholder: "Cómo se llama" },
+      { key: "raza", label: "Raza o cruza" },
+      { key: "edad", label: "Edad o fecha de nacimiento" },
+      { key: "sexo", label: "Sexo", options: ["Macho castrado", "Macho sin castrar", "Hembra castrada", "Hembra sin castrar"] },
+      { key: "senas", label: "Color y señas particulares" },
+      { key: "chapita", label: "Chapita o microchip", options: ["Tiene chapita", "Tiene microchip", "Tiene los dos", "No tiene"] },
+      { key: "fotos", label: "Fotos en las redes de Paseos Juan", options: ["Autorizo", "No autorizo"] },
+    ],
+  },
+  {
+    id: "salud",
+    title: "Salud",
+    iconName: "heartPulse",
+    fields: [
+      { key: "vacunas", label: "Vacunas", options: ["Al día", "Atrasadas", "No sé"] },
+      { key: "desparasitacion", label: "Última desparasitación", placeholder: "Por ejemplo: 10/2026" },
+      { key: "alergias", label: "Alergias o medicación" },
+      { key: "cuidados", label: "Lesiones, cirugías o cuidados especiales", textarea: true },
+      { key: "veterinaria", label: "Veterinaria de referencia" },
+    ],
+  },
+  {
+    id: "equipo",
+    title: "Equipo y paseo",
+    iconName: "shieldCheck",
+    fields: [
+      { key: "equipo", label: "Con qué sale", placeholder: "Collar, pechera, correa…" },
+      { key: "bozal", label: "Bozal", options: ["No usa bozal", "Usa bozal"] },
+      {
+        key: "retiro",
+        label: "Indicaciones para el retiro y la entrega",
+        textarea: true,
+        placeholder: "Por ejemplo: quién lo entrega o si hay otro perro en la casa. No hace falta poner la dirección.",
+      },
+    ],
+  },
+  {
+    id: "comportamiento",
+    title: "Comportamiento y control",
+    iconName: "eye",
+    hint: "Contanos lo que ves que hace, con ejemplos. Así lo cuidamos mejor.",
+    fields: [
+      { key: "otrosPerros", label: "Con otros perros", textarea: true, placeholder: "Por ejemplo: se acerca moviendo la cola, o ladra cuando otro perro viene de frente." },
+      { key: "personas", label: "Con personas y chicos", textarea: true },
+      { key: "estimulos", label: "Qué lo pone nervioso o le da miedo", placeholder: "Motos, ruidos fuertes, bicicletas…" },
+      { key: "correa", label: "En la correa", placeholder: "Si tira o si vuelve al llamarlo" },
+      { key: "noJuntar", label: "Perros con los que no debe juntarse", placeholder: "Si no hay, escribí “ninguno”" },
+    ],
+  },
+  {
+    id: "emergencia",
+    title: "Contacto de emergencia",
+    iconName: "users",
+    hint: "Alguien a quien llamar si no te encontramos a vos.",
+    fields: [
+      { key: "contactoNombre", label: "Nombre" },
+      { key: "contactoRelacion", label: "Relación", placeholder: "Familiar, vecino, amigo…" },
+      { key: "contactoTelefono", label: "Teléfono", type: "tel", autocomplete: "tel" },
+    ],
+  },
+];
+
+const ALL_FIELDS = FICHA_GROUPS.flatMap((group) => group.fields);
+
+function filled(ficha, key) {
+  return Boolean(String(ficha[key] ?? "").trim());
+}
+
+function groupProgress(ficha, group) {
+  return group.fields.filter((field) => filled(ficha, field.key)).length;
+}
+
+function fichaProgress(ficha) {
+  return ALL_FIELDS.filter((field) => filled(ficha, field.key)).length;
+}
+
+function safetyAlerts(ficha) {
+  const alerts = [];
+  if (ficha.bozal === "Usa bozal") alerts.push("Usa bozal");
+  const noJuntar = String(ficha.noJuntar ?? "").trim();
+  if (noJuntar && !/^ningun[oa]?\.?$/i.test(noJuntar)) alerts.push(`No juntar con: ${noJuntar}`);
+  return alerts;
+}
+
+// Máximo 3 pendientes, ordenados por seguridad primero.
+function pendingItems(ctx) {
+  const { ficha } = ctx;
+  const items = [];
+  const emergencia = FICHA_GROUPS.find((group) => group.id === "emergencia");
+  if (groupProgress(ficha, emergencia) < emergencia.fields.length) {
+    items.push({ text: "Cargá un contacto de emergencia", detail: "Por si no te encontramos durante el paseo.", go: "ficha-emergencia" });
+  }
+  if (!getCarnet()) {
+    items.push({ text: "Subí el carnet de vacunas", detail: "Foto o PDF. Lo revisamos antes de los paseos en grupo.", go: "cl-vacunas" });
+  }
+  const done = fichaProgress(ficha);
+  if (done < ALL_FIELDS.length) {
+    items.push({ text: "Completá la ficha de tu perro", detail: `Tenés ${done} de ${ALL_FIELDS.length} datos cargados.`, go: "cl-ficha" });
+  }
+  return items.slice(0, 3);
+}
+
+function isPromoActive(ctx) {
+  return ctx.todayIso <= PROMO.until;
+}
+
+// ---------------------------------------------------------------------------
+// Estado de la vista (sobrevive a los re-render globales)
+// ---------------------------------------------------------------------------
+
+const ui = {
+  status: {},
+  openGroups: new Set(["identificacion"]),
+  resetArmed: false,
+};
+
+function setStatus(region, message, html = "") {
+  ui.status[region] = { message, html };
+}
+
+function statusRegion(region) {
+  const status = ui.status[region];
+  const text = status ? `${esc(status.message)} ${status.html}`.trim() : "";
+  return `<p class="cl-status" role="status" aria-live="polite" data-cl-status="${region}">${text}</p>`;
+}
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
 
 export function clientDashboard() {
-  const demoClient = getDemoClient();
-  const clientName = demoClient?.name?.split(" ")[0] || "Martín";
-  const clientHighlights = [
-    {
-      title: "Próximo paseo",
-      text: "Revisá el estado y horario estimado del próximo paseo.",
-      icon: "calendarCheck",
-    },
-    {
-      title: "Mi perro",
-      text: "Consultá datos, conducta, vacunas y observaciones importantes.",
-      icon: "pawPrint",
-    },
-    {
-      title: "Beneficios",
-      text: "Accedé a beneficios del plan, productos recomendados y comunicación directa.",
-      icon: "shieldCheck",
-    },
-  ];
-
+  const ctx = getContext();
   return `
-    <section class="client-hero-card">
-      <div class="client-hero-copy">
-        <p class="eyebrow">Perfil cliente</p>
-        <h2>Hola, ${clientName}</h2>
-        <p>Todo lo que necesitás para seguir la experiencia de tu perro con Paseos Juan.</p>
-        <small>Estado del paseo, documentación, beneficios, pagos y comunicación en un solo lugar.</small>
-        <button class="primary-button">Solicitar evaluación inicial</button>
-      </div>
-      <div class="client-highlight-grid">
-        ${clientHighlights.map((item) => `
-          <article class="client-highlight-card">
-            <span>${icon(item.icon)}</span>
-            <strong>${item.title}</strong>
-            <p>${item.text}</p>
-          </article>
-        `).join("")}
-      </div>
-    </section>
-    ${demoClient ? `
-      <article class="panel demo-client-card">
-        <div>
-          <p class="eyebrow">Cuenta demo activa</p>
-          <h3>${demoClient.dogName}</h3>
-          <small>${demoClient.email} · Tamaño ${demoClient.dogSize}</small>
-        </div>
-        <button class="ghost-button" type="button" data-clear-demo>Salir demo</button>
-      </article>
-    ` : ""}
-    <div class="dashboard-grid">
-      <article class="panel wide">
-        <h3>Estado del próximo paseo</h3>
-        <div class="status-track">
-          ${["Esperando retiro", "Retirado", "Paseando", "Regresando", "Entregado"].map((step, index) => `
-            <span class="${index === 0 ? "current" : ""}">${step}</span>
-          `).join("")}
-        </div>
-      </article>
-      <article class="panel">
-        <h3>Notificaciones</h3>
-        ${["Retiro programado 10:00", "Vacuna de Tango pendiente", "Nuevo album disponible"].map((notice) => `
-          <div class="notice">${notice}</div>
-        `).join("")}
-      </article>
+    <div class="cl-page" data-cl-root>
+      ${pageContent(ctx)}
     </div>
-    <section class="dog-grid">
-      ${DOGS.slice(0, 2).map((dog) => dogCard(dog)).join("")}
-    </section>
-    ${VaccinationUploadCard()}
-    <div class="dashboard-grid">
-      <article class="panel">
-        <h3>Crear perfil de perro</h3>
-        <label>Edad <input placeholder="Ej. 3 anos" /></label>
-        <label>Raza <input placeholder="Ej. Labrador" /></label>
-        <label>Conducta <textarea placeholder="Sociable, reactivo, miedos, rutinas"></textarea></label>
-        <label>Veterinario <input placeholder="Nombre y telefono" /></label>
-        <label>Vacunas <input placeholder="Estado de vacunas" /></label>
-      </article>
-      <article class="panel">
-        <h3>Pagos y planes</h3>
-        <div class="client-plan-list">
-          ${PLANS.map((plan) => compactPlanCard(plan)).join("")}
-        </div>
-        <button class="secondary-button" data-client-action="pay-online">Pagar online</button>
-      </article>
-      <article class="panel">
-        <h3>Cambios de conducta</h3>
-        <textarea placeholder="Contanos que cambio observaste"></textarea>
-        <button class="secondary-button">Reportar cambio</button>
-      </article>
-      <article class="panel">
-        <h3>Seguimiento en tiempo real</h3>
-        <strong class="metric">Futuro</strong>
-        <small>La vista queda reservada para mapa, ubicacion y ETA del paseo.</small>
-      </article>
-    </div>
-    <article class="panel">
-      <h3>Historial y material del paseo</h3>
-      <div class="media-grid">
-        <div>Foto paseo</div>
-        <div>Video corto</div>
-        <div>Reporte final</div>
-      </div>
-    </article>
-    ${ProductBenefits()}
   `;
 }
 
-function VaccinationUploadCard() {
-  const vaccineDocument = getVaccineDocument();
-  const hasFile = Boolean(vaccineDocument.fileName);
+function pageContent(ctx) {
+  return `
+    <p class="cl-demo-note">
+      ${icon("help", "cl-icon-sm")}
+      <span><strong>Página de ejemplo.</strong> El perro y el plan son de demostración. Lo que cargás se guarda solo en este dispositivo.</span>
+    </p>
+    ${todaySection(ctx)}
+    ${quickActions(ctx)}
+    ${accessibilityBand()}
+    ${absenceSection(ctx)}
+    ${planSection(ctx)}
+    ${fichaSection(ctx)}
+    <div class="cl-two-col">
+      ${vaccineSection()}
+      ${paymentSection(ctx)}
+    </div>
+    ${isPromoActive(ctx) ? promoSection() : ""}
+    ${privacySection()}
+  `;
+}
+
+function todaySection(ctx) {
+  const { now, shift, settings, plan, dogName, ficha } = ctx;
+  const status = todayStatus(ctx);
+  const alerts = safetyAlerts(ficha);
+  const steps = ["Programado", "Turno en curso", "Turno terminado"];
+  const next = upcomingWalks(ctx, 1)[0];
+  const nextIsToday = next && isoDate(next) === ctx.todayIso;
+  const pending = pendingItems(ctx);
+
+  const statusText = {
+    libre: `Los días de paseo de tu plan son ${listJoin(settings.days.map((d) => d.toLowerCase()))}.`,
+    ausente: "Quedó anotado en este dispositivo. Si todavía no mandaste el aviso por WhatsApp, mandalo así el equipo se entera.",
+    programado: `Sale en el turno ${settings.shift.toLowerCase()}, entre las ${shift.from} y las ${shift.to}.`,
+    "en-curso": `Ahora es el horario del turno ${settings.shift.toLowerCase()} (${shift.from} a ${shift.to}). El equipo te avisa por WhatsApp cuando lo retira y cuando lo entrega.`,
+    terminado: `El turno ${settings.shift.toLowerCase()} terminó a las ${shift.to}. Si no te llegó el aviso de entrega, escribinos.`,
+  }[status.kind];
 
   return `
-    <section class="panel vaccination-card">
-      <div class="vaccination-copy">
-        <span class="document-icon">${icon(hasFile ? "fileCheck" : "uploadCloud")}</span>
+    <section class="cl-today" aria-labelledby="cl-today-title">
+      <div class="cl-today-main cl-card">
+        <div class="cl-dog-chip">
+          <span class="cl-avatar">${icon("pawPrint", "cl-icon")}</span>
+          <span>
+            <strong data-cl-dogname>${esc(dogName)}</strong>
+            <small>${esc(plan.name)} · ${esc(settings.size)} · Turno ${esc(settings.shift.toLowerCase())}</small>
+          </span>
+        </div>
+        <p class="cl-eyebrow">Hoy · ${esc(dayName(now.date))} ${formatDate(now.date)}</p>
+        <h1 id="cl-today-title" class="cl-today-title">${status.title}</h1>
+        <p class="cl-lead">${statusText}</p>
+        ${status.step >= 0 ? `
+          <ol class="cl-steps" aria-label="Estado del paseo según el horario del turno">
+            ${steps.map((step, index) => `
+              <li class="${index < status.step ? "is-done" : ""} ${index === status.step ? "is-current" : ""}" ${index === status.step ? 'aria-current="step"' : ""}>
+                <span class="cl-step-dot" aria-hidden="true"></span>
+                <span>${step}</span>
+              </li>
+            `).join("")}
+          </ol>
+          <p class="cl-fine">El estado sigue el horario del turno. El seguimiento en vivo todavía no está disponible. Horario exacto de retiro: <strong>${PENDIENTE}</strong> (te lo confirmamos por WhatsApp).</p>
+        ` : ""}
+        <div data-cl-region="alertas-hoy">${alertsBlock(alerts, true)}</div>
+        ${weekStrip(ctx)}
+      </div>
+
+      <div class="cl-today-side">
+        <article class="cl-card cl-next">
+          <p class="cl-eyebrow">${icon("calendarCheck", "cl-icon-sm")} Próximo paseo</p>
+          ${next ? `
+            <p class="cl-next-day">${nextIsToday ? "Hoy" : esc(dayName(next))}</p>
+            <p class="cl-next-date">${nextIsToday ? `${esc(dayName(next))} ${formatDate(next)}` : formatDate(next)}</p>
+            <p class="cl-next-shift">Turno ${esc(settings.shift.toLowerCase())} · ${shift.from} a ${shift.to}</p>
+          ` : `
+            <p class="cl-next-day">${PENDIENTE}</p>
+            <p class="cl-next-shift">No encontramos un próximo paseo con los días de tu plan.</p>
+          `}
+        </article>
+
+        <article class="cl-card cl-pending" aria-labelledby="cl-pending-title">
+          <h2 id="cl-pending-title" class="cl-h3">Tus pendientes</h2>
+          <div data-cl-region="pendientes">${pendingList(ctx, pending)}</div>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function pendingList(ctx, pending = pendingItems(ctx)) {
+  if (!pending.length) {
+    return `<p class="cl-all-done">${icon("checkCircle", "cl-icon-sm")} Todo al día. Gracias por mantener la ficha completa.</p>`;
+  }
+  return `
+    <ol class="cl-pending-list">
+      ${pending.map((item, index) => `
+        <li>
+          <button type="button" class="cl-pending-item" data-cl-go="${item.go}">
+            <span class="cl-pending-num" aria-hidden="true">${index + 1}</span>
+            <span>
+              <strong>${esc(item.text)}</strong>
+              <small>${esc(item.detail)}</small>
+            </span>
+            ${icon("arrowRight", "cl-icon-sm")}
+          </button>
+        </li>
+      `).join("")}
+    </ol>
+  `;
+}
+
+function alertsBlock(alerts, compact = false) {
+  if (!alerts.length) return "";
+  return `
+    <div class="cl-alert ${compact ? "is-compact" : ""}" role="note" aria-label="Alertas de seguridad">
+      ${icon("alertTriangle", "cl-icon")}
+      <div>
+        <strong>Alertas de seguridad</strong>
+        <ul>${alerts.map((alert) => `<li>${esc(alert)}</li>`).join("")}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function weekStrip(ctx) {
+  const { now, settings, absentDates, todayIso } = ctx;
+  const monday = addDays(now.date, -((now.date.getUTCDay() + 6) % 7));
+  const days = WEEK_DAYS.map((_, index) => addDays(monday, index));
+  return `
+    <div class="cl-week">
+      <p class="cl-week-title">Esta semana</p>
+      <ul class="cl-week-days">
+        ${days.map((date) => {
+          const iso = isoDate(date);
+          const name = dayName(date);
+          const walks = settings.days.includes(name);
+          const absent = walks && absentDates.has(iso);
+          const isToday = iso === todayIso;
+          const label = absent ? "ausencia avisada" : walks ? "con paseo" : "sin paseo";
+          return `
+            <li class="${walks ? "has-walk" : ""} ${absent ? "is-absent" : ""} ${isToday ? "is-today" : ""}" aria-label="${name} ${formatDate(date)}: ${label}${isToday ? " (hoy)" : ""}">
+              <span aria-hidden="true">${shortDay(name)}</span>
+              <b aria-hidden="true">${date.getUTCDate()}</b>
+              <i aria-hidden="true">${absent ? "Ausente" : walks ? "Paseo" : "—"}</i>
+            </li>
+          `;
+        }).join("")}
+      </ul>
+    </div>
+  `;
+}
+
+function quickActions(ctx) {
+  const actions = [
+    { label: "Avisar una ausencia", go: "cl-ausencia", iconName: "bell" },
+    { label: "Subir carnet de vacunas", go: "cl-vacunas", iconName: "fileUp" },
+  ];
+  return `
+    <nav class="cl-quick" aria-label="Acciones rápidas">
+      ${actions.map((action) => `
+        <button type="button" class="cl-quick-btn" data-cl-go="${action.go}">
+          ${icon(action.iconName, "cl-icon")}
+          <span>${action.label}</span>
+        </button>
+      `).join("")}
+      <a class="cl-quick-btn is-whatsapp" href="${waLink("Hola, tengo una consulta sobre los paseos de mi perro.")}" target="_blank" rel="noreferrer">
+        ${icon("message", "cl-icon")}
+        <span>Hablar por WhatsApp <small>${esc(BUSINESS_INFO.whatsappLabel)}</small></span>
+      </a>
+      ${isPromoActive(ctx) ? `
+        <button type="button" class="cl-quick-btn" data-cl-go="cl-promo">
+          ${icon("medal", "cl-icon")}
+          <span>Ver la promo <small>Hasta el ${esc(PROMO.untilLabel)}</small></span>
+        </button>
+      ` : ""}
+    </nav>
+  `;
+}
+
+function accessibilityState() {
+  const theme = isDarkTheme() ? "oscuro" : "claro";
+  const motion = isCalmMotion() ? "calmo (sin movimiento)" : "normal";
+  return `Ahora: tema ${theme} · movimiento ${motion}.`;
+}
+
+function accessibilityBand() {
+  return `
+    <section class="cl-a11y cl-card" aria-labelledby="cl-a11y-title">
+      <span class="cl-a11y-icon">${icon("eye", "cl-icon")}</span>
+      <div>
+        <h2 id="cl-a11y-title" class="cl-h3">Mirá la página como te quede más cómoda</h2>
+        <p><strong>Modo oscuro:</strong> menos brillo, ideal de noche. <strong>Modo calmo:</strong> apaga animaciones y el fondo en movimiento; recomendado si tenés epilepsia fotosensible, migrañas o te mareás con el movimiento en pantalla.</p>
+        <p class="cl-fine" data-cl-a11y-state>${accessibilityState()} Se guarda solo en este dispositivo.</p>
+      </div>
+      <button type="button" class="cl-btn is-secondary" data-cl-open-a11y>Abrir opciones de accesibilidad</button>
+    </section>
+  `;
+}
+
+function absenceSection(ctx) {
+  const options = upcomingWalks(ctx, 10);
+  return `
+    <section class="cl-card cl-section" id="cl-ausencia" aria-labelledby="cl-ausencia-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("bell", "cl-icon")}</span>
         <div>
-          <p class="eyebrow">Documentación del perro</p>
-          <h3>Vacunas y documentación</h3>
-          <p>
-            Subí una foto o PDF del carnet de vacunas para mantener la información del perro
-            actualizada.
-          </p>
+          <h2 id="cl-ausencia-title" class="cl-h2" tabindex="-1">Avisar una ausencia</h2>
+          <p>Si tu perro no puede salir algún día, avisanos con tiempo así reorganizamos el grupo.</p>
+        </div>
+      </header>
+      <div class="cl-absence-grid">
+        <div class="cl-form">
+          ${options.length ? `
+            <label for="cl-absence-date">Día que no sale
+              <select id="cl-absence-date" data-cl-absence-date>
+                ${options.map((date) => `<option value="${isoDate(date)}">${esc(dayName(date))} ${formatDate(date)} · turno ${esc(ctx.settings.shift.toLowerCase())}</option>`).join("")}
+              </select>
+            </label>
+            <label for="cl-absence-reason"><span>Motivo <span class="cl-optional">(opcional)</span></span>
+              <input id="cl-absence-reason" type="text" maxlength="140" placeholder="Por ejemplo: viaje" data-cl-absence-reason />
+            </label>
+            <button type="button" class="cl-btn" data-cl-absence-save>
+              ${icon("message", "cl-icon-sm")} Avisar por WhatsApp
+            </button>
+            <p class="cl-fine">Se abre WhatsApp con el mensaje listo: solo tenés que tocar Enviar. El aviso también queda anotado en este dispositivo.</p>
+          ` : `<p>${PENDIENTE}: no hay próximos paseos con los días de tu plan.</p>`}
+          ${statusRegion("ausencia")}
+        </div>
+        <div class="cl-absence-list">
+          <h3 class="cl-h4">Ausencias avisadas</h3>
+          ${ctx.absences.length ? `
+            <ul class="cl-list">
+              ${ctx.absences.map((item) => `
+                <li>
+                  <span>
+                    <strong>${esc(dayName(dateFromIso(item.date)))} ${formatIso(item.date)}</strong>
+                    ${item.reason ? `<small>${esc(item.reason)}</small>` : ""}
+                  </span>
+                  <button type="button" class="cl-btn is-ghost is-small" data-cl-absence-remove="${esc(item.date)}" aria-label="Quitar la ausencia del ${formatIso(item.date)}">Quitar</button>
+                </li>
+              `).join("")}
+            </ul>
+          ` : `<p class="cl-empty">No avisaste ausencias. Todos los paseos de tu plan siguen en pie.</p>`}
         </div>
       </div>
-      <div class="vaccination-upload-box">
-        <input id="vaccine-file" data-vaccine-file type="file" accept=".jpg,.jpeg,.png,.pdf" />
-        <label for="vaccine-file">
-          ${icon("fileUp")}
-          <strong>${hasFile ? "Cambiar archivo" : "Subir documentación"}</strong>
-          <small>Formatos permitidos: JPG, PNG o PDF.</small>
+    </section>
+  `;
+}
+
+function planSection(ctx) {
+  const { plan, settings, shift } = ctx;
+  const single = REAL_SINGLE_WALK[settings.size];
+  const daysOk = settings.days.length === plan.walks;
+  return `
+    <section class="cl-card cl-section" id="cl-plan" aria-labelledby="cl-plan-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("calendarCheck", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-plan-title" class="cl-h2" tabindex="-1">Tu plan</h2>
+          <p>Precios oficiales por semana y por perro, según el tamaño.</p>
+        </div>
+      </header>
+
+      <div class="cl-plan-summary">
+        <div class="cl-plan-main">
+          <p class="cl-eyebrow">Plan contratado (ejemplo)</p>
+          <p class="cl-plan-name">${esc(plan.name)}</p>
+          <p class="cl-plan-walks">${plural(plan.walks, "paseo", "paseos")} por semana · ${esc(settings.size)}</p>
+          <p class="cl-plan-price"><b>${formatPeso(plan.prices[settings.size])}</b> <span>por semana</span></p>
+        </div>
+        <dl class="cl-plan-facts">
+          <div>
+            <dt>Días</dt>
+            <dd>
+              <ul class="cl-day-chips" aria-label="Días contratados">
+                ${PLAN_DAYS.map((day) => `<li class="${settings.days.includes(day) ? "is-on" : ""}" aria-label="${day}: ${settings.days.includes(day) ? "contratado" : "no contratado"}"><span aria-hidden="true">${shortDay(day)}</span></li>`).join("")}
+              </ul>
+            </dd>
+          </div>
+          <div><dt>Turno</dt><dd>${esc(settings.shift)} · ${shift.from} a ${shift.to}</dd></div>
+          <div><dt>Horario exacto de retiro</dt><dd>${PENDIENTE}</dd></div>
+        </dl>
+      </div>
+      ${daysOk ? "" : `<p class="cl-warning">${icon("alertCircle", "cl-icon-sm")} El ${esc(plan.name)} incluye ${plural(plan.walks, "paseo", "paseos")} por semana y hay ${plural(settings.days.length, "día cargado", "días cargados")}. Lo confirmamos por WhatsApp.</p>`}
+
+      <h3 class="cl-h4">Todos los planes · tamaño ${esc(settings.size.toLowerCase())}</h3>
+      <ul class="cl-plan-grid">
+        ${REAL_PLANS.map((item) => `
+          <li class="cl-plan-card ${item.id === plan.id ? "is-current" : ""}">
+            ${item.id === plan.id ? `<span class="cl-badge">Tu plan</span>` : ""}
+            <strong>${esc(item.name)}</strong>
+            <span>${plural(item.walks, "paseo", "paseos")} por semana</span>
+            <b>${formatPeso(item.prices[settings.size])}</b>
+            <small>por semana</small>
+          </li>
+        `).join("")}
+      </ul>
+      <div class="cl-plan-extra">
+        <p><strong>Paseo suelto (${esc(settings.size.toLowerCase())}):</strong> individual ${formatPeso(single.individual)} · en grupo ${formatPeso(single.grupo)}.</p>
+        <p><strong>Más de un perro en casa:</strong> ${MULTI_DOG_DISCOUNTS.map((item) => `${item.dogs} perros ${item.discount}`).join(" · ")} de descuento.</p>
+        <p class="cl-fine">Fuente: tabla oficial de planes de Paseos Juan. El monto final de tu cuenta te lo confirmamos por WhatsApp.</p>
+      </div>
+
+      <details class="cl-details" data-cl-details="plan" ${ui.openGroups.has("plan") ? "open" : ""}>
+        <summary>${icon("sliders", "cl-icon-sm")} Cambiar el ejemplo</summary>
+        <div class="cl-form cl-plan-form">
+          <p class="cl-fine">Esto solo cambia lo que ves en este dispositivo. Para cambiar tu plan de verdad, escribinos por WhatsApp.</p>
+          <div class="cl-form-row">
+            <label for="cl-plan-id">Plan
+              <select id="cl-plan-id" data-cl-plan-field="planId">
+                ${REAL_PLANS.map((item) => `<option value="${item.id}" ${item.id === plan.id ? "selected" : ""}>${esc(item.name)} · ${plural(item.walks, "paseo", "paseos")}</option>`).join("")}
+              </select>
+            </label>
+            <label for="cl-plan-size">Tamaño
+              <select id="cl-plan-size" data-cl-plan-field="size">
+                ${SIZES.map((size) => `<option ${size === settings.size ? "selected" : ""}>${size}</option>`).join("")}
+              </select>
+            </label>
+            <label for="cl-plan-shift">Turno
+              <select id="cl-plan-shift" data-cl-plan-field="shift">
+                ${Object.entries(SHIFT_BY_LABEL).map(([label, item]) => `<option value="${label}" ${label === settings.shift ? "selected" : ""}>${label} (${item.from} a ${item.to})</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <fieldset class="cl-days-field">
+            <legend>Días de paseo</legend>
+            <div class="cl-days-options">
+              ${PLAN_DAYS.map((day) => `
+                <label class="cl-check">
+                  <input type="checkbox" value="${day}" data-cl-plan-day ${settings.days.includes(day) ? "checked" : ""} />
+                  <span>${day}</span>
+                </label>
+              `).join("")}
+            </div>
+          </fieldset>
+          <button type="button" class="cl-btn" data-cl-plan-save>Guardar ejemplo</button>
+          ${statusRegion("plan")}
+        </div>
+      </details>
+    </section>
+  `;
+}
+
+function fichaSection(ctx) {
+  const { ficha } = ctx;
+  const done = fichaProgress(ficha);
+  const total = ALL_FIELDS.length;
+  return `
+    <section class="cl-card cl-section" id="cl-ficha" aria-labelledby="cl-ficha-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("fileText", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-ficha-title" class="cl-h2" tabindex="-1">Ficha de <span data-cl-dogname>${esc(ctx.dogName)}</span></h2>
+          <p>Con estos datos cuidamos mejor a tu perro. Lo que falte figura como “${PENDIENTE}”. Se guarda solo en este dispositivo mientras lo escribís.</p>
+        </div>
+      </header>
+
+      <div class="cl-ficha-top">
+        <div class="cl-progress-wrap" data-cl-region="ficha-progreso">${fichaProgressBlock(done, total)}</div>
+        <div class="cl-category">
+          <span class="cl-category-tag">SIN EVALUAR</span>
+          <p><strong>Categoría operativa.</strong> ${esc(CATEGORIES["SIN EVALUAR"])} Todo perro nuevo empieza así y su primer paseo es individual. Fecha de evaluación: ${PENDIENTE}.</p>
+        </div>
+      </div>
+      <div data-cl-region="alertas-ficha">${alertsBlock(safetyAlerts(ficha))}</div>
+
+      <div class="cl-ficha-groups">
+        ${FICHA_GROUPS.map((group) => fichaGroup(group, ficha)).join("")}
+      </div>
+      ${statusRegion("ficha")}
+    </section>
+  `;
+}
+
+function fichaProgressBlock(done, total) {
+  const percent = Math.round((done / total) * 100);
+  return `
+    <p class="cl-progress-label"><strong>${done} de ${total}</strong> datos cargados</p>
+    <div class="cl-progress" role="progressbar" aria-label="Ficha completa" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}" aria-valuetext="${done} de ${total} datos cargados">
+      <span style="width:${percent}%"></span>
+    </div>
+  `;
+}
+
+function groupCountLabel(ficha, group) {
+  const count = groupProgress(ficha, group);
+  if (count === group.fields.length) return `<span class="cl-count is-done">${icon("checkCircle", "cl-icon-xs")} Completo</span>`;
+  return `<span class="cl-count">${count} de ${group.fields.length} · ${PENDIENTE.toLowerCase()}</span>`;
+}
+
+function fichaGroup(group, ficha) {
+  const open = ui.openGroups.has(group.id);
+  return `
+    <details class="cl-group" id="ficha-${group.id}" data-cl-details="${group.id}" ${open ? "open" : ""}>
+      <summary>
+        <span class="cl-group-icon">${icon(group.iconName, "cl-icon-sm")}</span>
+        <span class="cl-group-title">${group.title}</span>
+        <span data-cl-count="${group.id}">${groupCountLabel(ficha, group)}</span>
+        ${icon("chevronDown", "cl-icon-sm cl-chevron")}
+      </summary>
+      <div class="cl-group-body">
+        ${group.hint ? `<p class="cl-fine">${group.hint}</p>` : ""}
+        <div class="cl-fields">
+          ${group.fields.map((field) => fichaField(field, ficha)).join("")}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function fichaField(field, ficha) {
+  const id = `cl-f-${field.key}`;
+  const value = ficha[field.key] ?? "";
+  const wide = field.textarea ? "is-wide" : "";
+  let control;
+  if (field.options) {
+    control = `
+      <select id="${id}" data-cl-ficha="${field.key}">
+        <option value="">${PENDIENTE}</option>
+        ${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${esc(option)}</option>`).join("")}
+      </select>
+    `;
+  } else if (field.textarea) {
+    control = `<textarea id="${id}" rows="3" maxlength="600" data-cl-ficha="${field.key}" placeholder="${esc(field.placeholder || PENDIENTE)}">${esc(value)}</textarea>`;
+  } else {
+    control = `<input id="${id}" type="${field.type || "text"}" maxlength="140" ${field.autocomplete ? `autocomplete="${field.autocomplete}"` : 'autocomplete="off"'} data-cl-ficha="${field.key}" value="${esc(value)}" placeholder="${esc(field.placeholder || PENDIENTE)}" />`;
+  }
+  return `
+    <label class="cl-field ${wide}" for="${id}">
+      <span>${field.label}</span>
+      ${control}
+      ${field.placeholder && !field.options ? `<small class="cl-field-state" data-cl-field-state="${field.key}">${filled(ficha, field.key) ? "" : PENDIENTE}</small>` : ""}
+    </label>
+  `;
+}
+
+function vaccineSection() {
+  const carnet = getCarnet();
+  return `
+    <section class="cl-card cl-section" id="cl-vacunas" aria-labelledby="cl-vacunas-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon(carnet ? "fileCheck" : "uploadCloud", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-vacunas-title" class="cl-h2" tabindex="-1">Carnet de vacunas</h2>
+          <p>Subí una foto o PDF del carnet. Lo revisamos antes de los paseos en grupo.</p>
+        </div>
+      </header>
+      <div class="cl-upload">
+        <input id="cl-vaccine-file" class="cl-file-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/*" data-cl-file="carnet" />
+        <label for="cl-vaccine-file" class="cl-upload-box">
+          ${icon("fileUp", "cl-icon")}
+          <strong>${carnet ? "Cambiar archivo" : "Elegir foto o PDF"}</strong>
+          <small>JPG, PNG o PDF</small>
         </label>
       </div>
-      <div class="vaccination-status">
-        <span>
-          <small>Estado de revisión</small>
-          <strong>${vaccineDocument.status}</strong>
-        </span>
-        <span>
-          <small>Archivo cargado</small>
-          <strong>${hasFile ? vaccineDocument.fileName : "Sin archivo cargado"}</strong>
-        </span>
-      </div>
+      <dl class="cl-file-status">
+        <div><dt>Archivo</dt><dd>${carnet ? esc(carnet.name) : "Sin archivo"}</dd></div>
+        <div><dt>Estado</dt><dd>${carnet ? `Pendiente de revisión · cargado el ${esc(carnet.date)}` : PENDIENTE}</dd></div>
+      </dl>
+      <p class="cl-fine">La app todavía no envía archivos: queda anotado en este dispositivo. Para que lo revisemos, mandá la foto o el PDF por WhatsApp.</p>
+      <a class="cl-btn is-secondary" href="${waLink("Hola, te mando el carnet de vacunas de mi perro.")}" target="_blank" rel="noreferrer">
+        ${icon("message", "cl-icon-sm")} Mandar carnet por WhatsApp
+      </a>
+      ${statusRegion("carnet")}
     </section>
   `;
 }
 
-function ProductBenefits() {
+function paymentSection(ctx) {
+  const receipts = getFileList(KEYS.comprobantes);
   return `
-    <section class="client-benefits">
-      <div class="client-benefits-heading">
-        <p class="eyebrow">Beneficios de ser parte de Paseos Juan</p>
-        <h3>Productos recomendados para tu perro</h3>
-        <p>
-          Equipamiento y productos seleccionados para mejorar la seguridad, la rutina y la
-          experiencia del paseo.
-        </p>
+    <section class="cl-card cl-section" id="cl-pagos" aria-labelledby="cl-pagos-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("wallet", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-pagos-title" class="cl-h2" tabindex="-1">Pagos</h2>
+          <p>El alias y el detalle de pago te los enviamos por WhatsApp.</p>
+        </div>
+      </header>
+      <p class="cl-price-ref">Precio de lista de tu plan: <strong>${formatPeso(ctx.plan.prices[ctx.settings.size])} por semana</strong>. El monto final te lo confirmamos por WhatsApp.</p>
+      <a class="cl-btn" href="${waLink("Hola, ¿me pasan el alias y el detalle de pago del plan de mi perro?")}" target="_blank" rel="noreferrer">
+        ${icon("message", "cl-icon-sm")} Pedir alias y detalle por WhatsApp
+      </a>
+      <div class="cl-upload">
+        <input id="cl-receipt-file" class="cl-file-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/*" data-cl-file="comprobante" />
+        <label for="cl-receipt-file" class="cl-upload-box is-small">
+          ${icon("receipt", "cl-icon")}
+          <strong>Subir comprobante</strong>
+          <small>JPG, PNG o PDF</small>
+        </label>
       </div>
-      <div class="product-benefit-grid">
-        ${PRODUCTS.map((product) => `
-          <article class="product-benefit-card">
-            <span class="product-icon">${icon(product.icon)}</span>
-            <small>${product.tag}</small>
-            <h4>${product.name}</h4>
-            <p>${product.description}</p>
-            <strong>${product.price}</strong>
-            <button class="secondary-button" type="button">Consultar producto</button>
-          </article>
-        `).join("")}
-      </div>
-      <p class="product-benefit-note">
-        Los productos recomendados pueden variar según tamaño, conducta y necesidades de cada perro.
-      </p>
+      ${receipts.length ? `
+        <ul class="cl-list" aria-label="Comprobantes cargados">
+          ${receipts.slice(0, 5).map((item) => `
+            <li>
+              <span><strong>${esc(item.name)}</strong><small>Cargado el ${esc(item.date)} · Pendiente de confirmación</small></span>
+            </li>
+          `).join("")}
+        </ul>
+        <a class="cl-btn is-secondary" href="${waLink("Hola, te mando el comprobante de pago del plan de mi perro.")}" target="_blank" rel="noreferrer">
+          ${icon("message", "cl-icon-sm")} Mandar comprobante por WhatsApp
+        </a>
+      ` : `<p class="cl-empty">Todavía no cargaste comprobantes.</p>`}
+      ${statusRegion("comprobante")}
     </section>
   `;
 }
 
+function promoSection() {
+  return `
+    <section class="cl-card cl-section cl-promo" id="cl-promo" aria-labelledby="cl-promo-title">
+      <span class="cl-section-icon">${icon("medal", "cl-icon")}</span>
+      <div>
+        <p class="cl-eyebrow">Promo vigente hasta el ${esc(PROMO.untilLabel)}</p>
+        <h2 id="cl-promo-title" class="cl-h2" tabindex="-1">${esc(PROMO.title)}</h2>
+        <p>${esc(PROMO.detail)} Podés pasarla a quien quieras.</p>
+      </div>
+      <a class="cl-btn" href="${waLink("Hola, quiero la muestra gratis de DogPro o CatPro y el paseo de regalo.")}" target="_blank" rel="noreferrer">Quiero la promo</a>
+    </section>
+  `;
+}
 
-// Clicks de la vista cliente. Devuelve true si atendió el click (corta la cadena).
+function privacySection() {
+  return `
+    <section class="cl-privacy" aria-labelledby="cl-privacy-title">
+      <div>
+        <h2 id="cl-privacy-title" class="cl-h4">${icon("lock", "cl-icon-sm")} Tus datos</h2>
+        <p>La ficha, las ausencias y los archivos que anotás acá quedan solo en este dispositivo. No se comparten con nadie hasta que vos nos los mandes.</p>
+      </div>
+      <button type="button" class="cl-btn is-ghost ${ui.resetArmed ? "is-danger" : ""}" data-cl-reset>
+        ${ui.resetArmed ? "Tocá de nuevo para borrar todo" : "Borrar mis datos de este dispositivo"}
+      </button>
+      ${statusRegion("privacidad")}
+    </section>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Actualización de la página sin re-render global (mantiene foco y scroll)
+// ---------------------------------------------------------------------------
+
+function refreshPage(focusSelector) {
+  const root = document.querySelector("[data-cl-root]");
+  if (!root) return;
+  const active = document.activeElement;
+  const activeId = active?.id;
+  root.innerHTML = pageContent(getContext());
+  const target = (focusSelector && root.querySelector(focusSelector)) || (activeId && document.getElementById(activeId));
+  target?.focus({ preventScroll: true });
+}
+
+function refreshFichaParts() {
+  const root = document.querySelector("[data-cl-root]");
+  if (!root) return;
+  const ctx = getContext();
+  const regions = {
+    pendientes: () => pendingList(ctx),
+    "alertas-hoy": () => alertsBlock(safetyAlerts(ctx.ficha), true),
+    "alertas-ficha": () => alertsBlock(safetyAlerts(ctx.ficha)),
+    "ficha-progreso": () => fichaProgressBlock(fichaProgress(ctx.ficha), ALL_FIELDS.length),
+  };
+  Object.entries(regions).forEach(([name, build]) => {
+    root.querySelectorAll(`[data-cl-region="${name}"]`).forEach((element) => {
+      element.innerHTML = build();
+    });
+  });
+  FICHA_GROUPS.forEach((group) => {
+    const element = root.querySelector(`[data-cl-count="${group.id}"]`);
+    if (element) element.innerHTML = groupCountLabel(ctx.ficha, group);
+  });
+  root.querySelectorAll("[data-cl-dogname]").forEach((element) => {
+    element.textContent = ctx.dogName;
+  });
+  root.querySelectorAll("[data-cl-field-state]").forEach((element) => {
+    element.textContent = filled(ctx.ficha, element.dataset.clFieldState) ? "" : PENDIENTE;
+  });
+}
+
+function showStatus(region, message, html = "") {
+  setStatus(region, message, html);
+  const element = document.querySelector(`[data-cl-status="${region}"]`);
+  if (element) element.innerHTML = `${esc(message)} ${html}`.trim();
+}
+
+function goTo(id) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  if (target.tagName === "DETAILS") {
+    target.open = true;
+    ui.openGroups.add(target.dataset.clDetails);
+  }
+  target.scrollIntoView({ behavior: isCalmMotion() ? "auto" : "smooth", block: "start" });
+  const focusable = target.matches("details")
+    ? target.querySelector("input, select, textarea")
+    : target.querySelector("[tabindex='-1']");
+  focusable?.focus({ preventScroll: true });
+}
+
+function todayLabel() {
+  return formatDate(argentinaNow().date);
+}
+
+// ---------------------------------------------------------------------------
+// Eventos
+// ---------------------------------------------------------------------------
+
 function handleClienteClick(event) {
-  const clearDemo = event.target.closest("[data-clear-demo]");
-  if (clearDemo) {
-    localStorage.removeItem("paseosJuanDemoClient");
-    render();
+  if (!event.target.closest("[data-cl-root]")) return false;
+
+  const go = event.target.closest("[data-cl-go]");
+  if (go) {
+    goTo(go.dataset.clGo);
     return true;
   }
 
-  return false;
-}
+  if (event.target.closest("[data-cl-open-a11y]")) {
+    // Se abre después de este click: si no, el mismo click cerraría el panel.
+    setTimeout(() => {
+      const panel = document.getElementById("a11y-panel");
+      if (panel && !panel.hidden) {
+        panel.querySelector(".a11y-option.is-active")?.focus();
+        return;
+      }
+      document.querySelector(".a11y-toggle")?.click();
+    }, 0);
+    return true;
+  }
 
-// Era un listener "change" propio: nunca corta la cadena (no devuelve true).
-function handleVaccineChange(event) {
-  const vaccineInput = event.target.closest("[data-vaccine-file]");
-  if (!vaccineInput) return;
+  if (event.target.closest("[data-cl-absence-save]")) {
+    const date = document.querySelector("[data-cl-absence-date]")?.value;
+    const reason = document.querySelector("[data-cl-absence-reason]")?.value?.trim() || "";
+    if (!date) return true;
+    const ctx = getContext();
+    const absences = getAbsences().filter((item) => item.date !== date);
+    absences.push({ date, reason });
+    writeJSON(KEYS.ausencias, absences);
+    const name = ctx.dogName === DEFAULT_DOG_NAME ? "mi perro" : `mi perro ${ctx.dogName}`;
+    const message = [
+      `Hola, aviso que ${name} no sale al paseo el ${dayName(dateFromIso(date)).toLowerCase()} ${formatIso(date)} (turno ${ctx.settings.shift.toLowerCase()}).`,
+      reason ? `Motivo: ${reason}.` : "",
+      "¡Gracias!",
+    ].filter(Boolean).join(" ");
+    const link = waLink(message);
+    window.open(link, "_blank", "noopener");
+    setStatus(
+      "ausencia",
+      `Listo: anotamos la ausencia del ${formatIso(date)}. Si WhatsApp no se abrió,`,
+      `<a href="${link}" target="_blank" rel="noreferrer">tocá acá para mandar el aviso</a>.`,
+    );
+    refreshPage("[data-cl-status='ausencia']");
+    return true;
+  }
 
-  const file = vaccineInput.files?.[0];
-  if (!file) return;
+  const remove = event.target.closest("[data-cl-absence-remove]");
+  if (remove) {
+    const date = remove.dataset.clAbsenceRemove;
+    writeJSON(KEYS.ausencias, getAbsences().filter((item) => item.date !== date));
+    setStatus("ausencia", `Quitamos la ausencia del ${formatIso(date)}. Si ya la habías avisado, contanos por WhatsApp que al final sale.`);
+    refreshPage("#cl-ausencia-title");
+    return true;
+  }
 
-  localStorage.setItem("paseosJuanVaccineFile", file.name);
-  localStorage.setItem("paseosJuanVaccineStatus", "Pendiente de revisión");
-  render();
-}
+  if (event.target.closest("[data-cl-plan-save]")) {
+    const field = (name) => document.querySelector(`[data-cl-plan-field="${name}"]`)?.value;
+    const days = [...document.querySelectorAll("[data-cl-plan-day]:checked")].map((input) => input.value);
+    const planId = field("planId");
+    const plan = REAL_PLANS.find((item) => item.id === planId);
+    if (!days.length) {
+      showStatus("plan", "Elegí al menos un día de paseo.");
+      return true;
+    }
+    if (plan && days.length !== plan.walks) {
+      showStatus("plan", `El ${plan.name} incluye ${plural(plan.walks, "paseo", "paseos")} por semana: elegí ${plural(plan.walks, "día", "días")} (marcaste ${days.length}).`);
+      return true;
+    }
+    writeJSON(KEYS.plan, { planId, size: field("size"), shift: field("shift"), days });
+    setStatus("plan", "Guardado. Actualizamos el plan, el paseo de hoy y el próximo paseo.");
+    refreshPage("[data-cl-plan-save]");
+    return true;
+  }
 
-function handleClienteActionClick(event) {
-  const clientAction = event.target.closest("[data-client-action]");
-  if (clientAction) {
-    if (clientAction.dataset.clientAction === "pay-online") {
-      openModal('client-pay');
+  if (event.target.closest("[data-cl-reset]")) {
+    if (!ui.resetArmed) {
+      ui.resetArmed = true;
+      refreshPage("[data-cl-reset]");
+      return true;
+    }
+    Object.values(KEYS).forEach((key) => {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // Sin almacenamiento disponible: no hay nada que borrar.
+      }
+    });
+    ui.resetArmed = false;
+    ui.status = {};
+    setStatus("privacidad", "Listo: borramos de este dispositivo la ficha, el plan de ejemplo, las ausencias y los archivos anotados.");
+    refreshPage("[data-cl-reset]");
+    return true;
+  }
+
+  if (ui.resetArmed && !event.target.closest("[data-cl-reset]")) {
+    ui.resetArmed = false;
+    const button = document.querySelector("[data-cl-reset]");
+    if (button) {
+      button.classList.remove("is-danger");
+      button.textContent = "Borrar mis datos de este dispositivo";
     }
   }
 
   return false;
 }
 
+// Archivos: se anota solo el nombre y la fecha (el archivo no sale del dispositivo).
+function handleClienteChange(event) {
+  const input = event.target.closest("[data-cl-file]");
+  if (input) {
+    const file = input.files?.[0];
+    if (!file) return false;
+    const entry = { name: file.name, date: todayLabel() };
+    if (input.dataset.clFile === "carnet") {
+      writeJSON(KEYS.carnet, entry);
+      setStatus("carnet", `Anotamos “${file.name}”. Ahora mandalo por WhatsApp para que lo revisemos.`);
+      refreshPage("[data-cl-status='carnet']");
+    } else {
+      const list = [entry, ...getFileList(KEYS.comprobantes)].slice(0, 10);
+      writeJSON(KEYS.comprobantes, list);
+      setStatus("comprobante", `Anotamos “${file.name}”. Mandalo por WhatsApp así lo confirmamos.`);
+      refreshPage("[data-cl-status='comprobante']");
+    }
+    return false;
+  }
+
+  const fichaInput = event.target.closest("[data-cl-ficha]");
+  if (fichaInput) {
+    const ficha = getFicha();
+    const ok = writeJSON(KEYS.ficha, { ...ficha, [fichaInput.dataset.clFicha]: fichaInput.value.trim() });
+    showStatus("ficha", ok ? "Ficha guardada en este dispositivo." : "No pudimos guardar en este dispositivo (¿modo privado?). Lo que escribas vale solo para esta visita.");
+  }
+  return false;
+}
+
+// Guardado mientras se escribe, sin mover el foco.
+function handleClienteInput(event) {
+  const fichaInput = event.target.closest?.("[data-cl-ficha]");
+  if (!fichaInput) return;
+  const ficha = getFicha();
+  writeJSON(KEYS.ficha, { ...ficha, [fichaInput.dataset.clFicha]: fichaInput.value.trim() });
+  refreshFichaParts();
+}
+
+// Recordar qué grupos de la ficha quedaron abiertos.
+function handleClienteToggle(event) {
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement) || !details.dataset.clDetails) return;
+  if (details.open) ui.openGroups.add(details.dataset.clDetails);
+  else ui.openGroups.delete(details.dataset.clDetails);
+}
+
 export function registerClienteEvents() {
   clickHandlers.push(handleClienteClick);
-  changeHandlers.push(handleVaccineChange);
-  actionClickHandlers.push(handleClienteActionClick);
+  changeHandlers.push(handleClienteChange);
+  document.addEventListener("input", handleClienteInput);
+  document.addEventListener("toggle", handleClienteToggle, true);
+  onAccessibilityChange(() => {
+    const element = document.querySelector("[data-cl-a11y-state]");
+    if (element) element.textContent = `${accessibilityState()} Se guarda solo en este dispositivo.`;
+  });
 }
