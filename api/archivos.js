@@ -6,8 +6,8 @@
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/permisos.js";
-import { guardarArchivo } from "./_lib/archivos.js";
+import { puedeLeer, puedeEscribir, puedeVerArchivo, puedeSubirArchivo } from "./_lib/permisos.js";
+import { guardarArchivo, TIPOS } from "./_lib/archivos.js";
 
 export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   const user = await requireUser(req);
@@ -15,6 +15,8 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   if (req.method === "POST") {
     if (!puedeEscribir(user.rol, "archivos")) throw new HttpError(403, "Tu usuario no puede subir archivos.");
     const body = await readJson(req, 5 * 1024 * 1024);
+    if (!Object.prototype.hasOwnProperty.call(TIPOS, body.tipo)) throw new HttpError(400, "Tipo de archivo no válido.");
+    if (!puedeSubirArchivo(user.rol, body.tipo)) throw new HttpError(403, "Tu usuario no puede subir este tipo de archivo.");
     const registro = await guardarArchivo(body, user);
     return send(res, 201, { ok: true, registro });
   }
@@ -31,7 +33,11 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   if (!buffer) throw new HttpError(404, "No se encontró el archivo guardado.");
   res.statusCode = 200;
   res.setHeader("Content-Type", meta.mime);
-  res.setHeader("Content-Disposition", `inline; filename="${meta.nombreArchivo}"`);
+  // Las fotos se muestran; lo demás (PDF) se descarga y, si igual se abre, queda aislado.
+  const esImagen = /^image\//.test(String(meta.mime || ""));
+  const nombre = String(meta.nombreArchivo || "archivo").replace(/["\\\r\n]/g, "");
+  res.setHeader("Content-Disposition", `${esImagen ? "inline" : "attachment"}; filename="${nombre}"`);
+  if (!esImagen) res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
   res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.end(buffer);

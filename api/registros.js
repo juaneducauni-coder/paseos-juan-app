@@ -13,6 +13,58 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const PERRO_ID = /^[A-Za-z0-9_.-]{0,40}$/;
 const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre"];
 const MAX_RECORD = 20 * 1024;
+// Campos de autoría de `paseos` (quién marcó cada paso): los fija el servidor.
+const AUTORIA_PASEO = ["horaRetiroPor", "horaPaseoPor", "horaEntregaPor", "horaIntegradoPor", "devuelvePor"];
+// Colecciones donde un no-admin solo edita lo que cargó él (el coordinador administra los avisos).
+const SOLO_PROPIOS = ["incidentes", "observaciones", "avisos"];
+const escRegex = (texto) => String(texto).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Reglas por registro (además del permiso por colección). Devuelve los datos ya ajustados.
+function reglasPorRegistro(col, id, datos, previo, user) {
+  const admin = user.rol === "admin";
+  if (col === "solicitudes" && !admin && user.rol !== "coordinador") {
+    // El supervisor pide; el coordinador (o el admin) aplica o rechaza y responde.
+    if (previo && (previo.creadoPor !== user.usuario || (previo.estado || "pendiente") !== "pendiente")) {
+      throw new HttpError(403, "Solo podés cambiar tus pedidos mientras estén pendientes.");
+    }
+    datos.estado = "pendiente";
+    if (previo) delete datos.respuesta;
+    else datos.respuesta = "";
+  }
+  if (col === "checklists" && !admin) {
+    const propio = new RegExp(`^\\d{4}-\\d{2}-\\d{2}_${escRegex(user.usuario)}_(manana|tarde)$`);
+    if (!propio.test(id)) throw new HttpError(403, "Solo podés cargar tu propio checklist.");
+  }
+  if (SOLO_PROPIOS.includes(col) && !admin && previo && previo.creadoPor !== user.usuario) {
+    if (!(col === "avisos" && user.rol === "coordinador")) {
+      throw new HttpError(403, "Solo podés cambiar lo que cargaste vos.");
+    }
+  }
+  if (col === "paseos") {
+    for (const campo of AUTORIA_PASEO) {
+      const nombre = `${campo}Nombre`;
+      if (!Object.prototype.hasOwnProperty.call(datos, campo)) {
+        // Sin el usuario no se acepta un nombre suelto.
+        delete datos[nombre];
+        continue;
+      }
+      const valor = String(datos[campo] ?? "").trim();
+      if (!valor) {
+        // Vacío = desmarcar.
+        datos[campo] = "";
+        datos[nombre] = "";
+      } else if (previo && previo[campo] === valor) {
+        // Reenvía lo que ya estaba (pasos anteriores, cola sin señal): queda el autor original.
+        datos[campo] = previo[campo];
+        datos[nombre] = previo[nombre] || "";
+      } else {
+        datos[campo] = user.usuario;
+        datos[nombre] = user.nombre || "";
+      }
+    }
+  }
+  return datos;
+}
 
 export function nuevoId(fecha) {
   const now = new Date();
@@ -84,9 +136,10 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
 
     const ahora = new Date().toISOString();
     const previo = body.id ? await store.get(col, id) : null;
+    const datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
     const registro = {
       ...(previo || {}),
-      ...limpiar(body, coleccion(col).maxBytes),
+      ...datos,
       id,
       col,
       creadoPor: previo?.creadoPor || user.usuario,
@@ -107,6 +160,12 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
   if (!id || !ID.test(id)) throw new HttpError(400, "Identificador no válido.");
   const previo = await store.get(col, id);
   if (!previo) return send(res, 200, { ok: true, borrado: false });
+  // Los archivos los borra solo el admin (lo guardado en Drive o Vercel no se borra desde acá).
+  if (col === "archivos" && user.rol !== "admin") throw new HttpError(403, "Los archivos los borra solo el admin.");
+  // Un pedido de cambio ya aplicado o rechazado queda como registro: solo el admin lo borra.
+  if (col === "solicitudes" && user.rol !== "admin" && (previo.estado || "pendiente") !== "pendiente") {
+    throw new HttpError(403, "Ese pedido ya se respondió: no se puede borrar.");
+  }
   const esDueno = previo.creadoPor === user.usuario && Date.now() - Date.parse(previo.creadoEn) < 24 * 3600 * 1000;
   if (user.rol !== "admin" && !(esDueno && puedeEscribir(user.rol, col))) {
     throw new HttpError(403, "Solo el admin, o quien lo cargó en las últimas 24 horas, puede borrarlo.");
