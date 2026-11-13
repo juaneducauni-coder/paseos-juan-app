@@ -585,7 +585,7 @@ function legacyRecords() {
       key: LEGACY.altas,
       oldId: id,
       col: "fichas",
-      data: { id: legacyId(id), fecha: isoFromDMY(fecha) || hoy, perroNombre: old.nombre || PENDIENTE, datos: { ...datos, primerPaseo: "Individual" }, categoria: "SIN EVALUAR", estado: "lista", migrado: true },
+      data: { id: legacyId(id), fecha: isoFromDMY(fecha) || hoy, perroNombre: old.nombre || PENDIENTE, datos: { ...datos, primerPaseo: "Evaluación inicial antes del grupo" }, categoria: "SIN EVALUAR", estado: "lista", migrado: true },
     });
   });
   const enServidor = new Set(cached("resueltos").map((r) => r.perroId || r.id));
@@ -1588,7 +1588,6 @@ function ArchivoItem(a, scope) {
     a.creadoPor === "web" ? "Web" : a.creadoPorNombre || "",
     a.creadoEn ? fmtStamp(a.creadoEn) : fmtDate(a.fecha),
     fmtTamano(a.tamano),
-    a.ubicacion === "drive" ? "Drive" : "",
   ].filter(Boolean).join(" · ");
   return `
     <li class="coord-file">
@@ -1718,8 +1717,8 @@ function CoordinatorHeader() {
         <span class="coord-brand-text"><strong>Coordinación</strong></span>
       </a>
       <div class="coord-header-actions">
-        <button class="coord-btn is-ghost is-compact" type="button" data-a11y-toggle aria-controls="a11y-panel">
-          ${ic("eye")}<span class="cd-hide-xs">Accesibilidad</span><span class="coord-sr-only cd-show-xs">Accesibilidad</span>
+        <button class="coord-btn is-ghost is-compact cd-hide-xs" type="button" data-a11y-toggle aria-controls="a11y-panel">
+          ${ic("eye")}<span>Accesibilidad</span>
         </button>
         <a class="coord-btn is-ghost is-compact" href="/salir" data-link>${ic("logOut")}<span>Salir</span></a>
       </div>
@@ -1826,20 +1825,19 @@ function Tile({ go, iconName, n, label, sub, tone }) {
 
 function InicioView() {
   const hoy = hoyAR();
-  const user = currentUser();
   const sols = solicitudesPendientes();
   const urg = sols.filter((s) => s.urgente).length;
   const web = webNuevos(getPedidos());
   const vig = avisosVigentes();
   const barrios = groupByBarrio(vig).map(([b]) => b);
   const cargando = (col) => !loaded.has(col);
+  const sinRutas = loaded.has("plantillas") && !getPlantillas().length && !getRutasDia().length;
   return `
     <header class="cd-hello">
-      <p class="cd-date">${esc(dayLabel(hoy))}</p>
-      <h1 id="coord-view-title" tabindex="-1">Hola, ${esc(firstName(user.nombre) || user.nombre)}</h1>
+      <h1 id="coord-view-title" tabindex="-1">Hoy <span class="cd-date">${esc(dayLabel(hoy))}</span></h1>
     </header>
     <div class="cd-tiles">
-      ${Tile({ go: "mas:cambios", iconName: "bell", n: sols.length, label: "Pedidos de cambio", tone: urg ? "alert" : sols.length ? "warn" : "ok", sub: cargando("solicitudes") && !sols.length ? "…" : urg ? `${urg} ${urg === 1 ? "urgente" : "urgentes"}` : sols.length ? "Pendientes" : "Al día" })}
+      ${Tile({ go: "mas:cambios", iconName: "bell", n: sols.length, label: "Cambios pedidos", tone: urg ? "alert" : sols.length ? "warn" : "ok", sub: cargando("solicitudes") && !sols.length ? "…" : urg ? `${urg} ${urg === 1 ? "urgente" : "urgentes"}` : sols.length ? "Pendientes" : "Al día" })}
       ${Tile({ go: "mas:pedidos", iconName: "clipboardCheck", n: web.length, label: "Pedidos nuevos", tone: web.length ? "warn" : "ok", sub: cargando("pedidos") && !web.length ? "…" : web.length ? "De la web" : "Al día" })}
       ${Tile({ go: "mas:avisos", iconName: "mapPin", n: vig.length, label: "Avisos", tone: vig.length ? "warn" : "ok", sub: vig.length ? esc(shortList(barrios, 1)) : "Sin avisos" })}
     </div>
@@ -1852,9 +1850,32 @@ function InicioView() {
     <section class="cd-sec" aria-labelledby="coord-inicio-rutas">
       <div class="cd-h2-row">
         <h2 class="cd-h2" id="coord-inicio-rutas">Rutas de hoy</h2>
-        ${button("Semana", `data-coord-go-rutas="semana"`, "ghost", "calendarCheck")}
+        ${sinRutas || cargaProgreso ? "" : button("Semana", `data-coord-go-rutas="semana"`, "ghost", "calendarCheck")}
       </div>
       ${RoutesList(hoy)}
+    </section>
+    ${sinRutas && !cargaProgreso ? PasosInicio() : ""}
+  `;
+}
+
+// Sin rutas cargadas: qué sigue después de cargarlas (llena la pantalla con lo útil).
+function PasosInicio() {
+  const pasos = [
+    ["calendarCheck", "Revisá la semana", "Horarios y paseadores", `data-coord-go-rutas="semana"`],
+    ["users", "Sumá los clientes", "Tutor, barrio y días", `data-coord-go="clientes"`],
+    ["mapPin", "Avisá por barrio", "Obras, perros sueltos, clima", `data-coord-go="mas:avisos"`],
+  ];
+  return `
+    <section class="cd-sec" aria-labelledby="coord-inicio-pasos">
+      <h2 class="cd-h2" id="coord-inicio-pasos">Después</h2>
+      <ol class="cd-pasos">
+        ${pasos.map(([iconName, label, sub, attrs]) => `
+          <li><button type="button" class="cd-paso" ${attrs}>
+            ${ic(iconName)}
+            <span class="cd-paso-text"><b>${label}</b><small>${sub}</small></span>
+            ${ic("arrowRight", "coord-icon cd-paso-go")}
+          </button></li>`).join("")}
+      </ol>
     </section>
   `;
 }
@@ -1923,9 +1944,8 @@ function RouteCard(r, fecha, { detalle = false, filtro = false } = {}) {
 function RoutesList(fecha, { detalle = false, filtro = false } = {}) {
   const plantillas = getPlantillas();
   if (!loaded.has("plantillas") && !plantillas.length) return emptyState("Cargando rutas…", "clock");
-  if (!plantillas.length && !getRutasDia().length) {
-    return `${emptyState("Todavía no hay rutas.", "route")}${button("Cargar rutas", `data-coord-go-rutas="dia"`, "primary", "uploadCloud")}`;
-  }
+  // Sin rutas: se cargan ahí mismo (Cargar rutas → Sí, cargar), también desde Inicio.
+  if ((!plantillas.length && !getRutasDia().length) || cargaProgreso) return CargaPlanilla();
   const routes = effectiveRoutes(fecha);
   if (!routes.length) return emptyState("No hay rutas este día.", "route");
   return `<ul class="cd-list">${routes.map((r) => RouteCard(r, fecha, { detalle, filtro })).join("")}</ul>`;
@@ -1953,11 +1973,12 @@ function CargaPlanilla() {
   return `
     <div class="cd-card cd-carga">
       <p class="cd-big">${ic("uploadCloud")}<span><b>${base.length} rutas</b> · ${paseos} paseos</span></p>
-      <p class="cd-muted">De la planilla RPJ (BASE RUTAS, 12/11/2026). Sin «Llak»: no coincide con ningún perro.</p>
+      <p class="cd-muted">Desde la planilla de rutas (${esc(DATA_UPDATED)})</p>
+      ${fold("carga-falta", `${ic("help")}<span>1 perro sin cargar</span>`, `<p class="cd-foot">«Llak» (jueves tarde): el nombre no coincide con ningún perro. Pendiente de confirmar.</p>`)}
       ${cargaProgreso ? `<p class="cd-note" role="status">${ic("clock")}<span>${esc(cargaProgreso)}</span></p>` : ""}
       ${cargaConfirm ? `
         <div class="cd-confirm" role="group" aria-labelledby="coord-carga-q">
-          <p id="coord-carga-q"><b>¿Cargar las ${base.length} rutas?</b> Las ve todo el equipo.</p>
+          <p id="coord-carga-q"><b>¿Cargar las ${base.length} rutas de la planilla?</b> Las ve todo el equipo.</p>
           <div class="cd-actions">
             ${button("Sí, cargar", `id="coord-carga-ok" data-coord-carga-ok`, "primary", "checkCircle")}
             ${button("Cancelar", `id="coord-carga-cancel" data-coord-carga-cancel`, "ghost")}
@@ -2351,9 +2372,9 @@ function CambiosView() {
   const pend = solicitudesPendientes();
   const done = getSolicitudes().filter((s) => (s.estado || "pendiente") !== "pendiente");
   return `
-    ${SubHead("Pedidos de cambio", pend.length)}
+    ${SubHead("Cambios pedidos", pend.length)}
     <p class="cd-muted">Del supervisor.</p>
-    ${pend.length ? `<ul class="cd-list">${pend.map((s) => SolicitudCard(s)).join("")}</ul>` : emptyState(loaded.has("solicitudes") ? "No hay pedidos pendientes." : "Cargando…", loaded.has("solicitudes") ? "checkCircle" : "clock")}
+    ${pend.length ? `<ul class="cd-list">${pend.map((s) => SolicitudCard(s)).join("")}</ul>` : emptyState(loaded.has("solicitudes") ? "No hay cambios pendientes." : "Cargando…", loaded.has("solicitudes") ? "checkCircle" : "clock")}
     ${done.length ? fold("solHist", `Respondidos (${done.length})`, `<ul class="cd-list">${done.map((s) => SolicitudCard(s)).join("")}</ul>`) : ""}
   `;
 }
@@ -2535,7 +2556,7 @@ function MasView() {
   const desde = haceDias(6);
   const incidentes = cached("incidentes").filter((r) => !r.fecha || r.fecha >= desde).length;
   const items = [
-    ["cambios", "bell", "Cambios", solicitudesPendientes().length, "alert"],
+    ["cambios", "bell", "Cambios pedidos", solicitudesPendientes().length, "alert"],
     ["pedidos", "clipboardCheck", "Pedidos", abiertos, "warn"],
     ["avisos", "mapPin", "Avisos", avisosVigentes().length, "warn"],
     ["fichas", "userPlus", "Fichas", 0, "neutral"],
@@ -2550,6 +2571,9 @@ function MasView() {
         <button type="button" class="cd-menu-btn" id="coord-mas-${sub}" data-coord-go="mas:${sub}">
           ${ic(iconName)}<span>${label}</span>${n ? `<b class="cd-menu-n is-${tone}">${n}</b>` : ""}
         </button>`).join("")}
+      <button type="button" class="cd-menu-btn" id="coord-mas-a11y" data-a11y-toggle aria-controls="a11y-panel">
+        ${ic("eye")}<span>Accesibilidad</span>
+      </button>
     </div>
     ${fold("mas-fuentes", `${ic("help")}<b>Fuentes</b>`, `<p class="cd-foot">Rutas: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Carnets y documentos: privados.</p>`)}
   `;
@@ -2890,7 +2914,7 @@ function AltaForm() {
         <button type="button" class="cd-back" data-coord-alta-close>${ic("arrowLeft")}<span>Fichas</span></button>
         <h1 id="coord-view-title" tabindex="-1">Perro nuevo</h1>
       </div>
-      <p class="cd-chips">${chip("SIN EVALUAR", "neutral")}${chip("1.er paseo individual", "warn", "shieldCheck")}</p>
+      <p class="cd-chips">${chip("SIN EVALUAR", "neutral")}${chip("Evaluación inicial antes del grupo", "warn", "shieldCheck")}</p>
       ${draft.pedidoId ? `<p class="cd-note">${ic("clipboardCheck")}<span>Con datos del pedido web. Revisalos.</span></p>` : ""}
       ${field("alta", "nombre", "Nombre del perro", { value: draft.nombre, required: true })}
       <div class="coord-field">
@@ -2981,7 +3005,7 @@ function FichasView() {
                 ${Ava(DOG_BY_NAME.get(normalize(nombre)), nombre, "md")}
                 <div class="cd-row-main"><strong>${esc(nombre)}</strong><small>Alta ${esc(fmtDate(ficha.fecha))}</small></div>
               </div>
-              <p class="cd-chips">${chip(esc(ficha.categoria || "SIN EVALUAR"), "neutral")}${chip("1.er paseo individual", "warn")}${carnet ? chip("Carnet", "ok", "check") : chip("Sin carnet", "warn")}</p>
+              <p class="cd-chips">${chip(esc(ficha.categoria || "SIN EVALUAR"), "neutral")}${chip("Evaluación inicial antes del grupo", "warn")}${carnet ? chip("Carnet", "ok", "check") : chip("Sin carnet", "warn")}</p>
               <p class="cd-line">${esc(!a.tamano || a.tamano === PENDIENTE ? "Tamaño ?" : a.tamano)} · ${dias.length ? esc(daysLabel(dias)) : "Días ?"} · ${esc(!a.turno || a.turno === PENDIENTE ? "Turno ?" : a.turno)}</p>
               ${fileFeedback(scope)}
               ${whoLine(ficha)}
@@ -3001,7 +3025,7 @@ function altaText(ficha) {
   const v = (value) => value || PENDIENTE;
   return [
     `Ficha de alta: ${ficha.perroNombre || a.nombre} (cargada el ${fmtDate(ficha.fecha)}${ficha.creadoPorNombre ? ` por ${ficha.creadoPorNombre}` : ""})`,
-    `Categoría: ${ficha.categoria || "SIN EVALUAR"}. Primer paseo: individual.`,
+    `Categoría: ${ficha.categoria || "SIN EVALUAR"}. Evaluación inicial antes de sumarlo al grupo.`,
     `Identificación: ${v(a.tamano)}; raza o cruza: ${v(a.raza)}; edad: ${v(a.edad)}; sexo: ${v(a.sexo)}; castrado/a: ${v(a.castrado)}.`,
     `Tutor: ${v(a.tutor)}; contacto: ${v(a.contacto)}; emergencia: ${v(a.emergencia)}; zona: ${v(a.zona)}${a.referencia ? ` (${a.referencia})` : ""}.`,
     `Salud: vacunas al día: ${v(a.vacunas)}; veterinaria: ${v(a.veterinario)}; observaciones: ${v(a.salud)}.`,
@@ -3203,7 +3227,7 @@ async function subirDocumento(c) {
     await registros.save("clientes", { id, archivos: vinculados }).catch(() => {});
     if (subida === s) subida = null;
     const que = registro.tipo === TIPO_CARNET ? "Carnet" : "Documento";
-    setFileFlash(`cliente-${id}`, `${que}${dog ? ` de ${dog.name}` : ""} guardado${registro.ubicacion === "drive" ? " en Drive" : ""}.`);
+    setFileFlash(`cliente-${id}`, `${que}${dog ? ` de ${dog.name}` : ""} guardado${registro.ubicacion === "drive" ? " en tu Drive" : ""}.`);
   } catch (error) {
     s.estado = "";
     s.error = mensajeArchivo(error, "subir");
@@ -3455,7 +3479,14 @@ function handleCoordinadorClick(event) {
       if (lastError) showToast(`Se guardaron ${ok} de ${base.length} rutas. Error: ${lastError}`, { tone: "error" });
       else showToast(`Listo: ${ok} rutas cargadas.${pend ? " Se envían con señal." : ""}`);
       setRutasVista("dia");
-      scheduleRerender();
+      // Desde Inicio, al terminar lleva a Rutas (son 2 toques: Cargar rutas → Sí, cargar).
+      if (getView().tab === "inicio") {
+        goView("rutas");
+        render();
+        toTop();
+      } else {
+        scheduleRerender();
+      }
     });
     return true;
   }
@@ -4054,7 +4085,7 @@ function handleCoordinadorClick(event) {
     }
     const nombre = values.nombre.trim();
     const { archivos: delPedido, ...resto } = values;
-    const datos = { ...resto, tamano: values.tamano || PENDIENTE, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Individual" };
+    const datos = { ...resto, tamano: values.tamano || PENDIENTE, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Evaluación inicial antes del grupo" };
     if (altaCarnet && !altaCarnetSubido && sinSenal()) {
       showToast("Sin señal: el carnet necesita señal. Esperá o quitalo para guardar la ficha.", { tone: "error" });
       render();
