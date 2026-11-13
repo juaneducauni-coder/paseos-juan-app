@@ -33,7 +33,7 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 |---|---|---|---|
 | admin | Juan. Todo: usuarios, pagos, indicadores. | `/admin` (y todas) | Sí |
 | coordinador | Arma las rutas y los horarios (plantilla semanal y cambios del día), gestiona los clientes de los paseos, atiende pedidos y avisa lo que pasa en cada barrio. | `/coordinador` | **No** |
-| supervisor | Se asegura de que se cumplan los paseos del momento: quién falta retirar, atrasos contra el horario, entregas, incidentes, equipo. No arma rutas (las ve). | `/supervisor` (y `/paseador`) | No |
+| supervisor | Se asegura de que se cumplan los paseos del momento: quién falta retirar, atrasos contra el horario, entregas, incidentes, equipo. Mira las rutas y, si habló con alguien o pasó algo, **le pide el cambio al coordinador** (no edita la ruta él). | `/supervisor` (y `/paseador`) | No |
 | paseador | Hace su ruta del turno, en orden y con horario. | `/paseador` | No |
 | ayudante | Ayudante de paseador: acompaña al paseador en su ruta, marca pasos y reporta incidentes. Sin datos de clientes. | `/paseador` (modo ayudante) | No |
 | marketing | Mateo Pérez: pedidos y comunicación. | (en preparación) | No |
@@ -55,6 +55,7 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 | `observaciones` | equipo* | equipo* | automático | `fecha`, `hora`, `perroId`, `perroNombre`, `lugar`, `estimulo`, `reaccion`, `accion`, `resultado`, `titulo` |
 | `plantillas` | equipo* | admin, coordinador | `PJ_1M_lunes` | ver "Rutas y horarios" |
 | `rutas` | equipo* | admin, coordinador | `AAAA-MM-DD_PJ_1M` | igual que plantilla + `fecha` |
+| `solicitudes` | admin, coordinador, supervisor | admin, coordinador, supervisor | automático | Pedido de cambio de ruta del supervisor al coordinador: `fecha` (día del cambio), `turno`, `ruta`, `tipo` ("no sale", "agregar perro", "cambiar hora", "cambiar paseador o ayudante", "otro"), `perroId`, `perroNombre`, `detalle` (qué cambiar), `motivo` (qué pasó o con quién habló), `urgente` (true/false), `estado` ("pendiente", "aplicado", "rechazado"), `respuesta` (la escribe el coordinador), `titulo` |
 | `cierres` | admin, coordinador, supervisor | admin, supervisor | `AAAA-MM-DD_manana` | `fecha`, `turno`, `notas`, `resumen`, `cerrado` |
 | `clientes` | admin, coordinador | admin, coordinador | automático | `nombre` (tutor), `telefono`, `barrio`, `perros` (ids), `plan`, `dias`, `turno`, `estado` ("activo", "pausa", "baja"), `notas` |
 | `avisos` | equipo* y marketing | admin, coordinador, supervisor | automático | `fecha`, `barrio`, `tipo` ("obra o corte", "perro suelto", "clima", "seguridad", "cambio de horario", "otro"), `mensaje`, `vigenteHasta` (AAAA-MM-DD), `titulo` |

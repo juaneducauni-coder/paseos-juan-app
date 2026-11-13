@@ -24,6 +24,9 @@ export const COLECCIONES = {
   plantillas: { leer: EQUIPO, escribir: ["admin", "coordinador"] },
   // Cambios de un día puntual sobre la plantilla. id = AAAA-MM-DD_PJ_1M
   rutas: { leer: EQUIPO, escribir: ["admin", "coordinador"], porFecha: true },
+  // Pedidos de cambio de ruta: el supervisor ve algo en la calle (habló con un tutor, pasó algo)
+  // y le pide el cambio al coordinador, que lo aplica en la ruta y responde.
+  solicitudes: { leer: ["admin", "coordinador", "supervisor"], escribir: ["admin", "coordinador", "supervisor"], porFecha: true },
   // Cierres de turno del supervisor. id = AAAA-MM-DD_manana
   cierres: { leer: ["admin", "coordinador", "supervisor"], escribir: ["admin", "supervisor"], porFecha: true },
   // Clientes (tutores) y sus perros. Datos de contacto: solo admin y coordinador.
