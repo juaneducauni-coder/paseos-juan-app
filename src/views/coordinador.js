@@ -1,10 +1,12 @@
-// Vista del rol Coordinador: pedidos (incluidos los del formulario web), datos a confirmar,
-// altas, carga semanal, observaciones e incidentes recientes y pagos de apoyo.
+// Vista del rol Coordinador (definido por Juan el 13/11/2026):
+// - Organiza las RUTAS Y LOS HORARIOS: plantilla semanal (`plantillas`) y cambios de un día (`rutas`).
+// - Aplica los pedidos de cambio que le manda el supervisor (`solicitudes`).
+// - Gestiona los CLIENTES de los paseos (`clientes`) y los pedidos (`pedidos`, incluidos los de la web).
+// - AVISA lo que pasa en cada barrio (`avisos`).
+// - No ve plata: nada de pagos, montos ni precios por cliente (los pagos son solo del admin).
 //
-// Los datos del trabajo viven en el servidor (src/api/client.js, ver docs/datos-compartidos.md):
-// pedidos, fichas, resueltos y pagos se comparten con el resto del equipo según su rol.
-// La carga semanal y los datos a confirmar salen de src/data/realData.js.
-// En este dispositivo solo queda qué secciones están abiertas.
+// Los datos viven en el servidor (src/api/client.js, ver docs/datos-compartidos.md).
+// En este dispositivo solo quedan comodidades: qué secciones están abiertas y la vista de rutas elegida.
 import {
   PENDIENTE,
   DATA_UPDATED,
@@ -12,28 +14,28 @@ import {
   REAL_DOGS,
   REAL_PLANS,
   WEEK_DAYS,
-  dogsForShift,
+  TEAM,
+  BARRIOS_BASE,
   goesOn,
-  todayName,
-  formatPeso,
+  plantillasDesdePlanilla,
+  sumarMinutos,
 } from "../data/realData.js";
 import { session, registros, onDataChange, hoyAR } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
 
 /* ------------------------------------------------------------------ */
-/* Almacenamiento local                                                */
+/* Almacenamiento local (solo preferencias de pantalla)                */
 /* ------------------------------------------------------------------ */
 
 // Claves de la versión anterior (todo quedaba en el dispositivo). Se suben una vez y se borran.
+// La de pagos NO se toca: los pagos ahora son solo del admin y el coordinador no puede subirlos.
 const LEGACY = {
   resueltos: "paseosJuan_coord_resueltos",
   pedidos: "paseosJuan_coord_pedidos",
   altas: "paseosJuan_coord_altas",
-  pagos: "paseosJuan_coord_pagos",
   borradores: "paseosJuan_coord_borradores",
 };
-// Única clave que se sigue usando: qué secciones están abiertas (preferencia de pantalla).
 const SECTIONS_KEY = "paseosJuan_coord_secciones";
 
 function readJSON(key, fallback) {
@@ -66,13 +68,11 @@ function removeKey(key) {
 /* Mensajes de estado (aria-live)                                      */
 /* ------------------------------------------------------------------ */
 
-// Mensaje de la última acción (se muestra en la sección y se anuncia).
 let flash = null;
-// Último registro borrado, para poder deshacer.
 let lastDeleted = null;
 
-function setFlash(section, text, tone = "ok") {
-  flash = { section, text, tone };
+function setFlash(sectionKey, text, tone = "ok") {
+  flash = { section: sectionKey, text, tone };
   if (tone === "error") announceError(text);
   else announce(text);
 }
@@ -121,10 +121,6 @@ function esc(value) {
     .replaceAll("'", "&#39;");
 }
 
-function argentinaNow() {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
-}
-
 // "2026-11-13" → "13/11/2026"
 function fmtDate(iso) {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
@@ -143,41 +139,67 @@ function fmtStamp(isoTs) {
   return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`;
 }
 
-// "13/11/2026" → "2026-11-13" (o null si no es una fecha válida).
-function isoFromDMY(text) {
-  const match = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(String(text || ""));
-  if (!match) return null;
-  const [, d, m, y] = match.map(Number);
+function isISODate(text) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text || ""));
+  if (!match) return false;
+  const [, y, m, d] = match.map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
-  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
-  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
-function todayDMY() {
-  return fmtDate(hoyAR());
+function addDaysISO(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d + days));
+  return date.toISOString().slice(0, 10);
 }
 
-// Fecha desde la que se muestran observaciones e incidentes (hoy y los 6 días anteriores).
-function desde7() {
-  return hoyAR(new Date(Date.now() - 6 * 24 * 3600 * 1000));
+// "2026-11-13" → "Viernes"
+function dayNameISO(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return WEEK_DAYS[(new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7];
+}
+
+function dayLabel(iso) {
+  return `${dayNameISO(iso)} ${fmtDate(iso)}`;
+}
+
+function haceDias(n) {
+  return addDaysISO(hoyAR(), -n);
+}
+
+// Próximas fechas (desde hoy) que caen en ese día de la semana.
+function nextDatesFor(dia, count = 6) {
+  const out = [];
+  const hoy = hoyAR();
+  for (let i = 0; i < 70 && out.length < count; i += 1) {
+    const iso = addDaysISO(hoy, i);
+    if (dayNameISO(iso) === dia) out.push(iso);
+  }
+  return out;
 }
 
 function normalize(text) {
-  return String(text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return String(text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+}
+
+function slugDia(dia) {
+  return normalize(dia);
+}
+
+function listJoin(items) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
 }
 
 const DAY_SHORT = { Lunes: "lun", Martes: "mar", Miércoles: "mié", Jueves: "jue", Viernes: "vie", Sábado: "sáb", Domingo: "dom" };
 
 function daysLabel(days) {
-  if (!days?.length) return "Sin días en rutas";
+  if (!days?.length) return "Sin días";
   const work = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
-  if (work.every((d) => days.includes(d))) {
-    return days.includes("Sábado") ? "Lun a sáb" : "Lun a vie";
-  }
-  return days.map((d) => DAY_SHORT[d]).join(", ");
+  if (work.every((d) => days.includes(d))) return days.includes("Sábado") ? "Lun a sáb" : "Lun a vie";
+  return days.map((d) => DAY_SHORT[d] || d).join(", ");
 }
 
-// Horario por día (BASE RUTAS) agrupado por turno: "mañana: lun a vie · tarde: sáb".
 function scheduleLabel(dog) {
   const parts = SHIFT_LABELS.map((shift) => {
     const days = WEEK_DAYS.filter((day) => goesOn(dog, day, shift));
@@ -186,12 +208,7 @@ function scheduleLabel(dog) {
   return parts.length ? parts.join(" · ") : "Sin días en rutas";
 }
 
-function listJoin(items) {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
-}
-
-// Secciones plegables: se recuerda en el dispositivo qué está abierto.
+// Secciones plegables y vista elegida: se recuerdan en el dispositivo.
 function isOpen(key, fallback = false) {
   const state = readJSON(SECTIONS_KEY, {});
   return key in state ? Boolean(state[key]) : fallback;
@@ -201,7 +218,6 @@ function setOpen(key, value) {
   writeJSON(SECTIONS_KEY, { ...readJSON(SECTIONS_KEY, {}), [key]: value });
 }
 
-// Detalles de una tarjeta (por ejemplo, "Ver datos" de un pedido): solo en memoria.
 const openCards = new Set();
 
 function prefersCalm() {
@@ -218,28 +234,87 @@ function goTo(id, focusSelector) {
   });
 }
 
+function focusById(id) {
+  requestAnimationFrame(() => document.getElementById(id)?.focus({ preventScroll: false }));
+}
+
 function currentUser() {
   return session.user() || { usuario: "", nombre: PENDIENTE, rol: "" };
+}
+
+function minutesOf(hora) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(hora || ""));
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h > 23 || m > 59) return null;
+  return h * 60 + m;
+}
+
+function validHora(hora) {
+  return minutesOf(hora) !== null;
+}
+
+function padHora(hora) {
+  const total = minutesOf(hora);
+  if (total === null) return "";
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Perros y equipo                                                     */
+/* ------------------------------------------------------------------ */
+
+const SERVICE_DAYS = WEEK_DAYS.filter((day) => day !== "Domingo");
+const SHIFT_LABELS = ["Mañana", "Tarde"];
+const SHIFT_START = { Mañana: "09:00", Tarde: "14:45" };
+const DOG_BY_ID = new Map(REAL_DOGS.map((dog) => [dog.id, dog]));
+const DOG_BY_NAME = new Map(REAL_DOGS.map((dog) => [normalize(dog.name), dog]));
+const REVIEW_DOGS = REAL_DOGS.filter((dog) => dog.review || dog.status !== "Activo");
+
+function dogOf(stop) {
+  return (stop.perroId && DOG_BY_ID.get(stop.perroId)) || DOG_BY_NAME.get(normalize(stop.perroNombre)) || null;
+}
+
+function hasMuzzle(dog) {
+  return Boolean(dog?.safety?.some((note) => /bozal/i.test(note)));
+}
+
+// Nombre para mostrar de un usuario o nombre del equipo autorizado.
+function personName(value) {
+  if (!value) return "";
+  const n = normalize(value);
+  const member = TEAM.find((t) => t.id === n || normalize(t.name) === n || normalize(t.name.split(" ")[0]) === n);
+  return member ? member.name : value;
 }
 
 /* ------------------------------------------------------------------ */
 /* Datos compartidos: lectura, refresco y redibujado                   */
 /* ------------------------------------------------------------------ */
 
-const SHARED = ["pedidos", "fichas", "resueltos", "pagos"];
-const RECENT = ["observaciones", "incidentes"];
-
-function optsFor(col) {
-  return RECENT.includes(col) ? { desde: desde7() } : {};
-}
+// Colección → opciones de lectura (las que son por fecha se piden desde una fecha).
+const COLS = {
+  solicitudes: () => ({ desde: haceDias(14) }),
+  plantillas: () => ({}),
+  rutas: () => ({ desde: hoyAR() }),
+  clientes: () => ({}),
+  avisos: () => ({}),
+  pedidos: () => ({}),
+  fichas: () => ({}),
+  resueltos: () => ({}),
+  observaciones: () => ({ desde: haceDias(6) }),
+  incidentes: () => ({ desde: haceDias(6) }),
+};
+const COL_NAMES = Object.keys(COLS);
+const LEGACY_COLS = ["pedidos", "fichas", "resueltos"];
 
 function cached(col) {
-  return registros.cached(col, optsFor(col));
+  return registros.cached(col, COLS[col]());
 }
 
 const loaded = new Set();
 const loadErrors = new Map();
-const syncing = new Map(); // colección → { key, stop }
+const syncing = new Map();
 let dataWired = false;
 let rerenderQueued = false;
 
@@ -248,7 +323,7 @@ function wireData() {
   if (dataWired) return;
   dataWired = true;
   onDataChange((col) => {
-    if (![...SHARED, ...RECENT].includes(col)) return;
+    if (!COL_NAMES.includes(col)) return;
     loaded.add(col);
     loadErrors.delete(col);
     scheduleRerender();
@@ -257,12 +332,12 @@ function wireData() {
   window.addEventListener("offline", scheduleRerender);
 }
 
-// Pide los datos una vez (para saber si hubo error) y después los deja refrescando cada minuto.
+// Pide cada colección una vez (para saber si hubo error) y la deja refrescando sola.
 function ensureSync() {
   const user = session.user();
   if (!user) return;
-  [...SHARED, ...RECENT].forEach((col) => {
-    const opts = optsFor(col);
+  COL_NAMES.forEach((col) => {
+    const opts = COLS[col]();
     const key = `${user.usuario}|${opts.desde || ""}`;
     const current = syncing.get(col);
     if (current?.key === key) return;
@@ -309,7 +384,6 @@ function scheduleRerender() {
 function rerenderKeepingState() {
   document.querySelectorAll(".coord-shell [data-coord-form]").forEach((formEl) => {
     const form = formEl.dataset.coordForm;
-    // Un formulario recién guardado o vaciado no se vuelve a copiar desde la pantalla.
     if (!clearedForms.has(form)) drafts[form] = serializeForm(formEl);
   });
   const active = document.activeElement;
@@ -330,7 +404,7 @@ function rerenderKeepingState() {
       try {
         if (selection) again.setSelectionRange(selection[0], selection[1]);
       } catch {
-        // Algunos campos (select, número) no tienen selección.
+        // Algunos campos (select, hora, número) no tienen selección.
       }
     }
   }
@@ -340,51 +414,14 @@ function byNewest(a, b) {
   return String(b.creadoEn || "9999").localeCompare(String(a.creadoEn || "9999"));
 }
 
-const ESTADOS = ["nuevo", "en-curso", "resuelto"];
-
-function estadoDe(pedido) {
-  if (pedido.estado === "curso") return "en-curso";
-  return ESTADOS.includes(pedido.estado) ? pedido.estado : "nuevo";
-}
-
-function getPedidos() {
-  return cached("pedidos").slice().sort(byNewest);
-}
-
-function getFichas() {
-  return cached("fichas").slice().sort(byNewest);
-}
-
-function getPagos() {
-  return cached("pagos").slice().sort(byNewest);
-}
-
-// Mapa id del perro → registro de "resueltos" marcado como resuelto.
-function getResolved() {
-  const map = {};
-  cached("resueltos").forEach((r) => {
-    if (r.resuelto) map[r.perroId || r.id] = r;
-  });
-  return map;
-}
-
-function pedidoPerro(pedido) {
-  return pedido.datos?.perro || pedido.perro || "";
-}
-
-function webNuevos(pedidos) {
-  return pedidos.filter((p) => p.origen === "web" && estadoDe(p) === "nuevo");
-}
-
 // Borrar: admin siempre; el resto, solo lo que cargó en las últimas 24 horas.
 function canDelete(record) {
   const user = session.user();
-  if (!user || record.pendiente || !record.creadoEn) return false;
+  if (!user || !record || record.pendiente || !record.creadoEn) return false;
   if (user.rol === "admin") return true;
   return record.creadoPor === user.usuario && Date.now() - Date.parse(record.creadoEn) < 24 * 3600 * 1000;
 }
 
-// Quién cargó el registro y cuándo cambió por última vez.
 function whoLine(record, { web = false } = {}) {
   const parts = [];
   if (web) {
@@ -393,7 +430,7 @@ function whoLine(record, { web = false } = {}) {
     parts.push(`Cargado por ${esc(record.creadoPorNombre)}${record.creadoEn ? ` el ${fmtStamp(record.creadoEn)}` : ""}`);
   }
   if (record.actualizadoEn && record.actualizadoEn !== record.creadoEn) {
-    const quien = record.actualizadoPorNombre || record.cambioPorNombre;
+    const quien = record.actualizadoPorNombre;
     parts.push(`Último cambio${quien ? ` de ${esc(quien)}` : ""}: ${fmtStamp(record.actualizadoEn)}`);
   }
   const pending = record.pendiente
@@ -408,28 +445,29 @@ function whoLine(record, { web = false } = {}) {
 
 const busy = new Set();
 
-// Guarda en el servidor (o deja en cola sin señal) y avisa el resultado.
-async function guardar(col, data, { section, ok }) {
+async function guardar(col, data, { section: sectionKey, ok }) {
   try {
     const result = await registros.save(col, data);
-    setFlash(section, result.pendiente ? `${ok} Sin señal: se enviará cuando vuelva.` : ok);
+    setFlash(sectionKey, result.pendiente ? `${ok} Sin señal: se enviará cuando vuelva.` : ok);
     return result;
   } catch (error) {
-    setFlash(section, `No se pudo guardar: ${error.message}`, "error");
+    setFlash(sectionKey, `No se pudo guardar: ${error.message}`, "error");
     return null;
   } finally {
     scheduleRerender();
   }
 }
 
-async function borrar(col, record, { section, ok }) {
+async function borrar(col, record, { section: sectionKey, ok, undo = true }) {
   try {
     await registros.remove(col, record.id);
-    lastDeleted = { col, record, section };
-    setFlash(section, ok);
-    flash.undo = true;
+    lastDeleted = undo ? { col, record, section: sectionKey } : null;
+    setFlash(sectionKey, ok);
+    flash.undo = undo;
+    return true;
   } catch (error) {
-    setFlash(section, `No se pudo borrar: ${error.message}`, "error");
+    setFlash(sectionKey, `No se pudo borrar: ${error.message}`, "error");
+    return false;
   } finally {
     scheduleRerender();
   }
@@ -451,16 +489,22 @@ let migrationDone = false;
 let migrating = false;
 let migrationNote = "";
 const LEGACY_ID = /^[a-z0-9][a-z0-9_.-]{0,90}$/i;
+const ESTADOS = ["nuevo", "en-curso", "resuelto"];
 
 function legacyId(oldId) {
-  const id = `ant_${String(oldId || "")}`;
-  return LEGACY_ID.test(String(oldId || "")) ? id : undefined;
+  return LEGACY_ID.test(String(oldId || "")) ? `ant_${String(oldId)}` : undefined;
+}
+
+function isoFromDMY(text) {
+  const match = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(String(text || ""));
+  if (!match) return null;
+  const iso = `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+  return isISODate(iso) ? iso : null;
 }
 
 function legacyRecords() {
   const hoy = hoyAR();
   const out = [];
-
   readJSON(LEGACY.pedidos, []).forEach((old) => {
     const tipo = old.tipo || "Otro";
     out.push({
@@ -480,65 +524,27 @@ function legacyRecords() {
       },
     });
   });
-
   readJSON(LEGACY.altas, []).forEach((old) => {
     const { id, fecha, supervisor, categoria, primerPaseo, ...datos } = old;
     out.push({
       key: LEGACY.altas,
       oldId: id,
       col: "fichas",
-      data: {
-        id: legacyId(id),
-        fecha: isoFromDMY(fecha) || hoy,
-        perroNombre: old.nombre || PENDIENTE,
-        datos: { ...datos, primerPaseo: "Individual" },
-        categoria: "SIN EVALUAR",
-        estado: "lista",
-        migrado: true,
-      },
+      data: { id: legacyId(id), fecha: isoFromDMY(fecha) || hoy, perroNombre: old.nombre || PENDIENTE, datos: { ...datos, primerPaseo: "Individual" }, categoria: "SIN EVALUAR", estado: "lista", migrado: true },
     });
   });
-
-  readJSON(LEGACY.pagos, []).forEach((old) => {
-    const monto = Number(String(old.montoTexto || old.monto || "").replace(/[^\d]/g, "")) || 0;
-    out.push({
-      key: LEGACY.pagos,
-      oldId: old.id,
-      col: "pagos",
-      data: {
-        id: legacyId(old.id),
-        fecha: isoFromDMY(old.fecha) || hoy,
-        concepto: `Pago de ${old.perro || PENDIENTE}`,
-        perroNombre: old.perro || "",
-        monto,
-        medio: old.medio || "",
-        comprobante: old.comprobante || "",
-        nota: old.nota || "",
-        pasadoAlLibro: Boolean(old.enLibro),
-        migrado: true,
-      },
-    });
-  });
-
   const enServidor = new Set(cached("resueltos").map((r) => r.perroId || r.id));
   Object.entries(readJSON(LEGACY.resueltos, {})).forEach(([dogId, date]) => {
     if (enServidor.has(dogId)) {
       out.push({ key: LEGACY.resueltos, oldId: dogId, skip: true });
       return;
     }
-    const dog = REAL_DOGS.find((d) => d.id === dogId);
+    const dog = DOG_BY_ID.get(dogId);
     out.push({
       key: LEGACY.resueltos,
       oldId: dogId,
       col: "resueltos",
-      data: {
-        id: dogId,
-        perroId: dogId,
-        perroNombre: dog?.name || dogId,
-        resuelto: true,
-        nota: `Marcado como resuelto el ${date} en un solo dispositivo (versión anterior de la página).`,
-        migrado: true,
-      },
+      data: { id: dogId, perroId: dogId, perroNombre: dog?.name || dogId, resuelto: true, nota: `Marcado como resuelto el ${date} en un solo dispositivo (versión anterior de la página).`, migrado: true },
     });
   });
   return out;
@@ -546,16 +552,14 @@ function legacyRecords() {
 
 async function maybeMigrate() {
   if (migrationDone || migrating) return;
-  if (!SHARED.every((col) => loaded.has(col))) return;
+  if (!LEGACY_COLS.every((col) => loaded.has(col))) return;
   migrating = true;
   try {
-    // Borradores de formularios: pasan a memoria (pueden tener datos del tutor).
     const oldDrafts = readJSON(LEGACY.borradores, {});
     Object.entries(oldDrafts).forEach(([form, values]) => {
-      if (!drafts[form]) drafts[form] = values;
+      if (form !== "pago" && !drafts[form]) drafts[form] = values;
     });
     removeKey(LEGACY.borradores);
-
     const items = legacyRecords();
     if (!items.length) {
       migrationDone = true;
@@ -574,8 +578,7 @@ async function maybeMigrate() {
         error = err.message;
       }
     }
-    // Se borra de este dispositivo lo que ya subió (o quedó en cola para subir).
-    [LEGACY.pedidos, LEGACY.altas, LEGACY.pagos].forEach((key) => {
+    [LEGACY.pedidos, LEGACY.altas].forEach((key) => {
       const left = readJSON(key, []).filter((old) => failed.has(`${key}|${old.id}`));
       if (left.length) writeJSON(key, left);
       else removeKey(key);
@@ -583,9 +586,8 @@ async function maybeMigrate() {
     const leftResueltos = Object.fromEntries(Object.entries(readJSON(LEGACY.resueltos, {})).filter(([id]) => failed.has(`${LEGACY.resueltos}|${id}`)));
     if (Object.keys(leftResueltos).length) writeJSON(LEGACY.resueltos, leftResueltos);
     else removeKey(LEGACY.resueltos);
-
     if (subidos) {
-      migrationNote = `Subimos ${subidos} ${subidos === 1 ? "registro que estaba guardado" : "registros que estaban guardados"} solo en este dispositivo. Ahora los ve el resto del equipo según su rol.`;
+      migrationNote = `Subimos ${subidos} ${subidos === 1 ? "registro que estaba guardado" : "registros que estaban guardados"} solo en este dispositivo.`;
       announce(migrationNote);
     }
     if (failed.size) {
@@ -601,85 +603,504 @@ async function maybeMigrate() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Datos calculados desde realData                                     */
+/* Rutas: plantilla semanal, cambios del día y ruta efectiva           */
 /* ------------------------------------------------------------------ */
 
-const ACTIVE_DOGS = REAL_DOGS.filter((dog) => dog.status === "Activo");
-const SERVICE_DAYS = WEEK_DAYS.filter((day) => day !== "Domingo");
-const SHIFT_LABELS = ["Mañana", "Tarde"];
+const TURNO_ORDER = { Mañana: 0, Tarde: 1 };
+const ROUTE_CODE = /^[A-Z0-9][A-Z0-9_]{1,19}$/;
 
-function hasMuzzle(dog) {
-  return dog.safety.some((note) => /bozal/i.test(note));
+function isRoute(record) {
+  return record && Array.isArray(record.paradas) && record.ruta && record.dia;
 }
 
-function activeForShift(day, shift) {
-  return dogsForShift(day, shift).filter((dog) => dog.status === "Activo");
+function byRouteOrder(a, b) {
+  return (TURNO_ORDER[a.turno] ?? 9) - (TURNO_ORDER[b.turno] ?? 9) || String(a.ruta).localeCompare(String(b.ruta));
 }
 
-// Datos a revisar: perros con `review` o con estado distinto de Activo.
-const REVIEW_DOGS = REAL_DOGS.filter((dog) => dog.review || dog.status !== "Activo");
+function plantillaId(ruta, dia) {
+  return `${ruta}_${slugDia(dia)}`;
+}
 
-// Cruces: perros con indicación "no juntar" que figuran en el mismo día y turno.
-function conflictsFor(day, shift) {
-  const dogs = activeForShift(day, shift);
-  const names = new Set(dogs.map((dog) => dog.name));
-  const pairs = new Map();
-  dogs.forEach((dog) => {
-    (dog.incompatibleWith || []).forEach((other) => {
-      if (!names.has(other)) return;
-      const key = [dog.name, other].sort().join(" y ");
-      pairs.set(key, key);
-    });
+function rutaDiaId(fecha, ruta) {
+  return `${fecha}_${ruta}`;
+}
+
+function getPlantillas() {
+  return cached("plantillas").filter(isRoute);
+}
+
+function getRutasDia() {
+  return cached("rutas").filter((r) => isRoute(r) && r.fecha);
+}
+
+function plantillasDe(dia) {
+  return getPlantillas().filter((p) => p.dia === dia).sort(byRouteOrder);
+}
+
+// Ruta efectiva de un día: el cambio del día si existe; si no, la plantilla de ese día de la semana.
+function effectiveRoutes(fecha) {
+  const dia = dayNameISO(fecha);
+  const overrides = new Map(getRutasDia().filter((r) => r.fecha === fecha).map((r) => [r.ruta, r]));
+  const out = plantillasDe(dia).map((p) => {
+    const over = overrides.get(p.ruta);
+    overrides.delete(p.ruta);
+    return over ? { ...over, origen: "dia", plantillaId: p.id } : { ...p, origen: "plantilla", plantillaId: p.id };
   });
-  return [...pairs.keys()];
+  overrides.forEach((r) => out.push({ ...r, origen: "dia", plantillaId: "" }));
+  return out.sort(byRouteOrder);
 }
 
-function weeklyConflicts() {
-  const byPair = new Map();
-  SERVICE_DAYS.forEach((day) => {
-    SHIFT_LABELS.forEach((shift) => {
-      conflictsFor(day, shift).forEach((pair) => {
-        if (!byPair.has(pair)) byPair.set(pair, {});
-        const entry = byPair.get(pair);
-        entry[shift] = [...(entry[shift] || []), day];
+function stopsSorted(route) {
+  return (route.paradas || []).filter((s) => validHora(s.hora)).map((s) => s.hora).sort((a, b) => minutesOf(a) - minutesOf(b));
+}
+
+function routeSpan(route) {
+  const horas = stopsSorted(route);
+  if (!horas.length) return "Sin horarios";
+  return horas.length === 1 ? padHora(horas[0]) : `${padHora(horas[0])} a ${padHora(horas[horas.length - 1])}`;
+}
+
+// Próxima hora libre: la última hora cargada + 15 minutos (o el inicio del turno).
+function nextFreeHora(route) {
+  const horas = stopsSorted(route);
+  if (!horas.length) return SHIFT_START[route.turno] || "09:00";
+  return sumarMinutos(padHora(horas[horas.length - 1]), 15);
+}
+
+function stopWindow(stop) {
+  const start = minutesOf(stop.hora);
+  if (start === null) return null;
+  return [start, start + (Number(stop.minutos) || 45)];
+}
+
+function overlaps(a, b) {
+  return a && b && a[0] < b[1] && b[0] < a[1];
+}
+
+// Avisos al armar una ruta. No bloquean: se marcan en rojo.
+// others: las demás rutas del mismo día (para ver si un perro quedó en dos rutas a la misma hora).
+function routeWarnings(route, others = []) {
+  const list = [];
+  const byStop = new Map();
+  const add = (indices, text) => {
+    list.push(text);
+    indices.forEach((i) => byStop.set(i, [...(byStop.get(i) || []), text]));
+  };
+  const stops = (route.paradas || []).map((stop, index) => ({ stop, index, dog: dogOf(stop), win: stopWindow(stop) }));
+
+  stops.forEach(({ stop, index, dog, win }) => {
+    const name = stop.perroNombre || dog?.name || PENDIENTE;
+    if (!win) add([index], `${name}: falta la hora de retiro.`);
+    if (!dog) add([index], `${name}: no está en el registro de perros (perro sin ficha).`);
+    else if (dog.status !== "Activo") add([index], `${name}: estado «${dog.status}».`);
+  });
+
+  // Tamaños mezclados: un aviso por perro pequeño que comparte franja con perros grandes.
+  const mixed = new Map();
+  for (let i = 0; i < stops.length; i += 1) {
+    for (let j = i + 1; j < stops.length; j += 1) {
+      const a = stops[i];
+      const b = stops[j];
+      if (!a.dog || !b.dog) continue;
+      if (a.dog.id === b.dog.id) {
+        add([a.index, b.index], `${a.dog.name} está dos veces en esta ruta.`);
+        continue;
+      }
+      if (!overlaps(a.win, b.win)) continue;
+      const incompatible = (a.dog.incompatibleWith || []).includes(b.dog.name) || (b.dog.incompatibleWith || []).includes(a.dog.name);
+      if (incompatible) add([a.index, b.index], `No juntar: ${a.dog.name} y ${b.dog.name} van en la misma franja (${padHora(a.stop.hora)} y ${padHora(b.stop.hora)}).`);
+      const small = a.dog.size === "Pequeño" && b.dog.size === "Grande" ? a : b.dog.size === "Pequeño" && a.dog.size === "Grande" ? b : null;
+      if (small) {
+        const big = small === a ? b : a;
+        if (!mixed.has(small.index)) mixed.set(small.index, { small, bigs: [] });
+        mixed.get(small.index).bigs.push(big);
+      }
+    }
+  }
+  mixed.forEach(({ small, bigs }) => {
+    const names = [...new Set(bigs.map((b) => b.dog.name))];
+    add([small.index, ...bigs.map((b) => b.index)], `Tamaños mezclados: ${small.dog.name} (pequeño) comparte franja con ${listJoin(names)} (${names.length === 1 ? "grande" : "grandes"}).`);
+  });
+
+  others.filter((o) => o.ruta !== route.ruta).forEach((other) => {
+    (other.paradas || []).forEach((otherStop) => {
+      const otherDog = dogOf(otherStop);
+      stops.forEach(({ index, dog, win }) => {
+        if (!dog || !otherDog || dog.id !== otherDog.id) return;
+        if (overlaps(win, stopWindow(otherStop))) add([index], `${dog.name} también está en ${other.ruta} a las ${padHora(otherStop.hora)}.`);
       });
     });
   });
-  return [...byPair.entries()].map(([pair, shifts]) => ({
-    pair,
-    detail: Object.entries(shifts)
-      .map(([shift, days]) => `${shift.toLowerCase()}: ${daysLabel(days).toLowerCase()}`)
-      .join(" · "),
+
+  return { list: [...new Set(list)], byStop };
+}
+
+function warningsForPlantilla(p) {
+  return routeWarnings(p, plantillasDe(p.dia));
+}
+
+function warningsForDay(route, fecha) {
+  return routeWarnings(route, effectiveRoutes(fecha));
+}
+
+function routeText(route, { fecha } = {}) {
+  const head = fecha ? `${route.ruta} · ${dayLabel(fecha)} · ${route.turno}` : `${route.ruta} · ${route.dia} · ${route.turno} (plantilla semanal)`;
+  const lines = [
+    `*Ruta ${head}*`,
+    `Paseador: ${personName(route.paseador) || PENDIENTE} | Ayudante: ${personName(route.ayudante) || "sin ayudante"} | Supervisa: ${personName(route.supervisor) || PENDIENTE}`,
+  ];
+  const stops = (route.paradas || []).slice().sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
+  stops.forEach((stop, i) => {
+    const dog = dogOf(stop);
+    const extra = [];
+    if (stop.nota) extra.push(stop.nota);
+    if (hasMuzzle(dog) && !/bozal/i.test(stop.nota || "")) extra.push("Usa bozal");
+    lines.push(`${i + 1}) ${padHora(stop.hora) || "sin hora"} ${stop.perroNombre || dog?.name || PENDIENTE} · ${Number(stop.minutos) || 45} min${extra.length ? ` · ${extra.join(" · ")}` : ""}`);
+  });
+  if (!stops.length) lines.push("Sin perros cargados.");
+  if (route.notas) lines.push(`Notas: ${route.notas}`);
+  return lines.join("\n");
+}
+
+/* ---------- Editor de una ruta (en memoria) ---------- */
+
+let editor = null;
+let editorQuery = "";
+let editorHora = "";
+let editorConfirm = "";
+let cargaConfirm = false;
+let cargaProgreso = "";
+let rutasFecha = "";
+
+function rutasVista() {
+  return readJSON(SECTIONS_KEY, {}).rutasVista === "dia" ? "dia" : "semana";
+}
+
+function setRutasVista(vista) {
+  writeJSON(SECTIONS_KEY, { ...readJSON(SECTIONS_KEY, {}), rutasVista: vista });
+}
+
+function currentRutasFecha() {
+  const hoy = hoyAR();
+  if (!isISODate(rutasFecha) || rutasFecha < hoy) rutasFecha = hoy;
+  return rutasFecha;
+}
+
+function cleanStops(paradas) {
+  return (paradas || []).map((s) => ({
+    perroId: s.perroId || "",
+    perroNombre: s.perroNombre || dogOf(s)?.name || "",
+    hora: padHora(s.hora) || s.hora || "",
+    minutos: Number(s.minutos) || 45,
+    nota: s.nota || "",
   }));
 }
 
-// Nombres que figuran en "no juntar con" pero no están en la lista de perros.
-function unknownIncompatibles() {
-  const known = new Set(REAL_DOGS.map((dog) => dog.name));
-  const unknown = new Set();
-  REAL_DOGS.forEach((dog) => (dog.incompatibleWith || []).forEach((name) => !known.has(name) && unknown.add(name)));
-  return [...unknown];
+function openEditor(route, { modo, fecha = "", nuevo = false, solicitud = null } = {}) {
+  editor = {
+    modo,
+    fecha,
+    nuevo,
+    id: modo === "plantilla" ? plantillaId(route.ruta, route.dia) : rutaDiaId(fecha, route.ruta),
+    dia: modo === "dia" ? dayNameISO(fecha) : route.dia,
+    turno: route.turno,
+    ruta: route.ruta,
+    paseador: route.paseador || "",
+    ayudante: route.ayudante || "",
+    supervisor: route.supervisor || "",
+    notas: route.notas || "",
+    paradas: cleanStops(route.paradas),
+    plantillaId: route.plantillaId || (modo === "plantilla" ? route.id : ""),
+    existeDia: modo === "dia" && route.origen === "dia" ? route : null,
+    soloDia: modo === "plantilla" ? nextDatesFor(route.dia)[0] || "" : "",
+    solicitudId: solicitud?.id || "",
+    precarga: "",
+    respuesta: "",
+    sucio: false,
+  };
+  editorQuery = "";
+  editorHora = "";
+  editorConfirm = "";
 }
 
-function weeklyLoad() {
-  return SERVICE_DAYS.map((day) => {
-    const manana = activeForShift(day, "Mañana");
-    const tarde = activeForShift(day, "Tarde");
-    const muzzle = new Set([...manana, ...tarde].filter(hasMuzzle).map((dog) => dog.name));
-    return {
-      day,
-      manana: manana.length,
-      tarde: tarde.length,
-      total: manana.length + tarde.length,
-      muzzle: [...muzzle],
-      conflicts: conflictsFor(day, "Mañana").length + conflictsFor(day, "Tarde").length,
-    };
+function closeEditor() {
+  editor = null;
+  editorQuery = "";
+  editorHora = "";
+  editorConfirm = "";
+}
+
+function nextRouteCode(existing, turno) {
+  const letter = turno === "Mañana" ? "M" : "T";
+  for (let n = 1; n < 10; n += 1) {
+    const code = `PJ_${n}${letter}`;
+    if (!existing.some((r) => r.ruta === code)) return code;
+  }
+  return `PJ_X${letter}`;
+}
+
+function editorWarnings() {
+  if (!editor) return { list: [], byStop: new Map() };
+  const others = editor.modo === "plantilla" ? plantillasDe(editor.dia) : effectiveRoutes(editor.fecha);
+  return routeWarnings(editor, others);
+}
+
+function addStop(dog, nombreLibre) {
+  const hora = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(editor);
+  editor.paradas.push({
+    perroId: dog?.id || "",
+    perroNombre: dog?.name || nombreLibre,
+    hora,
+    minutos: dog?.minutes || 45,
+    nota: dog?.incompatibleWith?.length ? `No juntar con ${listJoin(dog.incompatibleWith)}` : hasMuzzle(dog) ? "Bozal" : "",
   });
+  editor.sucio = true;
+  editorQuery = "";
+  editorHora = "";
+}
+
+function sortStops() {
+  editor.paradas.sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
+  editor.sucio = true;
+}
+
+function routeRecordFromEditor() {
+  return {
+    dia: editor.dia,
+    turno: editor.turno,
+    ruta: editor.ruta,
+    paseador: editor.paseador.trim(),
+    ayudante: editor.ayudante.trim(),
+    supervisor: editor.supervisor.trim(),
+    notas: editor.notas.trim(),
+    paradas: cleanStops(editor.paradas),
+  };
+}
+
+function editorError() {
+  const code = String(editor.ruta || "").trim().toUpperCase().replace(/\s+/g, "_");
+  if (!ROUTE_CODE.test(code)) return ["El código de la ruta tiene que ser como PJ_1M (letras, números y guion bajo).", "coord-ed-ruta"];
+  editor.ruta = code;
+  if (editor.nuevo) {
+    const taken = editor.modo === "plantilla"
+      ? getPlantillas().some((p) => p.id === plantillaId(code, editor.dia))
+      : effectiveRoutes(editor.fecha).some((r) => r.ruta === code);
+    if (taken) return [`Ya hay una ruta ${code} ese día. Elegí otro código o editá la que existe.`, "coord-ed-ruta"];
+  }
+  const sinHora = editor.paradas.findIndex((s) => !validHora(s.hora));
+  if (sinHora >= 0) return [`Falta la hora de retiro de ${editor.paradas[sinHora].perroNombre || "un perro"}.`, `coord-ed-hora-${sinHora}`];
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pedidos de cambio del supervisor (`solicitudes`)                    */
+/* ------------------------------------------------------------------ */
+
+const rechazos = {};
+let rechazoAbierto = "";
+
+function getSolicitudes() {
+  return cached("solicitudes").slice().sort(byNewest);
+}
+
+function solicitudesPendientes() {
+  return getSolicitudes()
+    .filter((s) => (s.estado || "pendiente") === "pendiente")
+    .sort((a, b) => Number(Boolean(b.urgente)) - Number(Boolean(a.urgente)) || String(a.fecha || "").localeCompare(String(b.fecha || "")) || byNewest(b, a));
+}
+
+function solicitudPerro(s) {
+  if (s.perroId && DOG_BY_ID.get(s.perroId)) return DOG_BY_ID.get(s.perroId);
+  return DOG_BY_NAME.get(normalize(s.perroNombre)) || null;
+}
+
+function horaEnTexto(text) {
+  const match = /(\d{1,2})\s*[:.h]\s*(\d{2})/.exec(String(text || ""));
+  if (!match) return "";
+  return padHora(`${match[1]}:${match[2]}`);
+}
+
+// Abre el editor de esa ruta para ESE día, con el cambio precargado cuando se puede.
+function aplicarSolicitud(s) {
+  const fecha = isISODate(s.fecha) ? s.fecha : hoyAR();
+  const dog = solicitudPerro(s);
+  const routes = effectiveRoutes(fecha);
+  let route = s.ruta ? routes.find((r) => r.ruta === s.ruta) : null;
+  if (!route && dog) route = routes.find((r) => (!s.turno || r.turno === s.turno) && (r.paradas || []).some((p) => dogOf(p)?.id === dog.id));
+  if (!route && s.turno) route = routes.find((r) => r.turno === s.turno);
+  const nuevo = !route;
+  if (!route) {
+    const turno = s.turno || "Mañana";
+    route = { ruta: s.ruta || nextRouteCode(routes, turno), dia: dayNameISO(fecha), turno, paradas: [], origen: "plantilla" };
+  }
+  openEditor(route, { modo: "dia", fecha, nuevo, solicitud: s });
+  const tipo = normalize(s.tipo);
+  const idx = dog ? editor.paradas.findIndex((p) => dogOf(p)?.id === dog.id) : editor.paradas.findIndex((p) => normalize(p.perroNombre) === normalize(s.perroNombre));
+  const hora = horaEnTexto(s.detalle);
+  const nombre = dog?.name || s.perroNombre || "el perro";
+  if (tipo === "no sale") {
+    if (idx >= 0) {
+      editor.paradas.splice(idx, 1);
+      editor.precarga = `Ya saqué a ${nombre} de la ruta. Revisá y guardá.`;
+    } else editor.precarga = `${nombre} no está en esta ruta: revisá a mano.`;
+  } else if (tipo === "cambiar hora") {
+    if (idx >= 0 && hora) {
+      editor.paradas[idx].hora = hora;
+      editor.precarga = `Ya cambié la hora de ${nombre} a las ${hora}. Revisá y guardá.`;
+    } else editor.precarga = "No pude precargar la hora nueva: cambiala a mano.";
+  } else if (tipo === "agregar perro") {
+    if (idx >= 0) editor.precarga = `${nombre} ya estaba en la ruta: revisá la hora.`;
+    else if (dog || s.perroNombre) {
+      if (hora) editorHora = hora;
+      addStop(dog, s.perroNombre);
+      editor.precarga = `Ya agregué a ${nombre} a las ${editor.paradas[editor.paradas.length - 1].hora}. Revisá y guardá.`;
+    } else editor.precarga = "No dice qué perro agregar: buscalo abajo.";
+  } else {
+    editor.precarga = "Este cambio se hace a mano: revisá el pedido y ajustá la ruta.";
+  }
+  editor.sucio = true;
+  editor.respuesta = "";
+}
+
+/* ------------------------------------------------------------------ */
+/* Clientes, avisos y pedidos                                          */
+/* ------------------------------------------------------------------ */
+
+const CLIENTE_ESTADOS = [
+  ["activo", "Activo"],
+  ["pausa", "En pausa"],
+  ["baja", "De baja"],
+];
+const CLIENTE_PLANES = [PENDIENTE, ...REAL_PLANS.map((plan) => `${plan.name} (${plan.walks} paseos por semana)`), "Paseo suelto", "Otro (anotalo en notas)"];
+const CLIENTE_TURNOS = [PENDIENTE, "Mañana", "Tarde", "Mañana y tarde"];
+const AVISO_TIPOS = ["obra o corte", "perro suelto", "clima", "seguridad", "cambio de horario", "otro"];
+
+let clienteQuery = "";
+
+function getClientes() {
+  return cached("clientes").slice().sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || ""), "es"));
+}
+
+function getAvisos() {
+  return cached("avisos").slice().sort(byNewest);
+}
+
+function avisoVigente(aviso, hoy = hoyAR()) {
+  if (isISODate(aviso.vigenteHasta)) return aviso.vigenteHasta >= hoy;
+  return (aviso.fecha || "") === hoy;
+}
+
+function avisosVigentes() {
+  return getAvisos().filter((a) => avisoVigente(a));
+}
+
+function groupByBarrio(avisos) {
+  const map = new Map();
+  avisos.forEach((a) => {
+    const key = a.barrio || "Sin barrio";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(a);
+  });
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], "es"));
+}
+
+function barriosConocidos() {
+  const set = new Map();
+  [...BARRIOS_BASE, ...getClientes().map((c) => c.barrio), ...getAvisos().map((a) => a.barrio)].forEach((b) => {
+    const value = String(b || "").trim();
+    if (value && !set.has(normalize(value))) set.set(normalize(value), value);
+  });
+  return [...set.values()].sort((a, b) => a.localeCompare(b, "es"));
+}
+
+function avisoText(aviso) {
+  return [
+    `*Aviso Paseos Juan · ${aviso.barrio || "Sin barrio"}*`,
+    `Tipo: ${aviso.tipo || "otro"}`,
+    aviso.mensaje || "",
+    `Vigente hasta: ${isISODate(aviso.vigenteHasta) ? fmtDate(aviso.vigenteHasta) : fmtDate(aviso.fecha)}`,
+  ].filter(Boolean).join("\n");
+}
+
+const PEDIDO_TIPOS = ["Consulta", "Evaluación inicial", "Documentación", "Cambio de días o plan", "Ausencia", "Otro"];
+const PEDIDO_CANALES = ["WhatsApp", "Llamada", "En persona", "Otro"];
+const PEDIDO_COLUMNAS = [
+  ["nuevo", "Nuevo"],
+  ["en-curso", "En curso"],
+  ["resuelto", "Resuelto"],
+];
+const ESTADO_LABEL = { nuevo: "Nuevo", "en-curso": "En curso", resuelto: "Resuelto" };
+
+function estadoDe(pedido) {
+  if (pedido.estado === "curso") return "en-curso";
+  return ESTADOS.includes(pedido.estado) ? pedido.estado : "nuevo";
+}
+
+function getPedidos() {
+  return cached("pedidos").slice().sort(byNewest);
+}
+
+function getFichas() {
+  return cached("fichas").slice().sort(byNewest);
+}
+
+function getResolved() {
+  const map = {};
+  cached("resueltos").forEach((r) => {
+    if (r.resuelto) map[r.perroId || r.id] = r;
+  });
+  return map;
+}
+
+function pedidoPerro(pedido) {
+  return pedido.datos?.perro || pedido.perro || "";
+}
+
+function webNuevos(pedidos) {
+  return pedidos.filter((p) => p.origen === "web" && estadoDe(p) === "nuevo");
 }
 
 function pendingReview() {
   const resolved = getResolved();
   return REVIEW_DOGS.filter((dog) => !resolved[dog.id]);
+}
+
+// Teléfono → número para WhatsApp (celular de Argentina: 549 + 10 dígitos).
+function whatsappNumber(raw) {
+  let digits = String(raw || "").replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.startsWith("54")) {
+    digits = digits.slice(2);
+    if (digits.startsWith("9")) digits = digits.slice(1);
+  }
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 12) {
+    const cut = [2, 3, 4].find((at) => digits.slice(at, at + 2) === "15");
+    if (cut) digits = digits.slice(0, cut) + digits.slice(cut + 2);
+  }
+  return digits.length === 10 ? `549${digits}` : "";
+}
+
+function whatsappLinkTo(phone, message, variant = "secondary", label = "Escribirle por WhatsApp") {
+  if (!phone) return "";
+  const number = whatsappNumber(phone);
+  if (!number) return `<p class="coord-inline-alert">${icon("alertCircle", "coord-icon")}<span>Revisá el teléfono: no parece un celular de Argentina.</span></p>`;
+  return `<a class="coord-btn is-${variant}" href="https://wa.me/${number}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer">${icon("message", "coord-icon")}<span>${label}</span><span class="coord-sr-only"> (se abre en otra pestaña)</span></a>`;
+}
+
+const SERVICE_DAYS_FOR_PARSE = SERVICE_DAYS;
+
+// Días escritos por el tutor ("lunes, miércoles y viernes" o "lunes a viernes").
+function parseDays(text) {
+  const t = normalize(text);
+  const names = SERVICE_DAYS_FOR_PARSE.map(normalize);
+  const range = /(lunes|martes|miercoles|jueves|viernes|sabado)\s+(?:a|al|hasta)\s+(?:el\s+)?(lunes|martes|miercoles|jueves|viernes|sabado)/.exec(t);
+  if (range) {
+    const from = names.indexOf(range[1]);
+    const to = names.indexOf(range[2]);
+    if (from >= 0 && to >= from) return SERVICE_DAYS_FOR_PARSE.slice(from, to + 1);
+  }
+  return SERVICE_DAYS_FOR_PARSE.filter((day, index) => t.includes(names[index]));
 }
 
 /* ------------------------------------------------------------------ */
@@ -705,20 +1126,23 @@ function clearDraft(form) {
 
 function serializeForm(formEl) {
   const values = { ...getDraft(formEl.dataset.coordForm) };
-  formEl.querySelectorAll("[name]").forEach((field) => {
-    if (field.type === "file") return;
-    if (field.type === "checkbox") {
-      const group = formEl.querySelectorAll(`[name="${field.name}"]`);
-      values[field.name] = [...group].filter((box) => box.checked).map((box) => box.value);
+  const groups = new Set();
+  formEl.querySelectorAll("[name]").forEach((fieldEl) => {
+    if (fieldEl.type === "file") return;
+    if (fieldEl.type === "checkbox") {
+      if (groups.has(fieldEl.name)) return;
+      groups.add(fieldEl.name);
+      const group = formEl.querySelectorAll(`[name="${fieldEl.name}"]`);
+      values[fieldEl.name] = [...group].filter((box) => box.checked).map((box) => box.value);
       return;
     }
-    values[field.name] = field.value;
+    values[fieldEl.name] = fieldEl.value;
   });
   return values;
 }
 
 /* ------------------------------------------------------------------ */
-/* Componentes de formulario                                           */
+/* Componentes                                                         */
 /* ------------------------------------------------------------------ */
 
 function field(form, name, label, { value = "", placeholder = "", hint = "", type = "text", required = false, span = false, attrs = "" } = {}) {
@@ -734,45 +1158,44 @@ function field(form, name, label, { value = "", placeholder = "", hint = "", typ
 
 function selectField(form, name, label, options, { value = "", hint = "", span = false, required = false } = {}) {
   const id = `coord-${form}-${name}`;
+  const opts = options.map((option) => (Array.isArray(option) ? option : [option, option]));
   return `
     <div class="coord-field ${span ? "is-wide" : ""}">
       <label for="${id}">${label}${required ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
-      <select id="${id}" name="${name}" ${hint ? `aria-describedby="${id}-hint"` : ""} ${required ? "required" : ""}>
-        ${options.map((option) => `<option ${option === value ? "selected" : ""}>${esc(option)}</option>`).join("")}
+      <select id="${id}" name="${name}" ${hint ? `aria-describedby="${id}-hint"` : ""}>
+        ${opts.map(([val, text]) => `<option value="${esc(val)}" ${val === value ? "selected" : ""}>${esc(text)}</option>`).join("")}
       </select>
       ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
     </div>
   `;
 }
 
-function textArea(form, name, label, { value = "", placeholder = "", hint = "", span = true, attrs = "" } = {}) {
+function textArea(form, name, label, { value = "", placeholder = "", hint = "", span = true, attrs = "", required = false } = {}) {
   const id = `coord-${form}-${name}`;
   return `
     <div class="coord-field ${span ? "is-wide" : ""}">
-      <label for="${id}">${label}</label>
+      <label for="${id}">${label}${required ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
       <textarea id="${id}" name="${name}" rows="3" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""} ${hint ? `aria-describedby="${id}-hint"` : ""} ${attrs}>${esc(value)}</textarea>
       ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
     </div>
   `;
 }
 
-function fileField(form, name, label, fileName, hint) {
-  const id = `coord-${form}-${name}`;
+function daysField(form, days) {
   return `
-    <div class="coord-field">
-      <span class="coord-label" id="${id}-label">${label}</span>
-      <div class="coord-file">
-        <input class="coord-file-input" id="${id}" type="file" accept=".jpg,.jpeg,.png,.pdf" data-coord-file="${form}" data-coord-file-field="${name}" aria-labelledby="${id}-label ${id}-button" aria-describedby="${id}-hint" />
-        <label class="coord-btn is-secondary is-compact" for="${id}" id="${id}-button">${icon("fileUp", "coord-icon")}<span>${fileName ? "Cambiar archivo" : "Elegir archivo"}</span></label>
-        <span class="coord-file-name" data-coord-file-name>${fileName ? esc(fileName) : "Ningún archivo elegido"}</span>
+    <div class="coord-field is-wide">
+      <span class="coord-label" id="coord-${form}-dias-label">Días</span>
+      <div class="coord-days" role="group" aria-labelledby="coord-${form}-dias-label">
+        ${SERVICE_DAYS.map((day) => `
+          <label class="coord-day"><input type="checkbox" id="coord-${form}-dia-${slugDia(day)}" name="dias" value="${day}" ${days.includes(day) ? "checked" : ""} /><span>${day}</span></label>
+        `).join("")}
       </div>
-      <small id="${id}-hint">${hint}</small>
     </div>
   `;
 }
 
-function feedback(section) {
-  if (!flash || flash.section !== section) return "";
+function feedback(sectionKey) {
+  if (!flash || flash.section !== sectionKey) return "";
   const undo = flash.undo ? `<button class="coord-link" type="button" data-coord-undo>Deshacer</button>` : "";
   return `<p class="coord-flash is-${flash.tone}">${icon(flash.tone === "error" ? "alertCircle" : "checkCircle", "coord-icon")}<span>${esc(flash.text)}</span>${undo}</p>`;
 }
@@ -803,7 +1226,7 @@ function badge(text, tone = "neutral") {
 }
 
 function safetyChips(dog) {
-  if (!dog.safety?.length) return "";
+  if (!dog?.safety?.length) return "";
   return `
     <ul class="coord-safety" aria-label="Indicaciones de seguridad de ${esc(dog.name)}">
       ${dog.safety.map((note) => `<li class="${/bozal|no juntar/i.test(note) ? "is-alert" : ""}">${icon(/bozal|no juntar/i.test(note) ? "alertTriangle" : "users", "coord-icon")}${esc(note)}</li>`).join("")}
@@ -811,7 +1234,6 @@ function safetyChips(dog) {
   `;
 }
 
-// Lista de datos "etiqueta: valor" (solo los que tienen valor).
 function dataList(rows, className = "") {
   const visible = rows.filter(([, value]) => String(value ?? "").trim());
   if (!visible.length) return "";
@@ -821,6 +1243,22 @@ function dataList(rows, className = "") {
     </dl>
   `;
 }
+
+function warnList(list, id) {
+  if (!list.length) return "";
+  return `
+    <div class="coord-warn-box" role="note" ${id ? `id="${id}"` : ""}>
+      <h3>${icon("alertTriangle", "coord-icon")}<span>${list.length === 1 ? "1 aviso para revisar" : `${list.length} avisos para revisar`}</span></h3>
+      <ul>${list.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>
+      <p>No bloquea el guardado: revisalo antes de mandar la ruta.</p>
+    </div>
+  `;
+}
+
+const TEAM_DATALIST = `
+  <datalist id="coord-team-users">${TEAM.map((t) => `<option value="${esc(t.id)}">${esc(t.name)} · ${esc(t.label)}</option>`).join("")}</datalist>
+  <datalist id="coord-team-names">${TEAM.map((t) => `<option value="${esc(t.name.split(" ")[0])}">${esc(t.name)}</option>`).join("")}</datalist>
+`;
 
 /* ------------------------------------------------------------------ */
 /* Página                                                              */
@@ -868,19 +1306,22 @@ export function coordinatorDashboard() {
     <main class="coord-main" id="coord-main" tabindex="-1">
       ${SyncStrip()}
       ${TodayPanel()}
-      ${ReviewSection()}
+      ${AvisosStrip()}
+      ${RoutesBlock()}
+      ${SolicitudesSection()}
+      ${ClientesSection()}
+      ${AvisosSection()}
       ${RequestsSection()}
+      ${ReviewSection()}
       ${IntakeSection()}
       ${ActivitySection()}
-      ${LoadSection()}
-      ${PaymentsSection()}
       <p class="coord-footnote">
-        Rutas y datos de perros al ${DATA_UPDATED}. Fuentes: ${esc(BUSINESS_INFO.officialSources.dogs)} y ${esc(BUSINESS_INFO.officialSources.routes)}.
-        Pedidos, fichas, datos resueltos y pagos se guardan en los datos compartidos del equipo.
+        Rutas de partida: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Datos de perros: ${esc(BUSINESS_INFO.officialSources.dogs)}.
+        Rutas, clientes, avisos y pedidos se guardan en los datos compartidos del equipo. Los pagos los ve solo Juan.
       </p>
+      ${TEAM_DATALIST}
     </main>
   `;
-  // El mensaje de estado se muestra una sola vez.
   flash = null;
   clearedForms.clear();
   return content;
@@ -901,127 +1342,131 @@ function SyncStrip() {
   if (errors.length) {
     items.push(`<div class="coord-sync is-error">${icon("alertCircle", "coord-icon")}<span>${errors.map(esc).join(" ")}</span>${button("Reintentar", "data-coord-retry", "secondary")}</div>`);
   }
-  if (migrationNote) {
-    items.push(`<p class="coord-sync is-ok">${icon("uploadCloud", "coord-icon")}<span>${esc(migrationNote)}</span></p>`);
-  }
+  if (migrationNote) items.push(`<p class="coord-sync is-ok">${icon("uploadCloud", "coord-icon")}<span>${esc(migrationNote)}</span></p>`);
   return items.length ? `<div class="coord-sync-list">${items.join("")}</div>` : "";
 }
 
 /* ---------- 1. Lo urgente de hoy ---------- */
 
-function WebAlert(nuevos) {
-  if (!nuevos.length) return "";
-  const shown = nuevos.slice(0, 3);
+function SolicitudItem(s, { compact = false } = {}) {
+  const id = esc(s.id);
+  const estado = s.estado || "pendiente";
+  const nombre = s.perroNombre || solicitudPerro(s)?.name || "";
+  const quien = s.creadoPorNombre ? `${s.creadoPorNombre}${s.creadoEn ? `, ${fmtStamp(s.creadoEn)}` : ""}` : PENDIENTE;
+  const que = s.titulo || [s.tipo, nombre].filter(Boolean).join(": ");
+  const rechazo = rechazoAbierto === s.id;
   return `
-    <div class="coord-web-alert" role="note" aria-labelledby="coord-web-alert-title">
-      <h2 id="coord-web-alert-title">${icon("bell", "coord-icon")}<span>${nuevos.length === 1 ? "Pedido nuevo desde la web" : `${nuevos.length} pedidos nuevos desde la web`}</span></h2>
-      <ul>
-        ${shown.map((p) => {
-          const d = p.datos || {};
-          const bite = d.mordida && d.mordida !== "No";
-          return `
-            <li>
-              <div>
-                <strong>${esc(d.perro || PENDIENTE)}</strong>
-                <span>${esc([d.responsable, d.zona].filter(Boolean).join(" · ") || PENDIENTE)} · ${esc(fmtStamp(p.creadoEn) || fmtDate(p.fecha))}</span>
-                ${bite ? `<span class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>Mordida: ${esc(d.mordida)}</span></span>` : ""}
-              </div>
-              ${button("Ver pedido", `data-coord-goto-pedido="${esc(p.id)}"`, "primary", "arrowRight")}
-            </li>
-          `;
-        }).join("")}
-      </ul>
-      ${nuevos.length > shown.length ? `<p>Y ${nuevos.length - shown.length} más en el tablero de pedidos.</p>` : ""}
-    </div>
+    <li class="coord-sol ${s.urgente ? "is-urgent" : ""} is-${esc(estado)}" id="coord-sol-${id}" tabindex="-1">
+      <div class="coord-sol-head">
+        <strong>${esc(que || "Pedido de cambio")}</strong>
+        <span class="coord-badges">${s.urgente ? badge("Urgente", "alert") : ""}${estado === "aplicado" ? badge("Aplicado", "ok") : estado === "rechazado" ? badge("Rechazado", "warn") : badge("Pendiente", "warn")}</span>
+      </div>
+      <p class="coord-sol-where">${icon("route", "coord-icon")}<span>${esc([s.fecha ? dayLabel(s.fecha) : "", s.turno, s.ruta].filter(Boolean).join(" · ") || PENDIENTE)}</span></p>
+      ${dataList([
+        ["Qué cambiar", s.detalle],
+        ["Por qué", s.motivo],
+        ["Pidió", quien],
+        ["Respuesta", s.respuesta],
+      ], compact ? "is-compact" : "")}
+      ${s.pendiente ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Sin señal: se enviará cuando vuelva.</span></p>` : ""}
+      ${estado === "pendiente" ? `
+        ${rechazo ? `
+          <div class="coord-reject">
+            <label for="coord-rechazo-${id}">Respuesta para el supervisor <span class="coord-required">(obligatorio)</span></label>
+            <textarea id="coord-rechazo-${id}" rows="2" data-coord-rechazo="${id}" placeholder="Ej.: Ese día no hay lugar en la ruta; lo pasamos al lunes.">${esc(rechazos[s.id] || "")}</textarea>
+            <div class="coord-actions">
+              ${button("Enviar rechazo", `id="coord-rechazar-ok-${id}" data-coord-sol-rechazar-ok="${id}"`, "primary")}
+              ${button("Cancelar", `data-coord-sol-rechazar-cancel="${id}"`, "ghost")}
+            </div>
+          </div>` : `
+          <div class="coord-actions">
+            ${button("Aplicar", `id="coord-aplicar-${id}" data-coord-sol-aplicar="${id}"`, "primary", "checkCircle")}
+            ${button("Rechazar", `id="coord-rechazar-${id}" data-coord-sol-rechazar="${id}"`, "ghost", "x")}
+          </div>`}` : ""}
+    </li>
   `;
 }
 
 function TodayPanel() {
-  const now = argentinaNow();
-  const today = todayName(now);
+  const hoy = hoyAR();
   const user = currentUser();
-  const pending = pendingReview();
   const pedidos = getPedidos();
-  const openPedidos = pedidos.filter((p) => estadoDe(p) !== "resuelto");
-  const nuevos = pedidos.filter((p) => estadoDe(p) === "nuevo").length;
   const web = webNuevos(pedidos);
-  const manana = activeForShift(today, "Mañana");
-  const tarde = activeForShift(today, "Tarde");
-  const muzzleToday = [...new Set([...manana, ...tarde].filter(hasMuzzle).map((dog) => dog.name))];
-  const conflictsToday = [
-    ...conflictsFor(today, "Mañana").map((pair) => `${pair} (mañana)`),
-    ...conflictsFor(today, "Tarde").map((pair) => `${pair} (tarde)`),
-  ];
-  const noService = manana.length + tarde.length === 0;
+  const solicitudes = solicitudesPendientes();
+  const urgentes = solicitudes.filter((s) => s.urgente);
+  const plantillasCargadas = getPlantillas().length > 0;
+  const hoyRoutes = effectiveRoutes(hoy);
+  const hoyWarnings = hoyRoutes.reduce((sum, r) => sum + warningsForDay(r, hoy).list.length, 0);
+  const hoyDogs = hoyRoutes.reduce((sum, r) => sum + (r.paradas || []).length, 0);
+  const vigentes = avisosVigentes();
+  const barrios = groupByBarrio(vigentes).map(([b]) => b);
+  const review = pendingReview();
 
   let next;
-  if (web.length) {
+  if (urgentes.length) {
+    next = { text: `Resolvé el pedido urgente de <b>${esc(urgentes[0].creadoPorNombre || "supervisión")}</b>: ${esc(urgentes[0].titulo || urgentes[0].tipo || "cambio de ruta")}.`, action: button("Aplicar", `data-coord-sol-aplicar="${esc(urgentes[0].id)}"`, "primary", "arrowRight") };
+  } else if (web.length) {
     const oldest = web[web.length - 1];
     const d = oldest.datos || {};
-    next = {
-      text: `Escribile a <b>${esc(d.responsable || "quien hizo el pedido")}</b> por la evaluación de <b>${esc(d.perro || "su perro")}</b>.`,
-      action: button("Ver pedido", `data-coord-goto-pedido="${esc(oldest.id)}"`, "primary", "arrowRight"),
-    };
-  } else if (pending.length) {
-    const dog = pending[0];
-    next = {
-      text: `Confirmá el dato de <b>${esc(dog.name)}</b>: ${esc(dog.review || `estado "${dog.status}"`)}`,
-      action: button(`Ir a ${esc(dog.name)}`, `data-coord-goto-dog="${dog.id}"`, "primary", "arrowRight"),
-    };
-  } else if (openPedidos.length) {
-    const oldest = openPedidos[openPedidos.length - 1];
-    next = {
-      text: `Avanzá con el pedido más viejo: <b>${esc(oldest.titulo || oldest.tipo)}</b>.`,
-      action: button("Ver pedido", `data-coord-goto-pedido="${esc(oldest.id)}"`, "primary", "arrowRight"),
-    };
+    next = { text: `Escribile a <b>${esc(d.responsable || "quien hizo el pedido")}</b> por la evaluación de <b>${esc(d.perro || "su perro")}</b>.`, action: button("Ver pedido", `data-coord-goto-pedido="${esc(oldest.id)}"`, "primary", "arrowRight") };
+  } else if (!plantillasCargadas && loaded.has("plantillas")) {
+    next = { text: "Cargá las rutas de la planilla RPJ para tener la semana armada.", action: button("Ir a rutas", `data-coord-goto="coord-rutas"`, "primary", "arrowRight") };
+  } else if (solicitudes.length) {
+    next = { text: `Respondé el pedido de cambio de <b>${esc(solicitudes[0].creadoPorNombre || "supervisión")}</b>.`, action: button("Aplicar", `data-coord-sol-aplicar="${esc(solicitudes[0].id)}"`, "primary", "arrowRight") };
+  } else if (hoyWarnings) {
+    next = { text: `Revisá ${hoyWarnings === 1 ? "el aviso" : `los ${hoyWarnings} avisos`} de las rutas de hoy.`, action: button("Ver rutas de hoy", `data-coord-ver-dia="${hoy}"`, "primary", "arrowRight") };
+  } else if (review.length) {
+    next = { text: `Confirmá el dato de <b>${esc(review[0].name)}</b>: ${esc(review[0].review || `estado "${review[0].status}"`)}`, action: button("Ver datos", `data-coord-open="datos"`, "primary", "arrowRight") };
   } else {
-    next = {
-      text: "No hay datos ni pedidos pendientes. Revisá la carga de la semana.",
-      action: button("Ver carga", `data-coord-open="carga"`, "primary", "arrowRight"),
-    };
+    next = { text: "Todo en orden. Mirá las rutas del día siguiente.", action: button("Ver el día siguiente", `data-coord-ver-dia="${addDaysISO(hoy, 1)}"`, "primary", "arrowRight") };
   }
 
+  const shownSol = solicitudes.slice(0, 3);
   return `
     <section class="coord-today" aria-labelledby="coord-today-title">
       <div class="coord-today-head">
-        <p class="coord-kicker">${today} ${todayDMY()}</p>
+        <p class="coord-kicker">${dayLabel(hoy)}</p>
         <p class="coord-greeting">Hola, ${esc(user.nombre)}</p>
         <h1 id="coord-today-title">Lo urgente de hoy</h1>
-        <p class="coord-owner">A cargo: ${esc(user.nombre)}</p>
       </div>
 
-      ${WebAlert(web)}
+      ${solicitudes.length ? `
+        <div class="coord-sol-alert" id="coord-sol-urgente" tabindex="-1">
+          <h2>${icon("bell", "coord-icon")}<span>${solicitudes.length === 1 ? "1 pedido de cambio del supervisor" : `${solicitudes.length} pedidos de cambio del supervisor`}</span></h2>
+          ${feedback("solicitudes")}
+          <ul class="coord-sol-list">${shownSol.map((s) => SolicitudItem(s, { compact: true })).join("")}</ul>
+          ${solicitudes.length > shownSol.length ? `<p>Y ${solicitudes.length - shownSol.length} más. ${button("Ver todos", `data-coord-open="solicitudes"`, "ghost")}</p>` : ""}
+        </div>` : feedback("solicitudes")}
 
       <ol class="coord-priorities">
-        <li class="coord-priority ${pending.length ? "is-warn" : "is-ok"}">
+        <li class="coord-priority ${web.length ? "is-alert" : "is-ok"}">
           <span class="coord-priority-num" aria-hidden="true">1</span>
           <div>
-            <h2>Datos a confirmar</h2>
-            <p class="coord-big"><b>${pending.length}</b> <span>de ${REVIEW_DOGS.length} perros</span></p>
-            <p>${pending.length ? "Diferencias entre planillas o perros sin ruta." : "Todo confirmado."}</p>
+            <h2>Pedidos nuevos de la web</h2>
+            <p class="coord-big"><b>${web.length}</b> <span>${web.length === 1 ? "sin responder" : "sin responder"}</span></p>
+            <p>${web.length ? esc(listJoin(web.slice(0, 3).map((p) => p.datos?.perro || PENDIENTE))) : loaded.has("pedidos") ? "No hay pedidos nuevos." : "Cargando pedidos…"}</p>
           </div>
-          ${button("Ver la lista", `data-coord-goto="coord-datos"`, "secondary")}
+          ${button("Ver pedidos", `data-coord-open="pedidos"`, "secondary")}
         </li>
-        <li class="coord-priority ${web.length ? "is-alert" : nuevos ? "is-warn" : ""}">
+        <li class="coord-priority ${!plantillasCargadas ? "is-warn" : hoyWarnings ? "is-alert" : "is-ok"}">
           <span class="coord-priority-num" aria-hidden="true">2</span>
           <div>
-            <h2>Pedidos abiertos</h2>
-            <p class="coord-big"><b>${openPedidos.length}</b> <span>${nuevos ? `${nuevos} sin empezar` : openPedidos.length === 1 ? "pedido" : "pedidos"}</span></p>
-            <p>${pedidos.length ? "Consultas, evaluaciones de la web y avisos de clientes." : loaded.has("pedidos") ? "Todavía no hay pedidos." : "Cargando pedidos…"}</p>
+            <h2>Rutas de hoy</h2>
+            ${!plantillasCargadas && !hoyRoutes.length
+              ? `<p class="coord-big"><b>0</b> <span>rutas</span></p><p>${loaded.has("plantillas") ? "Todavía no hay rutas cargadas." : "Cargando rutas…"}</p>`
+              : `<p class="coord-big"><b>${hoyRoutes.length}</b> <span>${hoyRoutes.length === 1 ? "ruta" : "rutas"}</span> <b>${hoyDogs}</b> <span>paseos</span></p>
+                 ${hoyWarnings ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>${hoyWarnings} ${hoyWarnings === 1 ? "aviso" : "avisos"} para revisar</span></p>` : `<p>Sin avisos.</p>`}`}
           </div>
-          ${button(pedidos.length ? "Ver pedidos" : "Cargar un pedido", `data-coord-open="pedidos"`, "secondary")}
+          ${button(plantillasCargadas ? "Ver rutas de hoy" : "Cargar rutas", plantillasCargadas ? `data-coord-ver-dia="${hoy}"` : `data-coord-goto="coord-rutas"`, "secondary")}
         </li>
-        <li class="coord-priority ${conflictsToday.length ? "is-alert" : ""}">
+        <li class="coord-priority ${vigentes.length ? "is-warn" : "is-ok"}">
           <span class="coord-priority-num" aria-hidden="true">3</span>
           <div>
-            <h2>Hoy en la calle</h2>
-            ${noService
-              ? `<p class="coord-big"><b>0</b> <span>perros</span></p><p>No hay rutas cargadas para hoy.</p>`
-              : `<p class="coord-big"><b>${manana.length}</b> <span>mañana</span> <b>${tarde.length}</b> <span>tarde</span></p>
-                 ${muzzleToday.length ? `<p class="coord-inline-alert">${icon("alertTriangle", "coord-icon")}<span>Con bozal: ${esc(listJoin(muzzleToday))}</span></p>` : ""}
-                 ${conflictsToday.length ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>No juntar, comparten turno: ${esc(listJoin(conflictsToday))}</span></p>` : ""}`}
+            <h2>Avisos de barrio vigentes</h2>
+            <p class="coord-big"><b>${vigentes.length}</b> <span>${barrios.length === 1 ? "en 1 barrio" : `en ${barrios.length} barrios`}</span></p>
+            <p>${vigentes.length ? esc(listJoin(barrios.slice(0, 3))) : "Sin avisos vigentes."}</p>
           </div>
-          ${button("Ver carga de la semana", `data-coord-open="carga"`, "secondary")}
+          ${button(vigentes.length ? "Ver avisos" : "Cargar un aviso", vigentes.length ? `data-coord-goto="coord-avisos-vigentes"` : `data-coord-open="avisos"`, "secondary")}
         </li>
       </ol>
 
@@ -1033,10 +1478,699 @@ function TodayPanel() {
   `;
 }
 
-/* ---------- 2. Datos a confirmar ---------- */
+/* ---------- Avisos vigentes por barrio (arriba) ---------- */
+
+function AvisoCard(aviso, { history = false } = {}) {
+  const id = esc(aviso.id);
+  return `
+    <li class="coord-aviso ${history ? "is-old" : ""}">
+      <div class="coord-aviso-head">
+        ${history ? `<strong>${esc(aviso.barrio || "Sin barrio")}</strong>` : ""}
+        ${badge(esc(aviso.tipo || "otro"), aviso.tipo === "seguridad" || aviso.tipo === "perro suelto" ? "alert" : "warn")}
+        <small>${history ? "Venció" : "Hasta"} el ${esc(fmtDate(isISODate(aviso.vigenteHasta) ? aviso.vigenteHasta : aviso.fecha))}</small>
+      </div>
+      <p>${esc(aviso.mensaje || aviso.titulo || "")}</p>
+      ${whoLine(aviso)}
+      <div class="coord-actions">
+        ${button("Copiar para WhatsApp", `data-coord-aviso-copy="${id}"`, "ghost", "copy")}
+        ${!history ? button("Ya no está vigente", `data-coord-aviso-fin="${id}"`, "ghost") : ""}
+      </div>
+    </li>
+  `;
+}
+
+function AvisosStrip() {
+  const vigentes = avisosVigentes();
+  if (!vigentes.length) return "";
+  return `
+    <section class="coord-block coord-avisos-strip" id="coord-avisos-vigentes" tabindex="-1" aria-labelledby="coord-avisos-vig-title">
+      <div class="coord-block-head">
+        <div>
+          <h2 id="coord-avisos-vig-title">Avisos vigentes por barrio</h2>
+          <p>Lo que el equipo tiene que saber hoy en cada barrio.</p>
+        </div>
+        ${button("Cargar un aviso", `data-coord-open="avisos"`, "secondary", "plus")}
+      </div>
+      ${feedback("avisosTop")}
+      <div class="coord-barrios">
+        ${groupByBarrio(vigentes).map(([barrio, avisos]) => `
+          <section class="coord-barrio" aria-label="Avisos en ${esc(barrio)}">
+            <h3>${icon("mapPin", "coord-icon")}<span>${esc(barrio)}</span> <small>${avisos.length}</small></h3>
+            <ul class="coord-aviso-list">${avisos.map((a) => AvisoCard(a)).join("")}</ul>
+          </section>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+/* ---------- 2. Rutas y horarios ---------- */
+
+function RoutesBlock() {
+  const plantillas = getPlantillas();
+  const loading = !loaded.has("plantillas") && !plantillas.length;
+  let body;
+  if (editor) body = RouteEditor();
+  else if (loading) body = `<p class="coord-empty">${icon("clock", "coord-icon")}Cargando rutas…</p>`;
+  else if (!plantillas.length || cargaProgreso) body = CargaPlanilla();
+  else {
+    const vista = rutasVista();
+    body = `
+      <div class="coord-seg" role="group" aria-label="Qué querés ver">
+        <button type="button" class="coord-seg-btn" id="coord-vista-semana" data-coord-vista="semana" aria-pressed="${vista === "semana"}">${icon("calendarCheck", "coord-icon")}<span>Semana (se repite)</span></button>
+        <button type="button" class="coord-seg-btn" id="coord-vista-dia" data-coord-vista="dia" aria-pressed="${vista === "dia"}">${icon("route", "coord-icon")}<span>Un día puntual</span></button>
+      </div>
+      ${vista === "semana" ? WeekView() : DayView()}
+    `;
+  }
+  return `
+    <section class="coord-block coord-routes" id="coord-rutas" tabindex="-1" aria-labelledby="coord-rutas-title">
+      <div class="coord-block-head">
+        <div>
+          <h2 id="coord-rutas-title">Rutas y horarios</h2>
+          <p>La <b>semana</b> se repite todas las semanas. Si un día puntual cambia algo, guardalo <b>solo para ese día</b>: la semana no se toca.</p>
+        </div>
+      </div>
+      ${feedback("rutas")}
+      ${body}
+    </section>
+  `;
+}
+
+function CargaPlanilla() {
+  const base = plantillasDesdePlanilla();
+  const paseos = base.reduce((sum, p) => sum + p.paradas.length, 0);
+  return `
+    <div class="coord-carga">
+      <p>Todavía no hay rutas armadas en la app. Podés arrancar con las rutas reales de la planilla RPJ (hoja BASE RUTAS, leída el 12/11/2026): <b>${base.length} rutas</b> y <b>${paseos} paseos</b> con su hora de retiro. Después las cambiás acá.</p>
+      ${cargaProgreso ? `<p class="coord-note" role="status">${icon("clock", "coord-icon")}<span>${esc(cargaProgreso)}</span></p>` : ""}
+      ${cargaConfirm ? `
+        <div class="coord-confirm" role="group" aria-labelledby="coord-carga-q">
+          <p id="coord-carga-q"><b>¿Confirmás?</b> Se guardan ${base.length} rutas como semana base. Las ve todo el equipo.</p>
+          <div class="coord-actions">
+            ${button("Sí, cargar las rutas", `id="coord-carga-ok" data-coord-carga-ok`, "primary", "checkCircle")}
+            ${button("Cancelar", `id="coord-carga-cancel" data-coord-carga-cancel`, "ghost")}
+          </div>
+        </div>`
+        : `<button class="coord-btn is-primary coord-btn-big" type="button" id="coord-carga" data-coord-carga>${icon("uploadCloud", "coord-icon")}<span>Cargar las rutas de la planilla RPJ</span></button>`}
+      <p class="coord-meta">No incluye a «Llak» (jueves tarde): el nombre no coincide con ningún perro. Paseador y ayudante quedan para completar.</p>
+    </div>
+  `;
+}
+
+function RouteButton(route, { warnings, attrs }) {
+  const n = (route.paradas || []).length;
+  return `
+    <button type="button" class="coord-wroute ${warnings ? "is-alert" : ""}" ${attrs}>
+      <span class="coord-wroute-top"><strong>${esc(route.ruta)}</strong>${warnings ? `<span class="coord-wroute-warn">${icon("alertTriangle", "coord-icon")}${warnings}<span class="coord-sr-only"> ${warnings === 1 ? "aviso" : "avisos"}</span></span>` : ""}</span>
+      <span>${n} ${n === 1 ? "perro" : "perros"} · ${esc(routeSpan(route))}</span>
+      <small>${route.paseador ? esc(personName(route.paseador)) : "Sin paseador"}</small>
+    </button>
+  `;
+}
+
+function WeekView() {
+  const plantillas = getPlantillas();
+  const today = dayNameISO(hoyAR());
+  const days = plantillas.some((p) => p.dia === "Domingo") ? WEEK_DAYS : SERVICE_DAYS;
+  const total = plantillas.reduce((sum, p) => sum + p.paradas.length, 0);
+  return `
+    <p class="coord-meta">${plantillas.length} rutas · ${total} paseos por semana. Tocá una ruta para editar sus horarios.</p>
+    <div class="coord-week">
+      ${days.map((dia) => `
+        <section class="coord-wday ${dia === today ? "is-today" : ""}" aria-labelledby="coord-wday-${slugDia(dia)}">
+          <h3 id="coord-wday-${slugDia(dia)}">${dia}${dia === today ? ' <span class="coord-tag">Hoy</span>' : ""}</h3>
+          ${SHIFT_LABELS.map((turno) => {
+            const routes = plantillasDe(dia).filter((p) => p.turno === turno);
+            return `
+              <div class="coord-wturno">
+                <p class="coord-wturno-label">${turno}</p>
+                ${routes.map((p) => RouteButton(p, { warnings: warningsForPlantilla(p).list.length, attrs: `id="coord-wr-${esc(p.id)}" data-coord-edit-plantilla="${esc(p.id)}" aria-label="Editar ${esc(p.ruta)} del ${dia.toLowerCase()} a la ${turno.toLowerCase()}"` })).join("")}
+                <button type="button" class="coord-wadd" id="coord-wadd-${slugDia(dia)}-${slugDia(turno)}" data-coord-new-route data-dia="${dia}" data-turno="${turno}">${icon("plus", "coord-icon")}<span>Ruta</span><span class="coord-sr-only"> nueva el ${dia.toLowerCase()} a la ${turno.toLowerCase()}</span></button>
+              </div>
+            `;
+          }).join("")}
+        </section>
+      `).join("")}
+    </div>
+  `;
+}
+
+function DayView() {
+  const hoy = hoyAR();
+  const fecha = currentRutasFecha();
+  const routes = effectiveRoutes(fecha);
+  const total = routes.reduce((sum, r) => sum + (r.paradas || []).length, 0);
+  return `
+    <div class="coord-dayview">
+      <div class="coord-day-pick">
+        <div class="coord-field">
+          <label for="coord-rutas-fecha">Día</label>
+          <input id="coord-rutas-fecha" type="date" value="${fecha}" min="${hoy}" max="${addDaysISO(hoy, 90)}" data-coord-rutas-fecha />
+        </div>
+        <div class="coord-day-quick">
+          ${button("Hoy", `id="coord-dia-hoy" data-coord-ver-dia="${hoy}"`, fecha === hoy ? "secondary" : "ghost")}
+          ${button("Día siguiente", `id="coord-dia-manana" data-coord-ver-dia="${addDaysISO(hoy, 1)}"`, fecha === addDaysISO(hoy, 1) ? "secondary" : "ghost")}
+        </div>
+      </div>
+      <h3 class="coord-day-title">${esc(dayLabel(fecha))} · ${routes.length} ${routes.length === 1 ? "ruta" : "rutas"} · ${total} paseos</h3>
+      ${routes.length ? `<div class="coord-actions">${button("Copiar todas las rutas del día", `id="coord-copy-dia" data-coord-copy-dia="${fecha}"`, "ghost", "copy")}</div>` : `<p class="coord-empty is-small">No hay rutas para este día.</p>`}
+      <ul class="coord-dayroutes">
+        ${routes.map((r) => {
+          const w = warningsForDay(r, fecha);
+          const stops = (r.paradas || []).slice().sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
+          return `
+            <li class="coord-dayroute ${w.list.length ? "is-alert" : ""}">
+              <div class="coord-card-head">
+                <strong>${esc(r.ruta)} · ${esc(r.turno)}</strong>
+                ${r.origen === "dia" ? badge("Cambio solo para este día", "warn") : badge("Igual que la semana", "neutral")}
+              </div>
+              <p>${stops.length} ${stops.length === 1 ? "perro" : "perros"} · ${esc(routeSpan(r))} · Paseador: ${esc(personName(r.paseador) || PENDIENTE)}${r.ayudante ? ` · Ayudante: ${esc(personName(r.ayudante))}` : ""}</p>
+              ${w.list.length ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>${esc(w.list.slice(0, 2).join(" "))}${w.list.length > 2 ? ` Y ${w.list.length - 2} más.` : ""}</span></p>` : ""}
+              <details class="coord-card-more">
+                <summary>Ver paradas ${icon("chevronDown", "coord-icon")}</summary>
+                <ol class="coord-stops-mini">${stops.map((s, i) => `<li class="${w.byStop.has((r.paradas || []).indexOf(s)) ? "is-alert" : ""}"><b>${esc(padHora(s.hora) || "--:--")}</b> ${esc(s.perroNombre)} <small>${Number(s.minutos) || 45} min${s.nota ? ` · ${esc(s.nota)}` : ""}</small><span class="coord-sr-only"> (parada ${i + 1})</span></li>`).join("")}</ol>
+              </details>
+              <div class="coord-actions">
+                ${button("Cambiar solo este día", `id="coord-ed-dia-${esc(r.ruta)}" data-coord-edit-dia="${esc(r.ruta)}" data-fecha="${fecha}"`, "primary", "sliders")}
+                ${button("Copiar para WhatsApp", `data-coord-copy-ruta="${esc(r.ruta)}" data-fecha="${fecha}"`, "ghost", "copy")}
+              </div>
+            </li>
+          `;
+        }).join("")}
+      </ul>
+      <div class="coord-actions">
+        ${SHIFT_LABELS.map((turno) => button(`Ruta extra solo este día (${turno.toLowerCase()})`, `id="coord-extra-${slugDia(turno)}" data-coord-new-dia data-turno="${turno}" data-fecha="${fecha}"`, "ghost", "plus")).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function StopRow(stop, index, warnings) {
+  const dog = dogOf(stop);
+  const msgs = warnings.byStop.get(index) || [];
+  const end = validHora(stop.hora) ? sumarMinutos(padHora(stop.hora), stop.minutos || 45) : "";
+  const last = editor.paradas.length - 1;
+  const name = stop.perroNombre || dog?.name || PENDIENTE;
+  return `
+    <li class="coord-stop ${msgs.length ? "is-alert" : ""}">
+      <div class="coord-stop-head">
+        <span class="coord-stop-num" aria-hidden="true">${index + 1}</span>
+        <div class="coord-stop-name">
+          <strong>${esc(name)}</strong>
+          <small>${dog ? `${esc(dog.size)}${dog.status !== "Activo" ? ` · ${esc(dog.status)}` : ""}` : "Sin ficha en el registro"}</small>
+        </div>
+        <div class="coord-stop-tools">
+          <button type="button" class="coord-icon-btn" id="coord-ed-up-${index}" data-coord-stop-up="${index}" ${index === 0 ? "disabled" : ""} aria-label="Subir a ${esc(name)}">${icon("chevronDown", "coord-icon is-up")}</button>
+          <button type="button" class="coord-icon-btn" id="coord-ed-down-${index}" data-coord-stop-down="${index}" ${index === last ? "disabled" : ""} aria-label="Bajar a ${esc(name)}">${icon("chevronDown", "coord-icon")}</button>
+          <button type="button" class="coord-icon-btn is-danger" id="coord-ed-del-${index}" data-coord-stop-del="${index}" aria-label="Quitar a ${esc(name)} de la ruta">${icon("x", "coord-icon")}</button>
+        </div>
+      </div>
+      <div class="coord-stop-fields">
+        <div class="coord-field">
+          <label for="coord-ed-hora-${index}">Retiro</label>
+          <input id="coord-ed-hora-${index}" type="time" step="300" value="${esc(padHora(stop.hora))}" data-coord-stop="${index}" data-k="hora" ${!validHora(stop.hora) ? 'aria-invalid="true"' : ""} />
+        </div>
+        <div class="coord-field">
+          <label for="coord-ed-min-${index}">Minutos</label>
+          <input id="coord-ed-min-${index}" type="number" min="5" max="240" step="5" inputmode="numeric" value="${esc(stop.minutos)}" data-coord-stop="${index}" data-k="minutos" />
+        </div>
+        <p class="coord-stop-end">${end ? `Vuelve ~${end}` : ""}</p>
+        <div class="coord-field is-wide">
+          <label for="coord-ed-nota-${index}">Nota</label>
+          <input id="coord-ed-nota-${index}" type="text" value="${esc(stop.nota)}" data-coord-stop="${index}" data-k="nota" placeholder="Ej.: bozal, sale con…" autocomplete="off" />
+        </div>
+      </div>
+      ${msgs.length ? `<ul class="coord-stop-warn">${msgs.map((m) => `<li>${icon("alertTriangle", "coord-icon")}<span>${esc(m)}</span></li>`).join("")}</ul>` : ""}
+    </li>
+  `;
+}
+
+function dogResults() {
+  if (!editor) return "";
+  const q = normalize(editorQuery);
+  if (!q) return `<p class="coord-meta">Escribí el nombre del perro. Se agrega a la hora de arriba.</p>`;
+  const inRoute = new Set(editor.paradas.map((s) => dogOf(s)?.id).filter(Boolean));
+  const matches = REAL_DOGS.filter((dog) => normalize(dog.name).includes(q)).slice(0, 6);
+  const exact = REAL_DOGS.some((dog) => normalize(dog.name) === q);
+  const hora = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(editor);
+  return `
+    <ul class="coord-results">
+      ${matches.map((dog) => `
+        <li>
+          <button type="button" class="coord-result" id="coord-add-${dog.id}" data-coord-add-dog="${dog.id}">
+            ${icon("plus", "coord-icon")}
+            <span><b>${esc(dog.name)}</b> <small>${esc(dog.size)} · ${esc(scheduleLabel(dog))}</small></span>
+            ${dog.status !== "Activo" ? badge(esc(dog.status), "alert") : ""}
+            ${inRoute.has(dog.id) ? badge("Ya está en la ruta", "warn") : ""}
+            <span class="coord-result-hora">${hora}</span>
+          </button>
+        </li>`).join("")}
+      ${!exact && editorQuery.trim().length >= 2 ? `
+        <li>
+          <button type="button" class="coord-result is-free" id="coord-add-libre" data-coord-add-libre>
+            ${icon("plus", "coord-icon")}<span>Agregar «${esc(editorQuery.trim())}» (perro sin ficha)</span><span class="coord-result-hora">${hora}</span>
+          </button>
+        </li>` : ""}
+    </ul>
+    ${!matches.length ? `<p class="coord-meta">No hay perros con ese nombre en el registro.</p>` : ""}
+  `;
+}
+
+function RouteEditor() {
+  const e = editor;
+  const warnings = editorWarnings();
+  const solicitud = e.solicitudId ? getSolicitudes().find((s) => s.id === e.solicitudId) : null;
+  const isPlantilla = e.modo === "plantilla";
+  const fechas = isPlantilla ? nextDatesFor(e.dia) : [];
+  const suggested = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(e);
+  return `
+    <div class="coord-editor ${isPlantilla ? "is-plantilla" : "is-dia"}" id="coord-editor" tabindex="-1" aria-labelledby="coord-editor-title">
+      <div class="coord-editor-mode" role="note">
+        ${icon(isPlantilla ? "calendarCheck" : "alertTriangle", "coord-icon")}
+        <div>
+          <p class="coord-editor-kicker">${isPlantilla ? "Estás editando la SEMANA" : "Estás editando SOLO UN DÍA"}</p>
+          <h3 id="coord-editor-title">${esc(e.ruta)} · ${isPlantilla ? `${esc(e.dia)} · ${esc(e.turno)}` : `${esc(dayLabel(e.fecha))} · ${esc(e.turno)}`}</h3>
+          <p>${isPlantilla ? `Se repite todos los ${esc(e.dia.toLowerCase())}. Si es algo de un solo día, usá «Guardar solo para un día».` : "La semana no cambia. Este cambio manda sobre la semana solo ese día."}${e.nuevo ? " Ruta nueva." : ""}</p>
+        </div>
+      </div>
+
+      ${solicitud ? `
+        <div class="coord-editor-sol" role="note">
+          <p><b>Pedido de ${esc(solicitud.creadoPorNombre || "supervisión")}:</b> ${esc(solicitud.titulo || solicitud.tipo || "")}${solicitud.detalle ? ` · ${esc(solicitud.detalle)}` : ""}${solicitud.motivo ? ` · Motivo: ${esc(solicitud.motivo)}` : ""}</p>
+          ${e.precarga ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>${esc(e.precarga)}</span></p>` : ""}
+          <div class="coord-field is-wide">
+            <label for="coord-ed-respuesta">Respuesta para el supervisor (opcional)</label>
+            <input id="coord-ed-respuesta" type="text" value="${esc(e.respuesta)}" data-coord-ed-field="respuesta" placeholder="Ej.: Listo, ya lo saqué de la ruta." autocomplete="off" />
+          </div>
+        </div>` : ""}
+
+      ${feedback("editor")}
+
+      <div class="coord-grid coord-editor-team">
+        ${e.nuevo ? `
+          <div class="coord-field">
+            <label for="coord-ed-ruta">Código de la ruta</label>
+            <input id="coord-ed-ruta" type="text" value="${esc(e.ruta)}" data-coord-ed-field="ruta" autocomplete="off" aria-describedby="coord-ed-ruta-hint" />
+            <small id="coord-ed-ruta-hint">Ej.: PJ_2M (mañana) o PJ_3T (tarde).</small>
+          </div>` : ""}
+        <div class="coord-field">
+          <label for="coord-ed-paseador">Paseador</label>
+          <input id="coord-ed-paseador" type="text" list="coord-team-users" value="${esc(e.paseador)}" data-coord-ed-field="paseador" autocomplete="off" aria-describedby="coord-ed-paseador-hint" />
+          <small id="coord-ed-paseador-hint">Usuario de la app (ej.: sebastian).</small>
+        </div>
+        <div class="coord-field">
+          <label for="coord-ed-ayudante">Ayudante</label>
+          <input id="coord-ed-ayudante" type="text" list="coord-team-users" value="${esc(e.ayudante)}" data-coord-ed-field="ayudante" autocomplete="off" placeholder="Sin ayudante" />
+        </div>
+        <div class="coord-field">
+          <label for="coord-ed-supervisor">Supervisa</label>
+          <input id="coord-ed-supervisor" type="text" list="coord-team-names" value="${esc(e.supervisor)}" data-coord-ed-field="supervisor" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="coord-add" role="group" aria-labelledby="coord-add-title">
+        <h4 id="coord-add-title">${icon("plus", "coord-icon")}<span>Agregar un perro</span></h4>
+        <div class="coord-add-row">
+          <div class="coord-field coord-add-search">
+            <label for="coord-ed-buscar">Buscar perro</label>
+            <input id="coord-ed-buscar" type="search" value="${esc(editorQuery)}" data-coord-ed-search autocomplete="off" placeholder="Nombre del perro" aria-controls="coord-ed-results" />
+          </div>
+          <div class="coord-field coord-add-hora">
+            <label for="coord-ed-nueva-hora">Hora de retiro</label>
+            <input id="coord-ed-nueva-hora" type="time" step="300" value="${esc(suggested)}" data-coord-ed-hora aria-describedby="coord-ed-nueva-hora-hint" />
+            <small id="coord-ed-nueva-hora-hint">Sugerida: la última + 15 min.</small>
+          </div>
+        </div>
+        <div id="coord-ed-results" aria-live="polite">${dogResults()}</div>
+      </div>
+
+      <div class="coord-stops-head">
+        <h4>Paradas en orden <span>${e.paradas.length}</span></h4>
+        ${e.paradas.length > 1 ? button("Ordenar por hora", `id="coord-ed-sort" data-coord-ed-sort`, "ghost", "clock") : ""}
+      </div>
+      ${e.paradas.length ? `<ol class="coord-stops">${e.paradas.map((s, i) => StopRow(s, i, warnings)).join("")}</ol>` : `<p class="coord-empty is-small">La ruta no tiene perros todavía. Buscalos arriba.</p>`}
+
+      ${warnList(warnings.list, "coord-ed-warnings")}
+
+      <div class="coord-field is-wide">
+        <label for="coord-ed-notas">Notas de la ruta</label>
+        <textarea id="coord-ed-notas" rows="2" data-coord-ed-field="notas" placeholder="Ej.: arrancar por Mapuche">${esc(e.notas)}</textarea>
+      </div>
+
+      <div class="coord-editor-save">
+        ${isPlantilla ? `
+          <div class="coord-save-box is-main">
+            <p><b>Guardar en la semana:</b> cambia todos los ${esc(e.dia.toLowerCase())}.</p>
+            ${button("Guardar en la semana", `id="coord-ed-save" data-coord-ed-save="plantilla"`, "primary", "checkCircle")}
+          </div>
+          <div class="coord-save-box">
+            <div class="coord-field">
+              <label for="coord-ed-solodia">¿Es solo por un día? Elegí cuál</label>
+              <select id="coord-ed-solodia" data-coord-ed-field="soloDia">
+                ${fechas.map((f) => `<option value="${f}" ${f === e.soloDia ? "selected" : ""}>${esc(dayLabel(f))}${f === hoyAR() ? " (hoy)" : ""}${getRutasDia().some((r) => r.id === rutaDiaId(f, e.ruta)) ? " · ya tiene un cambio: se reemplaza" : ""}</option>`).join("")}
+              </select>
+            </div>
+            ${button("Guardar solo para ese día", `id="coord-ed-save-dia" data-coord-ed-save="dia"`, "secondary")}
+          </div>` : `
+          <div class="coord-save-box is-main">
+            <p><b>Guardar solo para el ${esc(dayLabel(e.fecha).toLowerCase())}.</b>${solicitud ? " El pedido del supervisor queda como aplicado." : ""}</p>
+            ${button(`Guardar solo para el ${esc(fmtDate(e.fecha))}`, `id="coord-ed-save" data-coord-ed-save="dia"`, "primary", "checkCircle")}
+          </div>
+          ${e.existeDia && canDelete(e.existeDia) ? `
+            <div class="coord-save-box">
+              <p>¿Ese día tiene que quedar igual que la semana?</p>
+              ${button("Volver a la ruta de la semana", `id="coord-ed-revert" data-coord-ed-revert`, "ghost")}
+            </div>` : ""}`}
+      </div>
+
+      ${editorConfirm === "salir" ? `
+        <div class="coord-confirm" role="group" aria-labelledby="coord-salir-q">
+          <p id="coord-salir-q"><b>Tenés cambios sin guardar.</b> ¿Salir igual y descartarlos?</p>
+          <div class="coord-actions">
+            ${button("Sí, descartar", `id="coord-ed-close-ok" data-coord-ed-close-ok`, "primary")}
+            ${button("Seguir editando", `id="coord-ed-close-cancel" data-coord-ed-close-cancel`, "ghost")}
+          </div>
+        </div>` : ""}
+
+      <div class="coord-actions coord-editor-foot">
+        ${button("Copiar para WhatsApp", `id="coord-ed-copy" data-coord-ed-copy`, "ghost", "copy")}
+        ${button(e.sucio ? "Cerrar sin guardar" : "Volver", `id="coord-ed-close" data-coord-ed-close`, "ghost", "x")}
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- 3. Pedidos de cambio del supervisor (todos) ---------- */
+
+function SolicitudesSection() {
+  const all = getSolicitudes();
+  const pend = solicitudesPendientes();
+  const done = all.filter((s) => (s.estado || "pendiente") !== "pendiente");
+  const body = `
+    <p class="coord-note">${icon("users", "coord-icon")}<span>El supervisor mira las rutas y, si habló con alguien o pasó algo, te pide el cambio. Vos lo aplicás o lo rechazás con una respuesta: la ve el supervisor.</span></p>
+    ${feedback("solicitudesTodas")}
+    <h3 class="coord-subtitle">Pendientes <span>${pend.length}</span></h3>
+    ${pend.length ? `<ul class="coord-sol-list">${pend.map((s) => SolicitudItem(s)).join("")}</ul>` : `<p class="coord-empty is-small">${loaded.has("solicitudes") ? "No hay pedidos pendientes." : "Cargando…"}</p>`}
+    ${done.length ? `
+      <details class="coord-more" ${isOpen("solHist") ? "open" : ""}>
+        <summary data-coord-toggle="solHist">Respondidos en las últimas 2 semanas (${done.length}) ${icon("chevronDown", "coord-icon")}</summary>
+        <ul class="coord-sol-list">${done.map((s) => SolicitudItem(s, { compact: true })).join("")}</ul>
+      </details>` : ""}
+  `;
+  return section({
+    key: "solicitudes",
+    id: "coord-solicitudes",
+    iconName: "bell",
+    title: "Pedidos de cambio del supervisor",
+    intro: "Aplicalos en la ruta del día o respondé por qué no.",
+    badges: pend.length ? badge(`${pend.length} ${pend.length === 1 ? "pendiente" : "pendientes"}`, "alert") : badge("Al día", "neutral"),
+    body,
+  });
+}
+
+/* ---------- 4. Clientes ---------- */
+
+function dogNames(ids) {
+  return (Array.isArray(ids) ? ids : []).map((id) => DOG_BY_ID.get(id)?.name || id);
+}
+
+function ClienteCard(c) {
+  const id = esc(c.id);
+  const estado = CLIENTE_ESTADOS.find(([v]) => v === c.estado) || CLIENTE_ESTADOS[0];
+  const perros = dogNames(c.perros);
+  return `
+    <li class="coord-card coord-cliente is-${esc(estado[0])}">
+      <div class="coord-card-head">
+        <strong>${esc(c.nombre || PENDIENTE)}</strong>
+        ${badge(estado[1], estado[0] === "activo" ? "ok" : estado[0] === "pausa" ? "warn" : "neutral")}
+      </div>
+      ${dataList([
+        ["Perros", perros.length ? listJoin(perros) : PENDIENTE],
+        ["Barrio", c.barrio],
+        ["Plan", c.plan && c.plan !== PENDIENTE ? c.plan : ""],
+        ["Días", Array.isArray(c.dias) && c.dias.length ? daysLabel(c.dias) : ""],
+        ["Turno", c.turno && c.turno !== PENDIENTE ? c.turno : ""],
+        ["Teléfono", c.telefono],
+        ["Notas", c.notas],
+      ], "is-compact")}
+      ${c.pendiente ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Sin señal: se enviará cuando vuelva.</span></p>` : ""}
+      <div class="coord-actions">
+        ${whatsappLinkTo(c.telefono, `Hola ${c.nombre || ""}, te escribo de Paseos Juan.`.replace(" ,", ","), "secondary", "WhatsApp")}
+        ${button("Editar", `id="coord-cli-edit-${id}" data-coord-cliente-edit="${id}"`, "ghost", "sliders")}
+      </div>
+    </li>
+  `;
+}
+
+function clientesFiltrados() {
+  const q = normalize(clienteQuery);
+  const list = getClientes();
+  if (!q) return list;
+  return list.filter((c) => normalize([c.nombre, c.barrio, c.telefono, c.notas, ...dogNames(c.perros)].join(" ")).includes(q));
+}
+
+function clientesListHTML() {
+  const list = clientesFiltrados();
+  if (!list.length) {
+    return `<p class="coord-empty is-small">${!loaded.has("clientes") ? "Cargando clientes…" : clienteQuery ? "Ningún cliente coincide con la búsqueda." : "Todavía no hay clientes cargados."}</p>`;
+  }
+  return `<ul class="coord-card-list is-grid">${list.map(ClienteCard).join("")}</ul>`;
+}
+
+function ClientesSection() {
+  const clientes = getClientes();
+  const draft = getDraft("cliente");
+  const editing = Boolean(draft.id);
+  const perros = Array.isArray(draft.perros) ? draft.perros : [];
+  const dias = Array.isArray(draft.dias) ? draft.dias : [];
+  const activos = clientes.filter((c) => (c.estado || "activo") === "activo").length;
+  const dogOptions = REAL_DOGS.slice().sort((a, b) => a.name.localeCompare(b.name, "es"));
+
+  const body = `
+    ${feedback("clientes")}
+    <div class="coord-field coord-search">
+      <label for="coord-clientes-buscar">Buscar cliente</label>
+      <input id="coord-clientes-buscar" type="search" value="${esc(clienteQuery)}" data-coord-clientes-buscar placeholder="Tutor, perro o barrio" autocomplete="off" aria-controls="coord-clientes-lista" />
+    </div>
+    <div id="coord-clientes-lista" aria-live="polite">${clientesListHTML()}</div>
+
+    <form class="coord-form" id="coord-cliente-form" data-coord-form="cliente" novalidate tabindex="-1">
+      <h3>${editing ? `Editando a ${esc(draft.nombre || "un cliente")}` : "Cargar un cliente"}</h3>
+      ${draft.pedidoId ? `<p class="coord-note">${icon("clipboardCheck", "coord-icon")}<span>Completado con los datos de un pedido. Revisalo antes de guardar.</span></p>` : ""}
+      <input type="hidden" name="id" value="${esc(draft.id || "")}" />
+      <input type="hidden" name="pedidoId" value="${esc(draft.pedidoId || "")}" />
+      <div class="coord-grid">
+        ${field("cliente", "nombre", "Nombre del tutor", { value: draft.nombre, required: true, attrs: 'autocomplete="off"' })}
+        ${field("cliente", "telefono", "Teléfono", { value: draft.telefono, type: "tel", attrs: 'autocomplete="off" inputmode="tel"', hint: "Celular con código de área (ej.: 11 1234-5678)." })}
+        ${field("cliente", "barrio", "Barrio", { value: draft.barrio, attrs: 'list="coord-barrios" autocomplete="off"', hint: "Elegí uno o escribí otro." })}
+        ${selectField("cliente", "plan", "Plan", CLIENTE_PLANES, { value: draft.plan || PENDIENTE })}
+        ${selectField("cliente", "turno", "Turno", CLIENTE_TURNOS, { value: draft.turno || PENDIENTE })}
+        ${selectField("cliente", "estado", "Estado", CLIENTE_ESTADOS, { value: draft.estado || "activo" })}
+        <div class="coord-field is-wide">
+          <span class="coord-label" id="coord-cliente-perros-label">Perros${perros.length ? ` (${perros.length})` : ""}</span>
+          <input id="coord-cliente-perros-buscar" type="search" data-coord-filter-perros placeholder="Filtrar perros" autocomplete="off" aria-label="Filtrar la lista de perros" />
+          <div class="coord-checks" role="group" aria-labelledby="coord-cliente-perros-label">
+            ${dogOptions.map((dog) => `<label class="coord-check" data-name="${esc(normalize(dog.name))}"><input type="checkbox" id="coord-cliente-perro-${dog.id}" name="perros" value="${dog.id}" ${perros.includes(dog.id) ? "checked" : ""} /><span>${esc(dog.name)} <small>${esc(dog.size)}</small></span></label>`).join("")}
+          </div>
+          <small>Si el perro todavía no está en el registro, anotalo en notas y cargá su ficha en «Alta de perro nuevo».</small>
+        </div>
+        ${daysField("cliente", dias)}
+        ${textArea("cliente", "notas", "Notas", { value: draft.notas, hint: "Lo operativo: llaves, portería, horarios. Sin datos de salud ni de pago." })}
+      </div>
+      <datalist id="coord-barrios">${barriosConocidos().map((b) => `<option value="${esc(b)}"></option>`).join("")}</datalist>
+      <div class="coord-actions">
+        ${button(editing ? "Guardar cambios" : "Guardar cliente", `id="coord-cliente-save" data-coord-cliente-save`, "primary", "plus")}
+        ${editing || draft.pedidoId ? button("Cancelar", `data-coord-cliente-cancel`, "ghost") : ""}
+      </div>
+    </form>
+  `;
+  return section({
+    key: "clientes",
+    id: "coord-clientes",
+    iconName: "users",
+    title: "Clientes",
+    intro: "Tutores, sus perros, plan, días y turno. Solo lo ven Juan y coordinación.",
+    badges: clientes.length ? badge(`${activos} ${activos === 1 ? "activo" : "activos"}`, "neutral") : "",
+    body,
+  });
+}
+
+/* ---------- 5. Avisos por barrio ---------- */
+
+function AvisosSection() {
+  const draft = getDraft("aviso");
+  const hoy = hoyAR();
+  const all = getAvisos();
+  const vigentes = all.filter((a) => avisoVigente(a, hoy));
+  const viejos = all.filter((a) => !avisoVigente(a, hoy)).slice(0, 20);
+  const body = `
+    ${feedback("avisos")}
+    <form class="coord-form" data-coord-form="aviso" novalidate>
+      <h3>Cargar un aviso</h3>
+      <div class="coord-grid">
+        ${field("aviso", "barrio", "Barrio", { value: draft.barrio, required: true, attrs: 'list="coord-barrios-aviso" autocomplete="off"' })}
+        ${selectField("aviso", "tipo", "Tipo", AVISO_TIPOS, { value: draft.tipo || AVISO_TIPOS[0] })}
+        ${field("aviso", "vigenteHasta", "Vigente hasta", { value: draft.vigenteHasta || hoy, type: "date", attrs: `min="${hoy}"` })}
+        ${textArea("aviso", "mensaje", "Qué pasa", { value: draft.mensaje, required: true, placeholder: "Ej.: Corte de calle en la entrada principal. Entrar por la puerta 2." })}
+      </div>
+      <datalist id="coord-barrios-aviso">${barriosConocidos().map((b) => `<option value="${esc(b)}"></option>`).join("")}</datalist>
+      <div class="coord-actions">${button("Guardar aviso", `id="coord-aviso-save" data-coord-aviso-save`, "primary", "plus")}</div>
+    </form>
+    <div class="coord-subblock">
+      <h3>Vigentes <span>${vigentes.length}</span></h3>
+      ${vigentes.length ? `<p class="coord-meta">Están arriba, agrupados por barrio.</p>` : `<p class="coord-empty is-small">${loaded.has("avisos") ? "No hay avisos vigentes." : "Cargando…"}</p>`}
+    </div>
+    ${viejos.length ? `
+      <details class="coord-more" ${isOpen("avisosViejos") ? "open" : ""}>
+        <summary data-coord-toggle="avisosViejos">Avisos vencidos (${viejos.length}) ${icon("chevronDown", "coord-icon")}</summary>
+        <ul class="coord-aviso-list">${viejos.map((a) => AvisoCard(a, { history: true })).join("")}</ul>
+      </details>` : ""}
+  `;
+  return section({
+    key: "avisos",
+    id: "coord-avisos",
+    iconName: "mapPin",
+    title: "Avisos por barrio",
+    intro: "Obras, cortes, perros sueltos, clima o seguridad. Los ve todo el equipo.",
+    badges: vigentes.length ? badge(`${vigentes.length} ${vigentes.length === 1 ? "vigente" : "vigentes"}`, "warn") : "",
+    body,
+  });
+}
+
+/* ---------- 6. Pedidos de clientes y evaluaciones ---------- */
+
+function webData(pedido) {
+  const d = pedido.datos || {};
+  const bite = d.mordida && d.mordida !== "No";
+  const perro = [d.edad, d.tamano, d.raza].filter(Boolean).join(" · ");
+  const servicio = [d.tipo, d.horario, d.dias].filter(Boolean).join(" · ");
+  return dataList([
+    ["Perro", perro ? `${d.perro || PENDIENTE} (${perro})` : d.perro || PENDIENTE],
+    ["Mordió o intentó morder", d.mordida, bite ? "alert" : ""],
+    ["Con otros perros", d.perros, d.perros === "No" ? "warn" : ""],
+    ["Energía", d.energia],
+    ["Conducta", d.conducta],
+    ["Responsable", d.responsable],
+    ["Teléfono", d.telefono],
+    ["Zona", [d.zona, d.referencia].filter(Boolean).join(" · ")],
+    ["Quiere", servicio],
+    ["Comentario", d.comentario],
+  ]);
+}
+
+function PedidoCard(pedido, fichaPorPedido, clientePorPedido) {
+  const estado = estadoDe(pedido);
+  const isWeb = pedido.origen === "web";
+  const d = pedido.datos || {};
+  const id = esc(pedido.id);
+  const ficha = fichaPorPedido.get(pedido.id);
+  const cliente = clientePorPedido.get(pedido.id);
+  const moves = {
+    nuevo: button("Empezar", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary") + button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "ghost"),
+    "en-curso": button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "secondary") + button("Volver a nuevo", `data-coord-pedido-move="${id}" data-estado="nuevo"`, "ghost"),
+    resuelto: button("Reabrir", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary"),
+  }[estado];
+  const memKey = `pedido-${pedido.id}`;
+  const showDataOpen = estado !== "resuelto" || openCards.has(memKey);
+  const canFicha = (isWeb || /evaluaci/i.test(pedido.tipo || "")) && !ficha && estado !== "resuelto";
+  const details = isWeb
+    ? estado === "resuelto"
+      ? `<details class="coord-card-more" ${showDataOpen ? "open" : ""}><summary data-coord-mem-toggle="${esc(memKey)}">Ver datos del formulario ${icon("chevronDown", "coord-icon")}</summary>${webData(pedido)}</details>`
+      : webData(pedido)
+    : `<p class="coord-card-dog">${icon("pawPrint", "coord-icon")}${esc(pedidoPerro(pedido) || PENDIENTE)}</p>${pedido.detalle ? `<p>${esc(pedido.detalle)}</p>` : ""}`;
+  const saludo = d.responsable ? `Hola ${d.responsable}` : "Hola";
+  return `
+    <li class="coord-card ${isWeb ? "is-web" : ""}" id="coord-pedido-${id}" tabindex="-1">
+      <div class="coord-card-head">
+        <strong>${esc(isWeb ? d.perro || PENDIENTE : pedido.tipo || "Pedido")}</strong>
+        <small>${isWeb ? esc(pedido.tipo || "Formulario web") : `${esc(fmtDate(pedido.fecha))}${d.canal ? ` · ${esc(d.canal)}` : ""}`}</small>
+      </div>
+      ${isWeb ? `<p class="coord-badges">${badge("Formulario web", "warn")}</p>` : ""}
+      ${details}
+      ${whoLine(pedido, { web: isWeb })}
+      ${ficha ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Ficha creada para ${esc(ficha.perroNombre)}</span></p>` : ""}
+      ${cliente ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Cliente cargado: ${esc(cliente.nombre)}</span></p>` : ""}
+      <div class="coord-actions">
+        ${estado !== "resuelto" && isWeb ? whatsappLinkTo(d.telefono, `${saludo}, te escribo de Paseos Juan por el pedido de evaluación de ${d.perro || "tu perro"}.`, "primary") : ""}
+        ${moves}
+        ${!cliente && (isWeb || d.responsable) ? button("Convertir en cliente", `data-coord-pedido-cliente="${id}"`, "ghost", "userPlus") : ""}
+        ${canFicha ? button("Armar ficha con estos datos", `data-coord-pedido-ficha="${id}"`, "ghost", "fileText") : ""}
+        ${estado === "resuelto" && canDelete(pedido) ? button("Borrar", `data-coord-pedido-delete="${id}"`, "ghost") : ""}
+      </div>
+    </li>
+  `;
+}
+
+function RequestsSection() {
+  const pedidos = getPedidos();
+  const draft = getDraft("pedido");
+  const open = pedidos.filter((p) => estadoDe(p) !== "resuelto").length;
+  const web = webNuevos(pedidos).length;
+  const fichaPorPedido = new Map(getFichas().filter((f) => f.datos?.pedidoId).map((f) => [f.datos.pedidoId, f]));
+  const clientePorPedido = new Map(getClientes().filter((c) => c.pedidoId).map((c) => [c.pedidoId, c]));
+  const isLoading = !loaded.has("pedidos") && !pedidos.length;
+  const body = `
+    ${feedback("pedidos")}
+    <div class="coord-board">
+      ${PEDIDO_COLUMNAS.map(([estado, label]) => {
+        const items = pedidos.filter((p) => estadoDe(p) === estado);
+        if (estado === "nuevo") items.sort((a, b) => Number(b.origen === "web") - Number(a.origen === "web"));
+        return `
+          <section class="coord-column" aria-labelledby="coord-col-${estado}">
+            <h3 id="coord-col-${estado}">${label} <span>${items.length}</span></h3>
+            ${items.length
+              ? `<ul class="coord-card-list">${items.map((p) => PedidoCard(p, fichaPorPedido, clientePorPedido)).join("")}</ul>`
+              : `<p class="coord-empty is-small">${isLoading ? "Cargando…" : estado === "nuevo" ? "Sin pedidos nuevos." : estado === "en-curso" ? "Nada en curso." : "Todavía no hay resueltos."}</p>`}
+          </section>
+        `;
+      }).join("")}
+    </div>
+    <form class="coord-form" data-coord-form="pedido" novalidate>
+      <h3>Cargar un pedido que llegó por otro lado</h3>
+      <div class="coord-grid">
+        ${selectField("pedido", "tipo", "Tipo de pedido", PEDIDO_TIPOS, { value: draft.tipo })}
+        ${field("pedido", "perro", "Perro", { value: draft.perro, placeholder: "Nombre del perro o «perro nuevo»", attrs: 'list="coord-dog-names" autocomplete="off"' })}
+        ${selectField("pedido", "canal", "Llegó por", PEDIDO_CANALES, { value: draft.canal })}
+        ${textArea("pedido", "detalle", "Qué hay que resolver", { value: draft.detalle, hint: "Sin teléfonos ni domicilios: solo lo necesario para resolverlo." })}
+      </div>
+      <datalist id="coord-dog-names">${REAL_DOGS.map((dog) => `<option value="${esc(dog.name)}"></option>`).join("")}</datalist>
+      <div class="coord-actions">${button("Guardar pedido", "data-coord-pedido-save", "primary", "plus")}</div>
+    </form>
+  `;
+  return section({
+    key: "pedidos",
+    id: "coord-pedidos",
+    iconName: "clipboardCheck",
+    title: "Pedidos y evaluaciones",
+    intro: "Los del formulario de la web y los que cargás vos.",
+    badges: `${web ? badge(`${web} ${web === 1 ? "nuevo" : "nuevos"} de la web`, "alert") : ""}${open ? badge(`${open} abiertos`, "warn") : badge("Sin pedidos abiertos", "neutral")}`,
+    body,
+    open: web > 0,
+  });
+}
+
+function draftClienteFromPedido(pedido) {
+  const d = pedido.datos || {};
+  const dog = DOG_BY_NAME.get(normalize(d.perro));
+  return {
+    pedidoId: pedido.id,
+    nombre: d.responsable || "",
+    telefono: d.telefono || "",
+    barrio: [d.zona, d.referencia].filter(Boolean).join(" · "),
+    perros: dog ? [dog.id] : [],
+    plan: PENDIENTE,
+    dias: parseDays(d.dias),
+    turno: ["Mañana", "Tarde"].includes(d.horario) ? d.horario : PENDIENTE,
+    estado: "activo",
+    notas: [`Desde el pedido del ${fmtDate(pedido.fecha)}.`, !dog && d.perro ? `Perro: ${d.perro} (todavía sin ficha en el registro).` : ""].filter(Boolean).join(" "),
+  };
+}
+
+/* ---------- 7. Datos a confirmar ---------- */
 
 function ReviewCard(dog, record) {
-  const who = record ? record.actualizadoPorNombre || record.resueltoPorNombre || record.creadoPorNombre : "";
+  const who = record ? record.actualizadoPorNombre || record.creadoPorNombre : "";
   return `
     <li class="coord-review ${record ? "is-resolved" : ""}" id="coord-dato-${dog.id}" tabindex="-1">
       <div class="coord-review-head">
@@ -1060,207 +2194,37 @@ function ReviewSection() {
   const resolved = getResolved();
   const pending = REVIEW_DOGS.filter((dog) => !resolved[dog.id]);
   const done = REVIEW_DOGS.filter((dog) => resolved[dog.id]);
-  const first = pending.slice(0, 4);
-  const rest = pending.slice(4);
-  const unknown = unknownIncompatibles();
-
-  return `
-    <section class="coord-block" id="coord-datos" tabindex="-1" aria-labelledby="coord-datos-title">
-      <div class="coord-block-head">
-        <div>
-          <h2 id="coord-datos-title">Datos a confirmar</h2>
-          <p>Perros con datos que no coinciden entre planillas o con estado distinto de Activo. Cuando lo confirmes en la planilla, marcalo como resuelto.</p>
-        </div>
-        <div class="coord-progress" aria-label="${done.length} de ${REVIEW_DOGS.length} resueltos">
-          <b>${done.length}/${REVIEW_DOGS.length}</b><span>resueltos</span>
-          <span class="coord-progress-bar" aria-hidden="true"><i style="width:${Math.round((done.length / REVIEW_DOGS.length) * 100)}%"></i></span>
-        </div>
-      </div>
-      ${feedback("datos")}
-      ${pending.length
-        ? `<ul class="coord-review-list">${first.map((dog) => ReviewCard(dog)).join("")}</ul>`
-        : `<p class="coord-empty">${icon("checkCircle", "coord-icon")}No quedan datos por confirmar.</p>`}
-      ${rest.length ? `
-        <details class="coord-more" ${isOpen("datosMas") ? "open" : ""}>
-          <summary data-coord-toggle="datosMas">Ver los otros ${rest.length} pendientes ${icon("chevronDown", "coord-icon")}</summary>
-          <ul class="coord-review-list">${rest.map((dog) => ReviewCard(dog)).join("")}</ul>
-        </details>` : ""}
-      ${done.length ? `
-        <details class="coord-more" ${isOpen("datosResueltos") ? "open" : ""}>
-          <summary data-coord-toggle="datosResueltos">Resueltos (${done.length}) ${icon("chevronDown", "coord-icon")}</summary>
-          <ul class="coord-review-list">${done.map((dog) => ReviewCard(dog, resolved[dog.id])).join("")}</ul>
-        </details>` : ""}
-      ${unknown.length ? `<p class="coord-note">${icon("alertCircle", "coord-icon")}<span>También a confirmar: ${esc(listJoin(unknown))} figura en "no juntar con" pero no está en la lista de perros.</span></p>` : ""}
-      <p class="coord-note">${icon("fileText", "coord-icon")}<span>Lo que marcás como resuelto lo ven Juan y coordinación. El cambio todavía debe incorporarse al ${esc(BUSINESS_INFO.officialSources.dogs.toLowerCase())}.</span></p>
-    </section>
-  `;
-}
-
-/* ---------- 3. Pedidos de clientes y evaluaciones ---------- */
-
-const PEDIDO_TIPOS = ["Consulta", "Evaluación inicial", "Documentación", "Cambio de días o plan", "Ausencia", "Otro"];
-const PEDIDO_CANALES = ["WhatsApp", "Llamada", "En persona", "Otro"];
-const PEDIDO_COLUMNAS = [
-  ["nuevo", "Nuevo"],
-  ["en-curso", "En curso"],
-  ["resuelto", "Resuelto"],
-];
-const ESTADO_LABEL = { nuevo: "Nuevo", "en-curso": "En curso", resuelto: "Resuelto" };
-
-// Teléfono que dejó el tutor → número para WhatsApp (celular de Argentina: 549 + 10 dígitos).
-function whatsappNumber(raw) {
-  let digits = String(raw || "").replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.startsWith("54")) {
-    digits = digits.slice(2);
-    if (digits.startsWith("9")) digits = digits.slice(1);
-  }
-  if (digits.startsWith("0")) digits = digits.slice(1);
-  // Formato local con 15 (ej.: 11 15 xxxx xxxx): se saca el 15 después del código de área.
-  if (digits.length === 12) {
-    const cut = [2, 3, 4].find((at) => digits.slice(at, at + 2) === "15");
-    if (cut) digits = digits.slice(0, cut) + digits.slice(cut + 2);
-  }
-  return digits.length === 10 ? `549${digits}` : "";
-}
-
-function whatsappButton(pedido, variant) {
-  const d = pedido.datos || {};
-  if (!d.telefono) return "";
-  const number = whatsappNumber(d.telefono);
-  if (!number) {
-    return `<p class="coord-inline-alert">${icon("alertCircle", "coord-icon")}<span>Revisá el teléfono: no parece un celular de Argentina. Escribile a mano.</span></p>`;
-  }
-  const saludo = d.responsable ? `Hola ${d.responsable}` : "Hola";
-  const message = `${saludo}, te escribo de Paseos Juan por el pedido de evaluación de ${d.perro || "tu perro"}.`;
-  return `<a class="coord-btn is-${variant}" href="https://wa.me/${number}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer">${icon("message", "coord-icon")}<span>Escribirle por WhatsApp</span><span class="coord-sr-only"> (se abre en otra pestaña)</span></a>`;
-}
-
-function webData(pedido) {
-  const d = pedido.datos || {};
-  const bite = d.mordida && d.mordida !== "No";
-  const perro = [d.edad, d.tamano, d.raza].filter(Boolean).join(" · ");
-  const servicio = [d.tipo, d.horario, d.dias].filter(Boolean).join(" · ");
-  return dataList([
-    ["Perro", perro ? `${d.perro || PENDIENTE} (${perro})` : d.perro || PENDIENTE],
-    ["Mordió o intentó morder", d.mordida, bite ? "alert" : ""],
-    ["Con otros perros", d.perros, d.perros === "No" ? "warn" : ""],
-    ["Energía", d.energia],
-    ["Conducta", d.conducta],
-    ["Responsable", d.responsable],
-    ["Teléfono", d.telefono],
-    ["Zona", [d.zona, d.referencia].filter(Boolean).join(" · ")],
-    ["Quiere", servicio],
-    ["Comentario", d.comentario],
-  ]);
-}
-
-function PedidoCard(pedido, fichaPorPedido) {
-  const estado = estadoDe(pedido);
-  const isWeb = pedido.origen === "web";
-  const d = pedido.datos || {};
-  const id = esc(pedido.id);
-  const ficha = fichaPorPedido.get(pedido.id);
-  const moves = {
-    nuevo: button("Empezar", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary") + button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "ghost"),
-    "en-curso": button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "secondary") + button("Volver a nuevo", `data-coord-pedido-move="${id}" data-estado="nuevo"`, "ghost"),
-    resuelto: button("Reabrir", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary"),
-  }[estado];
-  const memKey = `pedido-${pedido.id}`;
-  const showDataOpen = estado !== "resuelto" || openCards.has(memKey);
-  const canFicha = (isWeb || /evaluaci/i.test(pedido.tipo || "")) && !ficha && estado !== "resuelto";
-
-  const details = isWeb
-    ? estado === "resuelto"
-      ? `<details class="coord-card-more" ${showDataOpen ? "open" : ""}><summary data-coord-mem-toggle="${esc(memKey)}">Ver datos del formulario ${icon("chevronDown", "coord-icon")}</summary>${webData(pedido)}</details>`
-      : webData(pedido)
-    : `
-      <p class="coord-card-dog">${icon("pawPrint", "coord-icon")}${esc(pedidoPerro(pedido) || PENDIENTE)}</p>
-      ${pedido.detalle ? `<p>${esc(pedido.detalle)}</p>` : ""}
-    `;
-
-  return `
-    <li class="coord-card ${isWeb ? "is-web" : ""}" id="coord-pedido-${id}" tabindex="-1">
-      <div class="coord-card-head">
-        <strong>${esc(isWeb ? d.perro || PENDIENTE : pedido.tipo || "Pedido")}</strong>
-        <small>${isWeb ? esc(pedido.tipo || "Formulario web") : `${esc(fmtDate(pedido.fecha))}${d.canal || pedido.canal ? ` · ${esc(d.canal || pedido.canal)}` : ""}`}</small>
-      </div>
-      ${isWeb ? `<p class="coord-badges">${badge("Formulario web", "warn")}</p>` : ""}
-      ${details}
-      ${whoLine(pedido, { web: isWeb })}
-      ${ficha ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Ficha creada para ${esc(ficha.perroNombre)}</span></p>` : ""}
-      <div class="coord-actions">
-        ${estado !== "resuelto" ? whatsappButton(pedido, "primary") : ""}
-        ${moves}
-        ${canFicha ? button("Armar ficha con estos datos", `data-coord-pedido-ficha="${id}"`, "ghost", "userPlus") : ""}
-        ${estado === "resuelto" && canDelete(pedido) ? button("Borrar", `data-coord-pedido-delete="${id}"`, "ghost") : ""}
-      </div>
-    </li>
-  `;
-}
-
-function RequestsSection() {
-  const pedidos = getPedidos();
-  const draft = getDraft("pedido");
-  const open = pedidos.filter((p) => estadoDe(p) !== "resuelto").length;
-  const web = webNuevos(pedidos).length;
-  const dogNames = REAL_DOGS.map((dog) => dog.name);
-  const fichaPorPedido = new Map(getFichas().filter((f) => f.datos?.pedidoId).map((f) => [f.datos.pedidoId, f]));
-  const isLoading = !loaded.has("pedidos") && !pedidos.length;
-
   const body = `
-    ${feedback("pedidos")}
-    <div class="coord-board">
-      ${PEDIDO_COLUMNAS.map(([estado, label]) => {
-        const items = pedidos.filter((p) => estadoDe(p) === estado);
-        // Los pedidos nuevos de la web van primero.
-        if (estado === "nuevo") items.sort((a, b) => Number(b.origen === "web") - Number(a.origen === "web"));
-        return `
-          <section class="coord-column" aria-labelledby="coord-col-${estado}">
-            <h3 id="coord-col-${estado}">${label} <span>${items.length}</span></h3>
-            ${items.length
-              ? `<ul class="coord-card-list">${items.map((p) => PedidoCard(p, fichaPorPedido)).join("")}</ul>`
-              : `<p class="coord-empty is-small">${isLoading ? "Cargando…" : estado === "nuevo" ? "Sin pedidos nuevos." : estado === "en-curso" ? "Nada en curso." : "Todavía no hay resueltos."}</p>`}
-          </section>
-        `;
-      }).join("")}
-    </div>
-
-    <form class="coord-form" data-coord-form="pedido" novalidate>
-      <h3>Cargar un pedido que llegó por otro lado</h3>
-      <div class="coord-grid">
-        ${selectField("pedido", "tipo", "Tipo de pedido", PEDIDO_TIPOS, { value: draft.tipo })}
-        ${field("pedido", "perro", "Perro", { value: draft.perro, placeholder: "Nombre del perro o «perro nuevo»", attrs: 'list="coord-dog-names" autocomplete="off"' })}
-        ${selectField("pedido", "canal", "Llegó por", PEDIDO_CANALES, { value: draft.canal })}
-        ${textArea("pedido", "detalle", "Qué hay que resolver", { value: draft.detalle, hint: "Sin teléfonos ni domicilios: solo lo necesario para resolverlo." })}
-      </div>
-      <datalist id="coord-dog-names">${dogNames.map((name) => `<option value="${esc(name)}"></option>`).join("")}</datalist>
-      <div class="coord-actions">${button("Guardar pedido", "data-coord-pedido-save", "primary", "plus")}</div>
-    </form>
+    <p>Perros con datos que no coinciden entre planillas o con estado distinto de Activo. Cuando lo confirmes en la planilla, marcalo como resuelto.</p>
+    ${feedback("datos")}
+    ${pending.length ? `<ul class="coord-review-list">${pending.map((dog) => ReviewCard(dog)).join("")}</ul>` : `<p class="coord-empty">${icon("checkCircle", "coord-icon")}No quedan datos por confirmar.</p>`}
+    ${done.length ? `
+      <details class="coord-more" ${isOpen("datosResueltos") ? "open" : ""}>
+        <summary data-coord-toggle="datosResueltos">Resueltos (${done.length}) ${icon("chevronDown", "coord-icon")}</summary>
+        <ul class="coord-review-list">${done.map((dog) => ReviewCard(dog, resolved[dog.id])).join("")}</ul>
+      </details>` : ""}
+    <p class="coord-note">${icon("fileText", "coord-icon")}<span>El cambio todavía debe incorporarse al ${esc(BUSINESS_INFO.officialSources.dogs.toLowerCase())}.</span></p>
   `;
-
   return section({
-    key: "pedidos",
-    id: "coord-pedidos",
-    iconName: "clipboardCheck",
-    title: "Pedidos y evaluaciones",
-    intro: "Los del formulario de la web y los que cargás vos. Los ve todo coordinación.",
-    badges: `${web ? badge(`${web} ${web === 1 ? "nuevo" : "nuevos"} de la web`, "alert") : ""}${open ? badge(`${open} abiertos`, "warn") : badge("Sin pedidos abiertos", "neutral")}`,
+    key: "datos",
+    id: "coord-datos",
+    iconName: "help",
+    title: "Datos a confirmar",
+    intro: `${done.length} de ${REVIEW_DOGS.length} resueltos.`,
+    badges: pending.length ? badge(`${pending.length} pendientes`, "warn") : badge("Todo confirmado", "ok"),
     body,
-    open: web > 0,
   });
 }
 
-/* ---------- 4. Alta de perro nuevo ---------- */
+/* ---------- 8. Alta de perro nuevo ---------- */
 
-const SI_NO = ["Pendiente de confirmar", "Sí", "No"];
+const SI_NO = [PENDIENTE, "Sí", "No"];
 
 function IntakeSection() {
   const draft = getDraft("alta");
   const fichas = getFichas();
   const days = Array.isArray(draft.dias) ? draft.dias : [];
-  const planOptions = ["Pendiente de confirmar", ...REAL_PLANS.map((plan) => `${plan.name} (${plan.walks} paseos por semana)`), "Paseo suelto"];
-
+  const planOptions = [PENDIENTE, ...REAL_PLANS.map((plan) => `${plan.name} (${plan.walks} paseos por semana)`), "Paseo suelto"];
   const body = `
     <div class="coord-rule" role="note">
       ${icon("shieldCheck", "coord-icon")}
@@ -1273,10 +2237,10 @@ function IntakeSection() {
         <legend>Identificación</legend>
         <div class="coord-grid">
           ${field("alta", "nombre", "Nombre del perro", { value: draft.nombre, required: true })}
-          ${selectField("alta", "tamano", "Tamaño", ["Pendiente de confirmar", "Pequeño", "Mediano", "Grande"], { value: draft.tamano })}
+          ${selectField("alta", "tamano", "Tamaño", [PENDIENTE, "Pequeño", "Mediano", "Grande"], { value: draft.tamano })}
           ${field("alta", "raza", "Raza o cruza", { value: draft.raza })}
           ${field("alta", "edad", "Edad aproximada", { value: draft.edad })}
-          ${selectField("alta", "sexo", "Sexo", ["Pendiente de confirmar", "Macho", "Hembra"], { value: draft.sexo })}
+          ${selectField("alta", "sexo", "Sexo", [PENDIENTE, "Macho", "Hembra"], { value: draft.sexo })}
           ${selectField("alta", "castrado", "Castrado o castrada", SI_NO, { value: draft.castrado })}
         </div>
       </fieldset>
@@ -1287,7 +2251,7 @@ function IntakeSection() {
           ${field("alta", "tutor", "Nombre del tutor", { value: draft.tutor, attrs: 'autocomplete="off"' })}
           ${field("alta", "contacto", "Contacto del tutor", { value: draft.contacto, type: "tel", attrs: 'autocomplete="off"' })}
           ${field("alta", "emergencia", "Contacto de emergencia", { value: draft.emergencia, attrs: 'autocomplete="off"' })}
-          ${selectField("alta", "zona", "Zona", ["Pendiente de confirmar", "Pilar", "La Lonja", "Otra zona"], { value: draft.zona })}
+          ${selectField("alta", "zona", "Zona", [PENDIENTE, "Pilar", "La Lonja", "Otra zona"], { value: draft.zona })}
           ${field("alta", "referencia", "Barrio o referencia", { value: draft.referencia, attrs: 'autocomplete="off"' })}
         </div>
       </fieldset>
@@ -1295,7 +2259,6 @@ function IntakeSection() {
         <legend>Salud</legend>
         <div class="coord-grid">
           ${selectField("alta", "vacunas", "Vacunas al día", SI_NO, { value: draft.vacunas })}
-          ${fileField("alta", "carnet", "Carnet de vacunas", draft.carnet, "Foto o PDF. Se guarda solo el nombre del archivo.")}
           ${field("alta", "veterinario", "Veterinaria de referencia", { value: draft.veterinario })}
           ${textArea("alta", "salud", "Condiciones, alergias o medicación", { value: draft.salud, hint: "Lo que dice el tutor. Sin diagnósticos propios." })}
         </div>
@@ -1303,7 +2266,7 @@ function IntakeSection() {
       <fieldset>
         <legend>Equipo</legend>
         <div class="coord-grid">
-          ${selectField("alta", "sujecion", "Collar o pechera", ["Pendiente de confirmar", "Collar", "Pechera", "Collar y pechera"], { value: draft.sujecion })}
+          ${selectField("alta", "sujecion", "Collar o pechera", [PENDIENTE, "Collar", "Pechera", "Collar y pechera"], { value: draft.sujecion })}
           ${selectField("alta", "bozal", "Usa bozal", SI_NO, { value: draft.bozal })}
           ${selectField("alta", "correa", "Tiene correa propia", SI_NO, { value: draft.correa })}
         </div>
@@ -1313,7 +2276,7 @@ function IntakeSection() {
         <p class="coord-fieldset-note">Describí lo que se ve: qué pasó antes, qué hizo y qué pasó después. Sin etiquetas.</p>
         <div class="coord-grid">
           ${draft.relatoTutor ? textArea("alta", "relatoTutor", "Lo que contó el tutor en el formulario (no observado)", { value: draft.relatoTutor, attrs: "readonly" }) : ""}
-          ${textArea("alta", "conPerros", "Con otros perros", { value: draft.conPerros, placeholder: "Ej.: se acerca con la cola baja y se aleja si el otro ladra", span: false })}
+          ${textArea("alta", "conPerros", "Con otros perros", { value: draft.conPerros, span: false })}
           ${textArea("alta", "conPersonas", "Con personas", { value: draft.conPersonas, span: false })}
           ${textArea("alta", "estimulos", "Situaciones que lo alteran", { value: draft.estimulos, placeholder: "Ej.: motos, bicicletas, ruidos fuertes", span: false })}
           ${field("alta", "noJuntar", "No juntar con", { value: draft.noJuntar, attrs: 'list="coord-dog-names" autocomplete="off"' })}
@@ -1322,24 +2285,9 @@ function IntakeSection() {
       <fieldset>
         <legend>Servicio</legend>
         <div class="coord-grid">
-          ${selectField("alta", "plan", "Plan pedido", planOptions, { value: draft.plan, hint: "Precios oficiales en la tabla de planes." })}
-          ${selectField("alta", "turno", "Turno", ["Pendiente de confirmar", "Mañana", "Tarde"], { value: draft.turno })}
-          <div class="coord-field is-wide">
-            <span class="coord-label" id="coord-alta-dias-label">Días pedidos</span>
-            <div class="coord-days" role="group" aria-labelledby="coord-alta-dias-label">
-              ${SERVICE_DAYS.map((day) => `
-                <label class="coord-day"><input type="checkbox" name="dias" value="${day}" ${days.includes(day) ? "checked" : ""} /><span>${day}</span></label>
-              `).join("")}
-            </div>
-          </div>
-          <div class="coord-field">
-            <span class="coord-label">Categoría</span>
-            <p class="coord-fixed">${badge("SIN EVALUAR", "neutral")}</p>
-          </div>
-          <div class="coord-field">
-            <span class="coord-label">Primer paseo</span>
-            <p class="coord-fixed">${badge("Individual", "neutral")}</p>
-          </div>
+          ${selectField("alta", "plan", "Plan pedido", planOptions, { value: draft.plan })}
+          ${selectField("alta", "turno", "Turno", [PENDIENTE, "Mañana", "Tarde"], { value: draft.turno })}
+          ${daysField("alta", days)}
         </div>
       </fieldset>
       <div class="coord-actions">
@@ -1347,7 +2295,6 @@ function IntakeSection() {
         ${button("Vaciar formulario", "data-coord-alta-clear", "ghost")}
       </div>
     </form>
-
     <div class="coord-subblock">
       <h3>Fichas cargadas <span>${fichas.length}</span></h3>
       ${fichas.length ? `
@@ -1361,26 +2308,18 @@ function IntakeSection() {
                 <strong>${esc(ficha.perroNombre || a.nombre || PENDIENTE)}</strong>
                 <small>Alta ${esc(fmtDate(ficha.fecha))}</small>
               </div>
-              <p class="coord-badges">${badge(esc(ficha.categoria || "SIN EVALUAR"), "neutral")} ${badge("Primer paseo individual", "warn")} ${ficha.estado === "borrador" ? badge("Borrador", "neutral") : ""}</p>
-              <p>${esc(!a.tamano || a.tamano === PENDIENTE ? "Tamaño pendiente" : a.tamano)} · Plan: ${esc(!a.plan || a.plan === PENDIENTE ? "pendiente" : a.plan)} · Días: ${dias.length ? esc(daysLabel(dias).toLowerCase()) : "pendientes"} · Turno: ${esc(!a.turno || a.turno === PENDIENTE ? "pendiente" : a.turno.toLowerCase())}</p>
-              ${a.bozal === "Sí" || a.noJuntar ? `<ul class="coord-safety">
-                ${a.bozal === "Sí" ? `<li class="is-alert">${icon("alertTriangle", "coord-icon")}Usa bozal</li>` : ""}
-                ${a.noJuntar ? `<li class="is-alert">${icon("alertTriangle", "coord-icon")}No juntar con ${esc(a.noJuntar)}</li>` : ""}
-              </ul>` : ""}
+              <p class="coord-badges">${badge(esc(ficha.categoria || "SIN EVALUAR"), "neutral")} ${badge("Primer paseo individual", "warn")}</p>
+              <p>${esc(!a.tamano || a.tamano === PENDIENTE ? "Tamaño pendiente" : a.tamano)} · Días: ${dias.length ? esc(daysLabel(dias).toLowerCase()) : "pendientes"} · Turno: ${esc(!a.turno || a.turno === PENDIENTE ? "pendiente" : a.turno.toLowerCase())}</p>
               ${whoLine(ficha)}
               <div class="coord-actions">
                 ${button("Copiar ficha", `data-coord-alta-copy="${esc(ficha.id)}"`, "ghost", "copy")}
                 ${canDelete(ficha) ? button("Borrar", `data-coord-alta-delete="${esc(ficha.id)}"`, "ghost") : ""}
               </div>
-            </li>
-          `;
+            </li>`;
           }).join("")}
-        </ul>
-        <p class="coord-note">${icon("fileText", "coord-icon")}<span>Estas fichas todavía deben incorporarse al ${esc(BUSINESS_INFO.officialSources.dogs.toLowerCase())}.</span></p>
-      ` : `<p class="coord-empty is-small">${loaded.has("fichas") ? "Todavía no hay perros nuevos cargados." : "Cargando fichas…"}</p>`}
+        </ul>` : `<p class="coord-empty is-small">${loaded.has("fichas") ? "Todavía no hay perros nuevos cargados." : "Cargando fichas…"}</p>`}
     </div>
   `;
-
   return section({
     key: "alta",
     id: "coord-alta",
@@ -1400,7 +2339,7 @@ function altaText(ficha) {
     `Categoría: ${ficha.categoria || "SIN EVALUAR"}. Primer paseo: individual.`,
     `Identificación: ${v(a.tamano)}; raza o cruza: ${v(a.raza)}; edad: ${v(a.edad)}; sexo: ${v(a.sexo)}; castrado/a: ${v(a.castrado)}.`,
     `Tutor: ${v(a.tutor)}; contacto: ${v(a.contacto)}; emergencia: ${v(a.emergencia)}; zona: ${v(a.zona)}${a.referencia ? ` (${a.referencia})` : ""}.`,
-    `Salud: vacunas al día: ${v(a.vacunas)}; carnet: ${v(a.carnet)}; veterinaria: ${v(a.veterinario)}; observaciones: ${v(a.salud)}.`,
+    `Salud: vacunas al día: ${v(a.vacunas)}; veterinaria: ${v(a.veterinario)}; observaciones: ${v(a.salud)}.`,
     `Equipo: ${v(a.sujecion)}; bozal: ${v(a.bozal)}; correa propia: ${v(a.correa)}.`,
     a.relatoTutor ? `Lo que contó el tutor (no observado): ${a.relatoTutor.replace(/\n/g, "; ")}.` : "",
     `Con otros perros: ${v(a.conPerros)}. Con personas: ${v(a.conPersonas)}. Lo alteran: ${v(a.estimulos)}. No juntar con: ${a.noJuntar || "Sin indicación"}.`,
@@ -1408,20 +2347,6 @@ function altaText(ficha) {
   ].filter(Boolean).join("\n");
 }
 
-// Días escritos por el tutor ("lunes, miércoles y viernes" o "lunes a viernes").
-function parseDays(text) {
-  const t = normalize(text);
-  const names = SERVICE_DAYS.map(normalize);
-  const range = /(lunes|martes|miercoles|jueves|viernes|sabado)\s+(?:a|al|hasta)\s+(?:el\s+)?(lunes|martes|miercoles|jueves|viernes|sabado)/.exec(t);
-  if (range) {
-    const from = names.indexOf(range[1]);
-    const to = names.indexOf(range[2]);
-    if (from >= 0 && to >= from) return SERVICE_DAYS.slice(from, to + 1);
-  }
-  return SERVICE_DAYS.filter((day, index) => t.includes(names[index]));
-}
-
-// Completa el formulario de alta con lo que dejó el tutor en el pedido web.
 function draftFromPedido(pedido) {
   const d = pedido.datos || {};
   const zona = ["Pilar", "La Lonja"].find((z) => normalize(d.zona) === normalize(z));
@@ -1448,12 +2373,12 @@ function draftFromPedido(pedido) {
   };
 }
 
-/* ---------- 5. Observaciones e incidentes recientes (solo lectura) ---------- */
+/* ---------- 9. Observaciones e incidentes (solo lectura) ---------- */
 
 function dogNameFor(record) {
   if (record.perroNombre) return record.perroNombre;
   const ids = Array.isArray(record.perros) ? record.perros : record.perroId ? [record.perroId] : [];
-  const names = ids.map((id) => REAL_DOGS.find((dog) => dog.id === id)?.name || id);
+  const names = ids.map((id) => DOG_BY_ID.get(id)?.name || id);
   return names.length ? listJoin(names) : "";
 }
 
@@ -1466,24 +2391,8 @@ function ActivityItem(record, kind) {
   const title = record.titulo || (kind === "incidente" ? "Incidente" : "Observación");
   const riesgo = record.riesgo ? String(record.riesgo) : "";
   const rows = kind === "incidente"
-    ? [
-        ["Perro", dog],
-        ["Lugar", record.lugar],
-        ["Antes", record.antes],
-        ["Conducta", record.conducta],
-        ["Acción", record.accion],
-        ["Después", record.despues],
-        ["Lesiones", record.lesiones, record.lesiones && !/^no/i.test(record.lesiones) ? "alert" : ""],
-        ["Protocolo", record.protocolo],
-      ]
-    : [
-        ["Perro", dog],
-        ["Lugar", record.lugar],
-        ["Estímulo", record.estimulo],
-        ["Reacción", record.reaccion],
-        ["Acción", record.accion],
-        ["Resultado", record.resultado],
-      ];
+    ? [["Perro", dog], ["Lugar", record.lugar], ["Barrio", record.barrio], ["Antes", record.antes], ["Conducta", record.conducta], ["Acción", record.accion], ["Después", record.despues], ["Lesiones", record.lesiones, record.lesiones && !/^no/i.test(record.lesiones) ? "alert" : ""], ["Protocolo", record.protocolo]]
+    : [["Perro", dog], ["Lugar", record.lugar], ["Estímulo", record.estimulo], ["Reacción", record.reaccion], ["Acción", record.accion], ["Resultado", record.resultado]];
   return `
     <li class="coord-card coord-feed-item ${kind === "incidente" ? "is-incident" : ""}">
       <div class="coord-card-head">
@@ -1498,28 +2407,22 @@ function ActivityItem(record, kind) {
 }
 
 function ActivitySection() {
-  const incidentes = cached("incidentes").filter((r) => !r.fecha || r.fecha >= desde7()).sort(byMoment);
-  const observaciones = cached("observaciones").filter((r) => !r.fecha || r.fecha >= desde7()).sort(byMoment);
-  const loading = (col) => !loaded.has(col);
-
+  const desde = haceDias(6);
+  const incidentes = cached("incidentes").filter((r) => !r.fecha || r.fecha >= desde).sort(byMoment);
+  const observaciones = cached("observaciones").filter((r) => !r.fecha || r.fecha >= desde).sort(byMoment);
   const body = `
-    <p class="coord-note">${icon("eye", "coord-icon")}<span>Solo lectura. Las cargan los paseadores y supervisión. Se muestran los últimos 7 días (desde el ${esc(fmtDate(desde7()))}).</span></p>
+    <p class="coord-note">${icon("eye", "coord-icon")}<span>Solo lectura. Las cargan los paseadores y supervisión. Últimos 7 días (desde el ${esc(fmtDate(desde))}).</span></p>
     <div class="coord-feed">
       <section class="coord-subblock" aria-labelledby="coord-feed-inc">
         <h3 id="coord-feed-inc">Incidentes <span>${incidentes.length}</span></h3>
-        ${incidentes.length
-          ? `<ul class="coord-card-list">${incidentes.map((r) => ActivityItem(r, "incidente")).join("")}</ul>`
-          : `<p class="coord-empty is-small">${loading("incidentes") ? "Cargando…" : "Sin incidentes en los últimos 7 días."}</p>`}
+        ${incidentes.length ? `<ul class="coord-card-list">${incidentes.map((r) => ActivityItem(r, "incidente")).join("")}</ul>` : `<p class="coord-empty is-small">${loaded.has("incidentes") ? "Sin incidentes en los últimos 7 días." : "Cargando…"}</p>`}
       </section>
       <section class="coord-subblock" aria-labelledby="coord-feed-obs">
         <h3 id="coord-feed-obs">Observaciones <span>${observaciones.length}</span></h3>
-        ${observaciones.length
-          ? `<ul class="coord-card-list">${observaciones.map((r) => ActivityItem(r, "observacion")).join("")}</ul>`
-          : `<p class="coord-empty is-small">${loading("observaciones") ? "Cargando…" : "Sin observaciones en los últimos 7 días."}</p>`}
+        ${observaciones.length ? `<ul class="coord-card-list">${observaciones.map((r) => ActivityItem(r, "observacion")).join("")}</ul>` : `<p class="coord-empty is-small">${loaded.has("observaciones") ? "Sin observaciones en los últimos 7 días." : "Cargando…"}</p>`}
       </section>
     </div>
   `;
-
   return section({
     key: "actividad",
     id: "coord-actividad",
@@ -1527,125 +2430,6 @@ function ActivitySection() {
     title: "Observaciones e incidentes",
     intro: "Lo que registró el equipo en la calle en los últimos 7 días.",
     badges: `${incidentes.length ? badge(`${incidentes.length} ${incidentes.length === 1 ? "incidente" : "incidentes"}`, "alert") : ""}${observaciones.length ? badge(`${observaciones.length} ${observaciones.length === 1 ? "observación" : "observaciones"}`, "neutral") : ""}`,
-    body,
-  });
-}
-
-/* ---------- 6. Carga por día y turno ---------- */
-
-function LoadSection() {
-  const load = weeklyLoad();
-  const today = todayName(argentinaNow());
-  const max = Math.max(...load.map((row) => row.total), 1);
-  const busiest = load.filter((row) => row.total === max).map((row) => row.day);
-  const conflicts = weeklyConflicts();
-  const doubleShift = ACTIVE_DOGS.filter((dog) => SERVICE_DAYS.some((day) => SHIFT_LABELS.every((shift) => goesOn(dog, day, shift)))).map((dog) => dog.name);
-  const notCounted = REAL_DOGS.filter((dog) => dog.status !== "Activo").map((dog) => `${dog.name} (${dog.status.toLowerCase()})`);
-
-  const body = `
-    ${conflicts.length ? `
-      <div class="coord-alert-box" role="note">
-        <h3>${icon("alertTriangle", "coord-icon")}Perros que no se pueden juntar y comparten turno</h3>
-        <ul>${conflicts.map((c) => `<li><b>${esc(c.pair)}</b> · ${esc(c.detail)}</li>`).join("")}</ul>
-        <p>Según ${esc(BUSINESS_INFO.officialSources.routes)}. Revisá que no vayan en el mismo grupo.</p>
-      </div>` : ""}
-    <div class="coord-table-wrap">
-      <table class="coord-table">
-        <caption>Perros activos por día y turno (rutas del ${DATA_UPDATED}). Día con más carga: ${esc(listJoin(busiest.map((d) => d.toLowerCase())))}, ${max} paseos.</caption>
-        <thead>
-          <tr><th scope="col">Día</th><th scope="col">Mañana</th><th scope="col">Tarde</th><th scope="col">Total</th><th scope="col">Bozal</th></tr>
-        </thead>
-        <tbody>
-          ${load.map((row) => `
-            <tr class="${row.day === today ? "is-today" : ""} ${row.total === max ? "is-max" : ""}">
-              <th scope="row"><span class="coord-day-name">${row.day}</span>${row.day === today ? '<span class="coord-tag">Hoy</span>' : ""}</th>
-              <td>${row.manana}</td>
-              <td>${row.tarde}</td>
-              <td><span class="coord-total"><b>${row.total}</b><span class="coord-bar" aria-hidden="true"><i style="width:${Math.round((row.total / max) * 100)}%"></i></span></span></td>
-              <td><span class="coord-cell-alerts">${row.muzzle.length}${row.conflicts ? `<span class="coord-tag is-alert">${icon("alertTriangle", "coord-icon")}${row.conflicts}<span class="coord-sr-only"> ${row.conflicts === 1 ? "cruce" : "cruces"} a revisar</span></span>` : ""}</span></td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-    <ul class="coord-notes">
-      <li>Bozal: perros con bozal ese día. El ícono de alerta marca cuántos cruces de "no juntar" hay ese día.</li>
-      <li>Domingo: sin rutas cargadas.</li>
-      ${doubleShift.length ? `<li>${esc(listJoin(doubleShift))} ${doubleShift.length === 1 ? "sale" : "salen"} en los dos turnos el mismo día y cuenta${doubleShift.length === 1 ? "" : "n"} en ambos.</li>` : ""}
-      ${notCounted.length ? `<li>No se cuentan: ${esc(listJoin(notCounted))}.</li>` : ""}
-    </ul>
-  `;
-
-  return section({
-    key: "carga",
-    id: "coord-carga",
-    iconName: "chart",
-    title: "Carga por día y turno",
-    intro: "Calculada con las rutas reales. Incluye bozales y cruces a revisar.",
-    badges: conflicts.length ? badge(`${conflicts.length} ${conflicts.length === 1 ? "cruce" : "cruces"} a revisar`, "alert") : "",
-    body,
-  });
-}
-
-/* ---------- 7. Pagos (registro de apoyo compartido) ---------- */
-
-function PaymentsSection() {
-  const pagos = getPagos();
-  const draft = getDraft("pago");
-  const sinPasar = pagos.filter((p) => !p.pasadoAlLibro).length;
-  const dogOptions = ["Elegí un perro", ...ACTIVE_DOGS.map((dog) => dog.name).sort((a, b) => a.localeCompare(b, "es")), "Otro (anotalo en la nota)"];
-
-  const body = `
-    <div class="coord-rule is-info" role="note">
-      ${icon("fileText", "coord-icon")}
-      <p><b>Fuente oficial:</b> el ${esc(BUSINESS_INFO.officialSources.money)} y la hoja Cobranza semanal. Esto es solo un registro de apoyo para no olvidarte de pasar un pago. No anotes alias ni datos bancarios: el detalle de pago se envía por WhatsApp.</p>
-    </div>
-    ${feedback("pagos")}
-    <form class="coord-form" data-coord-form="pago" novalidate>
-      <h3>Anotar un pago recibido</h3>
-      <div class="coord-grid">
-        ${selectField("pago", "perro", "Perro", dogOptions, { value: draft.perro, required: true })}
-        ${field("pago", "monto", "Monto recibido", { value: draft.monto, required: true, attrs: 'inputmode="numeric" autocomplete="off"', hint: "El que figura en el comprobante. Solo números." })}
-        ${selectField("pago", "medio", "Medio de pago", ["Transferencia", "Efectivo", "Otro"], { value: draft.medio })}
-        ${field("pago", "fecha", "Fecha del pago", { value: draft.fecha || todayDMY(), placeholder: "DD/MM/AAAA", attrs: 'inputmode="numeric"', hint: "Formato DD/MM/AAAA." })}
-        ${fileField("pago", "comprobante", "Comprobante", draft.comprobante, "Foto o PDF. Se guarda solo el nombre del archivo.")}
-        ${field("pago", "nota", "Nota", { value: draft.nota, placeholder: "Opcional" })}
-      </div>
-      <div class="coord-actions">${button("Guardar registro", "data-coord-pago-save", "primary", "plus")}</div>
-    </form>
-
-    <div class="coord-subblock">
-      <h3>Pagos anotados <span>${pagos.length}</span></h3>
-      ${pagos.length ? `
-        <ul class="coord-pay-list">
-          ${pagos.map((pago) => `
-            <li class="coord-pay ${pago.pasadoAlLibro ? "is-done" : ""}">
-              <div class="coord-pay-main">
-                <strong>${esc(pago.perroNombre || pago.concepto || PENDIENTE)}</strong>
-                <span>${esc(Number.isFinite(Number(pago.monto)) && pago.monto !== "" ? formatPeso(pago.monto) : PENDIENTE)} · ${esc(pago.medio || PENDIENTE)} · ${esc(fmtDate(pago.fecha))}</span>
-                ${pago.comprobante ? `<small>Comprobante: ${esc(pago.comprobante)}</small>` : `<small>Sin comprobante</small>`}
-                ${pago.nota ? `<small>${esc(pago.nota)}</small>` : ""}
-                ${whoLine(pago)}
-              </div>
-              ${pago.pasadoAlLibro ? badge("Pasado al Libro contable", "ok") : badge("Falta pasar al Libro contable", "warn")}
-              <div class="coord-actions">
-                ${button(pago.pasadoAlLibro ? "Marcar como no pasado" : "Ya lo pasé al Libro", `data-coord-pago-libro="${esc(pago.id)}"`, pago.pasadoAlLibro ? "ghost" : "secondary", pago.pasadoAlLibro ? "" : "checkCircle")}
-                ${canDelete(pago) ? button("Borrar", `data-coord-pago-delete="${esc(pago.id)}"`, "ghost") : ""}
-              </div>
-            </li>
-          `).join("")}
-        </ul>
-      ` : `<p class="coord-empty is-small">${loaded.has("pagos") ? "No hay pagos anotados." : "Cargando pagos…"}</p>`}
-    </div>
-  `;
-
-  return section({
-    key: "pagos",
-    id: "coord-pagos",
-    iconName: "wallet",
-    title: "Pagos",
-    intro: "Registro de apoyo compartido con Juan. La fuente oficial es el Libro contable.",
-    badges: sinPasar ? badge(`${sinPasar} sin pasar al Libro`, "warn") : "",
     body,
   });
 }
@@ -1660,31 +2444,99 @@ function openAndGo(key, id, focusSelector) {
   goTo(id, focusSelector);
 }
 
-function copyText(text) {
+async function copyText(text) {
   try {
-    const result = navigator.clipboard?.writeText(text);
-    result?.catch?.(() => {});
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
   } catch {
-    // Sin portapapeles: no hacemos nada.
+    // Se intenta de la otra forma.
   }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function copyAndTell(text, sectionKey, okText) {
+  copyText(text).then((ok) => {
+    setFlash(sectionKey, ok ? okText : "No se pudo copiar. Probá de nuevo o copialo a mano.", ok ? "ok" : "error");
+    scheduleRerender();
+  });
 }
 
 function findIn(list, id) {
   return list.find((item) => item.id === id);
 }
 
+function showRoutesDay(fecha) {
+  rutasFecha = fecha;
+  setRutasVista("dia");
+  render();
+  goTo("coord-rutas");
+}
+
+async function saveEditor(destino) {
+  const error = editorError();
+  if (error) {
+    setFlash("editor", error[0], "error");
+    render();
+    focusById(error[1]);
+    return;
+  }
+  const record = routeRecordFromEditor();
+  const e = editor;
+  let saved;
+  if (destino === "plantilla") {
+    saved = await guardar("plantillas", { id: plantillaId(record.ruta, record.dia), ...record }, { section: "rutas", ok: `${record.ruta} del ${record.dia.toLowerCase()} guardada en la semana. Se repite todas las semanas.` });
+  } else {
+    const fecha = e.modo === "plantilla" ? e.soloDia : e.fecha;
+    if (!isISODate(fecha)) {
+      setFlash("editor", "Elegí el día.", "error");
+      render();
+      return;
+    }
+    saved = await guardar("rutas", { id: rutaDiaId(fecha, record.ruta), fecha, ...record, dia: dayNameISO(fecha), basadaEn: e.plantillaId || "" }, { section: "rutas", ok: `${record.ruta}: cambio guardado solo para el ${dayLabel(fecha).toLowerCase()}. La semana no cambió.` });
+    if (saved && e.solicitudId) {
+      const sol = getSolicitudes().find((s) => s.id === e.solicitudId);
+      // `solicitudes` es por fecha: el servidor pide la fecha también al actualizar.
+      await guardar("solicitudes", { id: e.solicitudId, fecha: isISODate(sol?.fecha) ? sol.fecha : fecha, estado: "aplicado", respuesta: e.respuesta.trim() || `Aplicado en la ruta ${record.ruta} del ${fmtDate(fecha)}.` }, { section: "rutas", ok: `Cambio aplicado y pedido del supervisor marcado como aplicado.` });
+    }
+    if (saved) {
+      rutasFecha = fecha;
+      setRutasVista("dia");
+    }
+  }
+  if (saved && editor === e) {
+    closeEditor();
+    render();
+    goTo("coord-rutas");
+  }
+}
+
 function handleCoordinadorClick(event) {
   if (!event.target.closest(".coord-shell")) return false;
+  const t = event.target;
 
-  // Abrir o cerrar una sección plegable: se recuerda en este dispositivo.
-  const toggle = event.target.closest("[data-coord-toggle]");
+  const toggle = t.closest("[data-coord-toggle]");
   if (toggle) {
     const details = toggle.parentElement;
     setOpen(toggle.dataset.coordToggle, !details.open);
     return true;
   }
 
-  const memToggle = event.target.closest("[data-coord-mem-toggle]");
+  const memToggle = t.closest("[data-coord-mem-toggle]");
   if (memToggle) {
     const key = memToggle.dataset.coordMemToggle;
     if (memToggle.parentElement.open) openCards.delete(key);
@@ -1692,46 +2544,34 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
-  if (event.target.closest("[data-coord-retry]")) {
+  if (t.closest("[data-coord-retry]")) {
     retrySync();
     migrationDone = false;
     announce("Volviendo a pedir los datos.");
     return true;
   }
 
-  const goto = event.target.closest("[data-coord-goto]");
+  const goto = t.closest("[data-coord-goto]");
   if (goto) {
     goTo(goto.dataset.coordGoto);
     return true;
   }
 
-  const gotoDog = event.target.closest("[data-coord-goto-dog]");
-  if (gotoDog) {
-    const id = gotoDog.dataset.coordGotoDog;
-    const indexInPending = pendingReview().findIndex((dog) => dog.id === id);
-    if (indexInPending >= 4) {
-      setOpen("datosMas", true);
-      render();
-    }
-    goTo(`coord-dato-${id}`);
-    return true;
-  }
-
-  const gotoPedido = event.target.closest("[data-coord-goto-pedido]");
+  const gotoPedido = t.closest("[data-coord-goto-pedido]");
   if (gotoPedido) {
     openAndGo("pedidos", `coord-pedido-${gotoPedido.dataset.coordGotoPedido}`);
     return true;
   }
 
-  const openSection = event.target.closest("[data-coord-open]");
+  const openSection = t.closest("[data-coord-open]");
   if (openSection) {
     const key = openSection.dataset.coordOpen;
-    const focus = key === "pedidos" && !getPedidos().length ? "#coord-pedido-tipo" : null;
+    const focus = { avisos: "#coord-aviso-barrio", clientes: "#coord-clientes-buscar" }[key] || null;
     openAndGo(key, `coord-${key}`, focus);
     return true;
   }
 
-  const undo = event.target.closest("[data-coord-undo]");
+  const undo = t.closest("[data-coord-undo]");
   if (undo) {
     const deleted = lastDeleted;
     lastDeleted = null;
@@ -1742,55 +2582,426 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
-  // Datos a confirmar
-  const resolve = event.target.closest("[data-coord-resolve]");
-  if (resolve) {
-    const id = resolve.dataset.coordResolve;
-    const dog = REAL_DOGS.find((d) => d.id === id);
-    run(`resuelto-${id}`, async () => {
-      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` });
-      if (saved) goTo("coord-datos");
+  /* ---------- Rutas ---------- */
+
+  const vista = t.closest("[data-coord-vista]");
+  if (vista) {
+    setRutasVista(vista.dataset.coordVista);
+    render();
+    focusById(`coord-vista-${vista.dataset.coordVista}`);
+    return true;
+  }
+
+  const verDia = t.closest("[data-coord-ver-dia]");
+  if (verDia) {
+    if (editor) {
+      goTo("coord-rutas");
+      return true;
+    }
+    showRoutesDay(verDia.dataset.coordVerDia);
+    return true;
+  }
+
+  if (t.closest("[data-coord-carga]")) {
+    cargaConfirm = true;
+    render();
+    focusById("coord-carga-ok");
+    return true;
+  }
+
+  if (t.closest("[data-coord-carga-cancel]")) {
+    cargaConfirm = false;
+    render();
+    focusById("coord-carga");
+    return true;
+  }
+
+  if (t.closest("[data-coord-carga-ok]")) {
+    run("carga", async () => {
+      const base = plantillasDesdePlanilla();
+      let ok = 0;
+      let pend = 0;
+      let lastError = "";
+      for (const p of base) {
+        cargaProgreso = `Guardando ${ok + 1} de ${base.length}…`;
+        scheduleRerender();
+        try {
+          const result = await registros.save("plantillas", p);
+          ok += 1;
+          if (result.pendiente) pend += 1;
+        } catch (error) {
+          lastError = error.message;
+        }
+      }
+      cargaConfirm = false;
+      cargaProgreso = "";
+      if (lastError) setFlash("rutas", `Se guardaron ${ok} de ${base.length} rutas. Error: ${lastError}`, "error");
+      else setFlash("rutas", `Listo: ${ok} rutas cargadas en la semana.${pend ? " Sin señal: se envían cuando vuelva." : ""}`);
+      setRutasVista("semana");
+      scheduleRerender();
     });
     return true;
   }
 
-  const unresolve = event.target.closest("[data-coord-unresolve]");
+  const editPlantilla = t.closest("[data-coord-edit-plantilla]");
+  if (editPlantilla) {
+    const p = findIn(getPlantillas(), editPlantilla.dataset.coordEditPlantilla);
+    if (p) {
+      openEditor(p, { modo: "plantilla" });
+      render();
+      goTo("coord-editor");
+    }
+    return true;
+  }
+
+  const newRoute = t.closest("[data-coord-new-route]");
+  if (newRoute) {
+    const { dia, turno } = newRoute.dataset;
+    openEditor({ ruta: nextRouteCode(plantillasDe(dia), turno), dia, turno, paradas: [], supervisor: "" }, { modo: "plantilla", nuevo: true });
+    render();
+    goTo("coord-editor", "#coord-ed-ruta");
+    return true;
+  }
+
+  const editDia = t.closest("[data-coord-edit-dia]");
+  if (editDia) {
+    const fecha = editDia.dataset.fecha;
+    const r = effectiveRoutes(fecha).find((x) => x.ruta === editDia.dataset.coordEditDia);
+    if (r) {
+      openEditor(r, { modo: "dia", fecha });
+      render();
+      goTo("coord-editor");
+    }
+    return true;
+  }
+
+  const newDia = t.closest("[data-coord-new-dia]");
+  if (newDia) {
+    const { fecha, turno } = newDia.dataset;
+    openEditor({ ruta: nextRouteCode(effectiveRoutes(fecha), turno), dia: dayNameISO(fecha), turno, paradas: [] }, { modo: "dia", fecha, nuevo: true });
+    render();
+    goTo("coord-editor", "#coord-ed-ruta");
+    return true;
+  }
+
+  const copyRuta = t.closest("[data-coord-copy-ruta]");
+  if (copyRuta) {
+    const fecha = copyRuta.dataset.fecha;
+    const r = effectiveRoutes(fecha).find((x) => x.ruta === copyRuta.dataset.coordCopyRuta);
+    if (r) copyAndTell(routeText(r, { fecha }), "rutas", `${r.ruta} copiada. Pegala en el grupo de WhatsApp del equipo.`);
+    return true;
+  }
+
+  const copyDia = t.closest("[data-coord-copy-dia]");
+  if (copyDia) {
+    const fecha = copyDia.dataset.coordCopyDia;
+    const text = effectiveRoutes(fecha).map((r) => routeText(r, { fecha })).join("\n\n");
+    copyAndTell(text, "rutas", `Rutas del ${dayLabel(fecha).toLowerCase()} copiadas.`);
+    return true;
+  }
+
+  // Editor
+  if (editor) {
+    const addDog = t.closest("[data-coord-add-dog]");
+    if (addDog) {
+      const dog = DOG_BY_ID.get(addDog.dataset.coordAddDog);
+      if (dog) {
+        addStop(dog);
+        announce(`${dog.name} agregado a las ${editor.paradas[editor.paradas.length - 1].hora}.`);
+        render();
+        focusById("coord-ed-buscar");
+      }
+      return true;
+    }
+    if (t.closest("[data-coord-add-libre]")) {
+      const nombre = editorQuery.trim();
+      if (nombre) {
+        addStop(null, nombre);
+        announce(`${nombre} agregado como perro sin ficha.`);
+        render();
+        focusById("coord-ed-buscar");
+      }
+      return true;
+    }
+    const up = t.closest("[data-coord-stop-up]");
+    const down = t.closest("[data-coord-stop-down]");
+    if (up || down) {
+      const i = Number((up || down).dataset[up ? "coordStopUp" : "coordStopDown"]);
+      const j = up ? i - 1 : i + 1;
+      if (j >= 0 && j < editor.paradas.length) {
+        [editor.paradas[i], editor.paradas[j]] = [editor.paradas[j], editor.paradas[i]];
+        editor.sucio = true;
+        render();
+        const target = document.getElementById(`coord-ed-${up ? "up" : "down"}-${j}`);
+        focusById(target && !target.disabled ? target.id : `coord-ed-hora-${j}`);
+        announce(`${editor.paradas[j].perroNombre} ahora es la parada ${j + 1}.`);
+      }
+      return true;
+    }
+    const del = t.closest("[data-coord-stop-del]");
+    if (del) {
+      const i = Number(del.dataset.coordStopDel);
+      const [removed] = editor.paradas.splice(i, 1);
+      editor.sucio = true;
+      announce(`${removed?.perroNombre || "Perro"} quitado de la ruta.`);
+      render();
+      focusById(editor.paradas.length ? `coord-ed-hora-${Math.min(i, editor.paradas.length - 1)}` : "coord-ed-buscar");
+      return true;
+    }
+    if (t.closest("[data-coord-ed-sort]")) {
+      sortStops();
+      announce("Paradas ordenadas por hora.");
+      render();
+      focusById("coord-ed-sort");
+      return true;
+    }
+    const save = t.closest("[data-coord-ed-save]");
+    if (save) {
+      run("editor-save", () => saveEditor(save.dataset.coordEdSave));
+      return true;
+    }
+    if (t.closest("[data-coord-ed-revert]")) {
+      const record = editor.existeDia;
+      run("editor-revert", async () => {
+        const ok = await borrar("rutas", record, { section: "rutas", ok: `${record.ruta} del ${fmtDate(record.fecha)} vuelve a ser igual que la semana.`, undo: false });
+        if (ok) {
+          closeEditor();
+          scheduleRerender();
+        }
+      });
+      return true;
+    }
+    if (t.closest("[data-coord-ed-copy]")) {
+      const text = routeText(routeRecordFromEditor(), editor.modo === "dia" ? { fecha: editor.fecha } : {});
+      copyAndTell(text, "editor", "Ruta copiada. Pegala en el grupo de WhatsApp del equipo.");
+      return true;
+    }
+    if (t.closest("[data-coord-ed-close]")) {
+      if (editor.sucio) {
+        editorConfirm = "salir";
+        render();
+        focusById("coord-ed-close-cancel");
+      } else {
+        closeEditor();
+        render();
+        goTo("coord-rutas");
+      }
+      return true;
+    }
+    if (t.closest("[data-coord-ed-close-ok]")) {
+      closeEditor();
+      render();
+      goTo("coord-rutas");
+      return true;
+    }
+    if (t.closest("[data-coord-ed-close-cancel]")) {
+      editorConfirm = "";
+      render();
+      focusById("coord-ed-close");
+      return true;
+    }
+  }
+
+  /* ---------- Pedidos de cambio del supervisor ---------- */
+
+  const aplicar = t.closest("[data-coord-sol-aplicar]");
+  if (aplicar) {
+    const s = findIn(getSolicitudes(), aplicar.dataset.coordSolAplicar);
+    if (!s) return true;
+    if (editor?.sucio && editor.solicitudId !== s.id) {
+      setFlash("editor", "Primero guardá o cerrá la ruta que estás editando.", "error");
+      render();
+      goTo("coord-editor");
+      return true;
+    }
+    aplicarSolicitud(s);
+    render();
+    goTo("coord-editor");
+    return true;
+  }
+
+  const rechazar = t.closest("[data-coord-sol-rechazar]");
+  if (rechazar) {
+    rechazoAbierto = rechazar.dataset.coordSolRechazar;
+    render();
+    focusById(`coord-rechazo-${rechazoAbierto}`);
+    return true;
+  }
+
+  if (t.closest("[data-coord-sol-rechazar-cancel]")) {
+    const id = rechazoAbierto;
+    rechazoAbierto = "";
+    render();
+    focusById(`coord-rechazar-${id}`);
+    return true;
+  }
+
+  const rechazarOk = t.closest("[data-coord-sol-rechazar-ok]");
+  if (rechazarOk) {
+    const id = rechazarOk.dataset.coordSolRechazarOk;
+    const area = document.getElementById(`coord-rechazo-${id}`);
+    const respuesta = (area?.value || rechazos[id] || "").trim();
+    const inSection = Boolean(t.closest("#coord-solicitudes"));
+    const sectionKey = inSection ? "solicitudesTodas" : "solicitudes";
+    if (respuesta.length < 3) {
+      setFlash(sectionKey, "Escribí una respuesta corta para el supervisor.", "error");
+      rechazos[id] = respuesta;
+      render();
+      focusById(`coord-rechazo-${id}`);
+      return true;
+    }
+    const sol = findIn(getSolicitudes(), id);
+    run(`sol-${id}`, async () => {
+      const saved = await guardar("solicitudes", { id, fecha: isISODate(sol?.fecha) ? sol.fecha : hoyAR(), estado: "rechazado", respuesta }, { section: sectionKey, ok: "Pedido rechazado. El supervisor ve tu respuesta." });
+      if (saved) {
+        delete rechazos[id];
+        rechazoAbierto = "";
+      }
+    });
+    return true;
+  }
+
+  /* ---------- Clientes ---------- */
+
+  if (t.closest("[data-coord-cliente-save]")) {
+    const form = t.closest("[data-coord-form]");
+    const values = serializeForm(form);
+    saveDraft("cliente", values);
+    if (!values.nombre?.trim()) {
+      setFlash("clientes", "Falta el nombre del tutor.", "error");
+      render();
+      focusById("coord-cliente-nombre");
+      return true;
+    }
+    const data = {
+      nombre: values.nombre.trim(),
+      telefono: values.telefono?.trim() || "",
+      barrio: values.barrio?.trim() || "",
+      perros: Array.isArray(values.perros) ? values.perros : [],
+      plan: values.plan || PENDIENTE,
+      dias: Array.isArray(values.dias) ? values.dias : [],
+      turno: values.turno || PENDIENTE,
+      estado: values.estado || "activo",
+      notas: values.notas?.trim() || "",
+    };
+    if (values.id) data.id = values.id;
+    if (values.pedidoId) data.pedidoId = values.pedidoId;
+    run("cliente-save", async () => {
+      const saved = await guardar("clientes", data, { section: "clientes", ok: values.id ? `Cambios de ${data.nombre} guardados.` : `${data.nombre} quedó cargado como cliente.` });
+      if (saved) {
+        clearDraft("cliente");
+        if (values.pedidoId && !values.id) {
+          const pedido = findIn(getPedidos(), values.pedidoId);
+          if (pedido && estadoDe(pedido) === "nuevo") await registros.save("pedidos", { id: pedido.id, estado: "en-curso" }).catch(() => {});
+        }
+      }
+    });
+    return true;
+  }
+
+  if (t.closest("[data-coord-cliente-cancel]")) {
+    clearDraft("cliente");
+    setFlash("clientes", "Formulario vacío.");
+    render();
+    return true;
+  }
+
+  const clienteEdit = t.closest("[data-coord-cliente-edit]");
+  if (clienteEdit) {
+    const c = findIn(getClientes(), clienteEdit.dataset.coordClienteEdit);
+    if (c) {
+      drafts.cliente = { id: c.id, pedidoId: c.pedidoId || "", nombre: c.nombre || "", telefono: c.telefono || "", barrio: c.barrio || "", perros: c.perros || [], plan: c.plan || PENDIENTE, dias: c.dias || [], turno: c.turno || PENDIENTE, estado: c.estado || "activo", notas: c.notas || "" };
+      clearedForms.delete("cliente");
+      render();
+      goTo("coord-cliente-form", "#coord-cliente-nombre");
+    }
+    return true;
+  }
+
+  /* ---------- Avisos ---------- */
+
+  if (t.closest("[data-coord-aviso-save]")) {
+    const form = t.closest("[data-coord-form]");
+    const values = serializeForm(form);
+    saveDraft("aviso", values);
+    const hoy = hoyAR();
+    const error = !values.barrio?.trim()
+      ? ["Falta el barrio.", "coord-aviso-barrio"]
+      : !values.mensaje?.trim()
+        ? ["Escribí qué pasa.", "coord-aviso-mensaje"]
+        : values.vigenteHasta && (!isISODate(values.vigenteHasta) || values.vigenteHasta < hoy)
+          ? ["La fecha de «vigente hasta» tiene que ser hoy o después.", "coord-aviso-vigenteHasta"]
+          : null;
+    if (error) {
+      setFlash("avisos", error[0], "error");
+      render();
+      focusById(error[1]);
+      return true;
+    }
+    const barrio = values.barrio.trim();
+    const tipo = AVISO_TIPOS.includes(values.tipo) ? values.tipo : "otro";
+    run("aviso-save", async () => {
+      const saved = await guardar("avisos", { fecha: hoy, barrio, tipo, mensaje: values.mensaje.trim(), vigenteHasta: values.vigenteHasta || hoy, titulo: `${tipo[0].toUpperCase()}${tipo.slice(1)} en ${barrio}` }, { section: "avisos", ok: `Aviso de ${barrio} guardado. Ya lo ve el equipo.` });
+      if (saved) clearDraft("aviso");
+    });
+    return true;
+  }
+
+  const avisoCopy = t.closest("[data-coord-aviso-copy]");
+  if (avisoCopy) {
+    const aviso = findIn(getAvisos(), avisoCopy.dataset.coordAvisoCopy);
+    const sectionKey = t.closest("#coord-avisos") ? "avisos" : "avisosTop";
+    if (aviso) copyAndTell(avisoText(aviso), sectionKey, "Aviso copiado. Pegalo en el grupo de WhatsApp del equipo.");
+    return true;
+  }
+
+  const avisoFin = t.closest("[data-coord-aviso-fin]");
+  if (avisoFin) {
+    const aviso = findIn(getAvisos(), avisoFin.dataset.coordAvisoFin);
+    if (aviso) run(`aviso-${aviso.id}`, () => guardar("avisos", { id: aviso.id, vigenteHasta: addDaysISO(hoyAR(), -1) }, { section: "avisos", ok: `Aviso de ${aviso.barrio || "barrio"} marcado como terminado.` }));
+    return true;
+  }
+
+  /* ---------- Datos a confirmar ---------- */
+
+  const resolve = t.closest("[data-coord-resolve]");
+  if (resolve) {
+    const id = resolve.dataset.coordResolve;
+    const dog = DOG_BY_ID.get(id);
+    run(`resuelto-${id}`, () => guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` }));
+    return true;
+  }
+
+  const unresolve = t.closest("[data-coord-unresolve]");
   if (unresolve) {
     const id = unresolve.dataset.coordUnresolve;
-    const dog = REAL_DOGS.find((d) => d.id === id);
+    const dog = DOG_BY_ID.get(id);
     run(`resuelto-${id}`, () => guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, { section: "datos", ok: `${dog?.name || id}: volvió a pendientes.` }));
     return true;
   }
 
-  // Pedidos
-  if (event.target.closest("[data-coord-pedido-save]")) {
-    const form = event.target.closest("[data-coord-form]");
+  /* ---------- Pedidos ---------- */
+
+  if (t.closest("[data-coord-pedido-save]")) {
+    const form = t.closest("[data-coord-form]");
     const values = serializeForm(form);
     saveDraft("pedido", values);
     if (!values.perro?.trim() && !values.detalle?.trim()) {
       setFlash("pedidos", "Escribí el perro o qué hay que resolver.", "error");
       render();
-      goTo("coord-pedidos", "#coord-pedido-perro");
+      focusById("coord-pedido-perro");
       return true;
     }
     const tipo = values.tipo || PEDIDO_TIPOS[0];
     const perro = values.perro?.trim() || "";
     run("pedido-save", async () => {
-      const saved = await guardar("pedidos", {
-        fecha: hoyAR(),
-        tipo,
-        estado: "nuevo",
-        origen: "app",
-        titulo: `${tipo}: ${perro || "sin perro indicado"}`,
-        detalle: values.detalle?.trim() || "",
-        datos: { perro, canal: values.canal || PEDIDO_CANALES[0] },
-      }, { section: "pedidos", ok: `Pedido guardado en "Nuevo".` });
+      const saved = await guardar("pedidos", { fecha: hoyAR(), tipo, estado: "nuevo", origen: "app", titulo: `${tipo}: ${perro || "sin perro indicado"}`, detalle: values.detalle?.trim() || "", datos: { perro, canal: values.canal || PEDIDO_CANALES[0] } }, { section: "pedidos", ok: `Pedido guardado en "Nuevo".` });
       if (saved) clearDraft("pedido");
     });
     return true;
   }
 
-  const move = event.target.closest("[data-coord-pedido-move]");
+  const move = t.closest("[data-coord-pedido-move]");
   if (move) {
     const id = move.dataset.coordPedidoMove;
     const estado = move.dataset.estado;
@@ -1798,158 +3009,177 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
-  const pedidoDelete = event.target.closest("[data-coord-pedido-delete]");
+  const pedidoDelete = t.closest("[data-coord-pedido-delete]");
   if (pedidoDelete) {
     const pedido = findIn(getPedidos(), pedidoDelete.dataset.coordPedidoDelete);
     if (pedido) run(`pedido-${pedido.id}`, () => borrar("pedidos", pedido, { section: "pedidos", ok: "Pedido borrado." }));
     return true;
   }
 
-  const pedidoFicha = event.target.closest("[data-coord-pedido-ficha]");
+  const pedidoCliente = t.closest("[data-coord-pedido-cliente]");
+  if (pedidoCliente) {
+    const pedido = findIn(getPedidos(), pedidoCliente.dataset.coordPedidoCliente);
+    if (!pedido) return true;
+    drafts.cliente = draftClienteFromPedido(pedido);
+    clearedForms.delete("cliente");
+    setFlash("clientes", `Formulario completado con el pedido de ${pedido.datos?.responsable || "la web"}. Revisalo y guardalo.`);
+    openAndGo("clientes", "coord-cliente-form", "#coord-cliente-nombre");
+    return true;
+  }
+
+  const pedidoFicha = t.closest("[data-coord-pedido-ficha]");
   if (pedidoFicha) {
     const pedido = findIn(getPedidos(), pedidoFicha.dataset.coordPedidoFicha);
     if (!pedido) return true;
     drafts.alta = draftFromPedido(pedido);
+    clearedForms.delete("alta");
     setFlash("alta", `Formulario completado con el pedido de ${pedidoPerro(pedido) || "la web"}. Revisalo y guardalo.`);
     openAndGo("alta", "coord-alta", "#coord-alta-nombre");
     return true;
   }
 
-  // Altas
-  if (event.target.closest("[data-coord-alta-save]")) {
-    const form = event.target.closest("[data-coord-form]");
+  /* ---------- Altas ---------- */
+
+  if (t.closest("[data-coord-alta-save]")) {
+    const form = t.closest("[data-coord-form]");
     const values = serializeForm(form);
     saveDraft("alta", values);
     if (!values.nombre?.trim()) {
       setFlash("alta", "Falta el nombre del perro.", "error");
       render();
-      goTo("coord-alta", "#coord-alta-nombre");
+      focusById("coord-alta-nombre");
       return true;
     }
     const nombre = values.nombre.trim();
     const datos = { ...values, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Individual" };
     run("alta-save", async () => {
-      const saved = await guardar("fichas", { fecha: hoyAR(), perroNombre: nombre, datos, categoria: "SIN EVALUAR", estado: "lista" }, {
-        section: "alta",
-        ok: `Ficha de ${nombre} guardada. Arranca SIN EVALUAR y con primer paseo individual.`,
-      });
-      if (saved) {
-        clearDraft("alta");
-        goTo("coord-alta");
-      }
+      const saved = await guardar("fichas", { fecha: hoyAR(), perroNombre: nombre, datos, categoria: "SIN EVALUAR", estado: "lista" }, { section: "alta", ok: `Ficha de ${nombre} guardada. Arranca SIN EVALUAR y con primer paseo individual.` });
+      if (saved) clearDraft("alta");
     });
     return true;
   }
 
-  if (event.target.closest("[data-coord-alta-clear]")) {
+  if (t.closest("[data-coord-alta-clear]")) {
     clearDraft("alta");
     setFlash("alta", "Formulario vacío.");
     render();
     return true;
   }
 
-  const altaCopy = event.target.closest("[data-coord-alta-copy]");
+  const altaCopy = t.closest("[data-coord-alta-copy]");
   if (altaCopy) {
     const ficha = findIn(getFichas(), altaCopy.dataset.coordAltaCopy);
-    if (ficha) copyText(altaText(ficha));
-    setFlash("alta", "Ficha copiada. Pegala en el registro maestro.");
-    render();
+    if (ficha) copyAndTell(altaText(ficha), "alta", "Ficha copiada. Pegala en el registro maestro.");
     return true;
   }
 
-  const altaDelete = event.target.closest("[data-coord-alta-delete]");
+  const altaDelete = t.closest("[data-coord-alta-delete]");
   if (altaDelete) {
     const ficha = findIn(getFichas(), altaDelete.dataset.coordAltaDelete);
     if (ficha) run(`ficha-${ficha.id}`, () => borrar("fichas", ficha, { section: "alta", ok: "Ficha borrada." }));
     return true;
   }
 
-  // Pagos
-  if (event.target.closest("[data-coord-pago-save]")) {
-    const form = event.target.closest("[data-coord-form]");
-    const values = serializeForm(form);
-    saveDraft("pago", values);
-    const digits = String(values.monto || "").replace(/[^\d]/g, "");
-    const fecha = isoFromDMY(values.fecha || todayDMY());
-    const error = !values.perro || values.perro === "Elegí un perro"
-      ? ["Elegí el perro.", "#coord-pago-perro"]
-      : !digits
-        ? ["Falta el monto del comprobante.", "#coord-pago-monto"]
-        : !fecha
-          ? ["La fecha no es válida. Usá DD/MM/AAAA.", "#coord-pago-fecha"]
-          : null;
-    if (error) {
-      setFlash("pagos", error[0], "error");
-      render();
-      goTo("coord-pagos", error[1]);
-      return true;
-    }
-    run("pago-save", async () => {
-      const saved = await guardar("pagos", {
-        fecha,
-        concepto: `Pago de ${values.perro}`,
-        perroNombre: values.perro,
-        monto: Number(digits),
-        medio: values.medio || "Transferencia",
-        comprobante: values.comprobante || "",
-        nota: values.nota?.trim() || "",
-        pasadoAlLibro: false,
-      }, { section: "pagos", ok: `Pago de ${values.perro} anotado. Acordate de pasarlo al Libro contable.` });
-      if (saved) clearDraft("pago");
-    });
-    return true;
-  }
-
-  const pagoLibro = event.target.closest("[data-coord-pago-libro]");
-  if (pagoLibro) {
-    const pago = findIn(getPagos(), pagoLibro.dataset.coordPagoLibro);
-    if (!pago) return true;
-    const now = !pago.pasadoAlLibro;
-    run(`pago-${pago.id}`, () => guardar("pagos", { id: pago.id, pasadoAlLibro: now }, {
-      section: "pagos",
-      ok: now ? "Marcado como pasado al Libro contable." : "Marcado como pendiente de pasar al Libro.",
-    }));
-    return true;
-  }
-
-  const pagoDelete = event.target.closest("[data-coord-pago-delete]");
-  if (pagoDelete) {
-    const pago = findIn(getPagos(), pagoDelete.dataset.coordPagoDelete);
-    if (pago) run(`pago-${pago.id}`, () => borrar("pagos", pago, { section: "pagos", ok: "Registro borrado." }));
-    return true;
-  }
-
   return false;
+}
+
+// Mientras se escribe: actualiza el estado en memoria sin redibujar toda la página.
+function handleCoordinadorInput(event) {
+  const target = event.target;
+  if (!target.closest?.(".coord-shell")) return;
+
+  if (editor) {
+    if (target.matches("[data-coord-ed-search]")) {
+      editorQuery = target.value;
+      const box = document.getElementById("coord-ed-results");
+      if (box) box.innerHTML = dogResults();
+      return;
+    }
+    if (target.matches("[data-coord-ed-hora]")) {
+      editorHora = target.value;
+      const box = document.getElementById("coord-ed-results");
+      if (box) box.innerHTML = dogResults();
+      return;
+    }
+    if (target.matches("[data-coord-ed-field]")) {
+      editor[target.dataset.coordEdField] = target.value;
+      editor.sucio = true;
+      return;
+    }
+    if (target.matches("[data-coord-stop]")) {
+      const stop = editor.paradas[Number(target.dataset.coordStop)];
+      if (stop) {
+        stop[target.dataset.k] = target.dataset.k === "minutos" ? target.value : target.value;
+        editor.sucio = true;
+      }
+      return;
+    }
+  }
+
+  if (target.matches("[data-coord-rechazo]")) {
+    rechazos[target.dataset.coordRechazo] = target.value;
+    return;
+  }
+
+  if (target.matches("[data-coord-clientes-buscar]")) {
+    clienteQuery = target.value;
+    const box = document.getElementById("coord-clientes-lista");
+    if (box) box.innerHTML = clientesListHTML();
+    return;
+  }
+
+  if (target.matches("[data-coord-filter-perros]")) {
+    const q = normalize(target.value);
+    target.parentElement.querySelectorAll(".coord-check").forEach((label) => {
+      label.hidden = Boolean(q) && !label.dataset.name.includes(q) && !label.querySelector("input").checked;
+    });
+  }
 }
 
 function handleCoordinadorChange(event) {
   const target = event.target;
   if (!target.closest?.(".coord-shell")) return false;
 
-  const fileInput = target.closest("[data-coord-file]");
-  if (fileInput) {
-    const form = fileInput.dataset.coordFile;
-    const file = fileInput.files?.[0];
-    const formEl = fileInput.closest("[data-coord-form]");
-    const values = formEl ? serializeForm(formEl) : getDraft(form);
-    if (file) values[fileInput.dataset.coordFileField] = file.name;
-    saveDraft(form, values);
-    const nameEl = fileInput.parentElement.querySelector("[data-coord-file-name]");
-    if (nameEl && file) nameEl.textContent = file.name;
+  if (target.matches("[data-coord-rutas-fecha]")) {
+    if (isISODate(target.value)) {
+      rutasFecha = target.value;
+      scheduleRerender();
+    }
     return true;
   }
 
-  // Borrador en memoria: no se pierde lo escrito si la página se redibuja.
+  if (editor && target.matches("[data-coord-stop]")) {
+    const stop = editor.paradas[Number(target.dataset.coordStop)];
+    if (stop) {
+      stop[target.dataset.k] = target.dataset.k === "minutos" ? Number(target.value) || 45 : target.value;
+      editor.sucio = true;
+      if (target.dataset.k !== "nota") scheduleRerender();
+    }
+    return true;
+  }
+
+  if (editor && target.matches("[data-coord-ed-field]")) {
+    editor[target.dataset.coordEdField] = target.value;
+    editor.sucio = true;
+    return true;
+  }
+
+  if (target.matches("[data-coord-ed-hora], [data-coord-ed-search], [data-coord-rechazo], [data-coord-clientes-buscar], [data-coord-filter-perros]")) return true;
+
   const formEl = target.closest("[data-coord-form]");
   if (formEl) {
     saveDraft(formEl.dataset.coordForm, serializeForm(formEl));
+    if (formEl.dataset.coordForm === "cliente" && target.name === "perros") {
+      const label = document.getElementById("coord-cliente-perros-label");
+      const n = (drafts.cliente.perros || []).length;
+      if (label) label.textContent = `Perros${n ? ` (${n})` : ""}`;
+    }
     return true;
   }
-
   return false;
 }
 
-// Enter dentro de un formulario: guarda con el botón principal en vez de recargar la página.
+// Enter dentro de un formulario o del buscador: no recarga la página.
 function handleCoordinadorSubmit(event) {
   const form = event.target.closest?.(".coord-shell [data-coord-form]");
   if (!form) return;
@@ -1957,8 +3187,19 @@ function handleCoordinadorSubmit(event) {
   form.querySelector(".coord-btn.is-primary")?.click();
 }
 
+function handleCoordinadorKeydown(event) {
+  if (event.key !== "Enter") return;
+  const target = event.target;
+  if (target.matches?.(".coord-shell [data-coord-ed-search]")) {
+    event.preventDefault();
+    document.querySelector("#coord-ed-results .coord-result")?.click();
+  }
+}
+
 export function registerCoordinadorEvents() {
   clickHandlers.push(handleCoordinadorClick);
   changeHandlers.push(handleCoordinadorChange);
+  document.addEventListener("input", handleCoordinadorInput);
   document.addEventListener("submit", handleCoordinadorSubmit);
+  document.addEventListener("keydown", handleCoordinadorKeydown);
 }

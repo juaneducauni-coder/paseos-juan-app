@@ -476,8 +476,7 @@ html[data-theme="dark"] .coord-logo-dark {
   font-weight: 700;
 }
 
-.coord-progress-bar,
-.coord-bar {
+.coord-progress-bar {
   display: block;
   grid-column: 1 / -1;
   height: 8px;
@@ -486,8 +485,7 @@ html[data-theme="dark"] .coord-logo-dark {
   background: var(--c-line);
 }
 
-.coord-progress-bar i,
-.coord-bar i {
+.coord-progress-bar i {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -1197,72 +1195,6 @@ html[data-theme="dark"] .coord-logo-dark {
 
 /* ---------- Tabla de carga ---------- */
 
-.coord-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--c-line);
-  border-radius: 16px;
-}
-
-.coord-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-
-.coord-table caption {
-  border-bottom: 1px solid var(--c-line);
-  color: var(--c-text);
-  font-size: 0.9rem;
-  line-height: 1.45;
-  padding: 10px 12px;
-  text-align: left;
-}
-
-.coord-table th,
-.coord-table td {
-  border-bottom: 1px solid var(--c-line);
-  padding: 10px 8px;
-  text-align: left;
-  vertical-align: middle;
-}
-
-.coord-table thead th {
-  background: var(--c-card-2);
-  color: var(--c-text);
-  font-size: 0.78rem;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.coord-table tbody th {
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.coord-table tbody tr:last-child th,
-.coord-table tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-.coord-table tr.is-today {
-  background: var(--c-green-soft);
-}
-
-.coord-table tr.is-max td b {
-  color: var(--c-green);
-}
-
-.coord-total {
-  display: grid;
-  gap: 4px;
-  min-width: 44px;
-}
-
-.coord-total b {
-  font-size: 1.05rem;
-}
-
 .coord-tag {
   display: inline-block;
   border-radius: 999px;
@@ -1289,73 +1221,7 @@ html[data-theme="dark"] .coord-logo-dark {
   height: 13px;
 }
 
-.coord-table tbody th .coord-tag {
-  margin-left: 6px;
-}
-
-.coord-cell-alerts {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.coord-notes {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  color: var(--c-text);
-  font-size: 0.92rem;
-  line-height: 1.5;
-  padding-left: 20px;
-}
-
 /* ---------- Pagos ---------- */
-
-.coord-pay-list {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.coord-pay {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--c-line);
-  border-radius: 14px;
-  background: var(--c-card-2);
-  padding: 12px;
-}
-
-.coord-pay-main {
-  display: grid;
-  gap: 2px;
-}
-
-.coord-pay-main strong {
-  font-size: 1.05rem;
-  font-weight: 900;
-}
-
-.coord-pay-main span {
-  font-weight: 700;
-}
-
-.coord-pay-main small {
-  color: var(--c-text);
-  overflow-wrap: anywhere;
-}
-
-.coord-pay .coord-badge {
-  justify-self: start;
-}
-
-.coord-pay .coord-btn {
-  min-height: 44px;
-  padding: 8px 12px;
-}
 
 .coord-footnote {
   color: var(--c-text);
@@ -1624,25 +1490,6 @@ a.coord-btn {
     padding: 0;
   }
 
-  .coord-table th,
-  .coord-table td {
-    padding: 9px 6px;
-  }
-
-  .coord-table thead th {
-    font-size: 0.7rem;
-    letter-spacing: 0.02em;
-  }
-
-  .coord-table tbody th .coord-tag {
-    display: table;
-    margin: 4px 0 0;
-  }
-
-  .coord-total {
-    min-width: 36px;
-  }
-
   .coord-form .coord-actions .coord-btn {
     width: 100%;
   }
@@ -1713,15 +1560,6 @@ a.coord-btn {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .coord-pay {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
-
-  .coord-pay .coord-actions {
-    grid-column: 1 / -1;
-  }
-
   .coord-web-alert li {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -1745,17 +1583,992 @@ a.coord-btn {
   .coord-card-list.is-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
-  .coord-table th,
-  .coord-table td {
-    padding: 12px 16px;
+/* ================================================================== */
+/* Rol nuevo (E-016): rutas y horarios, pedidos de cambio, clientes    */
+/* y avisos por barrio. Mobile first.                                  */
+/* ================================================================== */
+
+.coord-shell {
+  --c-red: #b3261e;
+  --c-red-soft: rgba(179, 38, 30, 0.08);
+}
+
+html[data-theme="dark"] .coord-shell {
+  --c-red: #f28b82;
+  --c-red-soft: rgba(242, 139, 130, 0.12);
+}
+
+.coord-main,
+.coord-main > * {
+  min-width: 0;
+}
+
+.coord-subtitle {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.coord-subtitle span {
+  color: var(--c-text);
+  font-weight: 800;
+}
+
+.coord-data.is-compact {
+  gap: 2px;
+}
+
+.coord-data.is-compact > div {
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.coord-data.is-compact dt {
+  padding-top: 2px;
+}
+
+/* ---------- Pedidos de cambio del supervisor ---------- */
+
+.coord-sol-alert {
+  display: grid;
+  gap: 12px;
+  border: 2px solid var(--c-red);
+  border-radius: 18px;
+  background: var(--c-red-soft);
+  padding: 14px;
+}
+
+.coord-sol-alert:focus {
+  outline: none;
+}
+
+.coord-sol-alert > h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-alert-ink);
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.coord-sol-alert > p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.coord-sol-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-sol {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--c-line);
+  border-left: 6px solid #c99a1a;
+  border-radius: 14px;
+  background: var(--c-card);
+  padding: 12px 14px;
+}
+
+.coord-sol.is-urgent {
+  border-left-color: var(--c-red);
+}
+
+.coord-sol.is-aplicado {
+  border-left-color: var(--c-green);
+}
+
+.coord-sol.is-rechazado {
+  border-left-color: var(--c-line-strong);
+}
+
+.coord-sol:focus {
+  outline: 3px solid var(--c-focus);
+}
+
+.coord-sol-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.coord-sol-head strong {
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.coord-sol-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-text);
+  font-weight: 800;
+}
+
+.coord-sol-where .coord-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.coord-reject {
+  display: grid;
+  gap: 8px;
+}
+
+.coord-reject label {
+  font-weight: 800;
+}
+
+.coord-shell .coord-reject textarea {
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 12px;
+  background: var(--c-field);
+  color: var(--c-ink);
+  font: inherit;
+  padding: 10px 12px;
+}
+
+/* ---------- Avisos por barrio ---------- */
+
+.coord-barrios {
+  display: grid;
+  gap: 12px;
+}
+
+.coord-barrio {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--c-warn-line);
+  border-radius: 16px;
+  background: var(--c-warn-bg);
+  padding: 12px;
+}
+
+.coord-barrio h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-warn-ink);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.coord-barrio h3 small {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+.coord-aviso-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-aviso {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-card);
+  padding: 10px 12px;
+}
+
+.coord-aviso.is-old {
+  opacity: 0.85;
+}
+
+.coord-aviso-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.coord-aviso-head small {
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.coord-aviso > p {
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.coord-aviso .coord-actions .coord-btn {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+/* ---------- Rutas y horarios ---------- */
+
+.coord-routes {
+  border-color: var(--c-green);
+}
+
+.coord-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 16px;
+  background: var(--c-card-2);
+  padding: 4px;
+}
+
+.coord-seg-btn {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--c-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 800;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.coord-seg-btn[aria-pressed="true"] {
+  background: var(--c-green);
+  color: var(--c-on-green);
+}
+
+.coord-carga {
+  display: grid;
+  gap: 14px;
+  border: 1px dashed var(--c-green);
+  border-radius: 18px;
+  background: var(--c-green-soft);
+  padding: 16px;
+}
+
+.coord-carga > p {
+  line-height: 1.5;
+}
+
+.coord-btn-big {
+  width: 100%;
+  min-height: 64px;
+  font-size: 1.1rem;
+}
+
+.coord-confirm {
+  display: grid;
+  gap: 10px;
+  border: 2px solid #c99a1a;
+  border-radius: 16px;
+  background: var(--c-warn-bg);
+  color: var(--c-warn-ink);
+  padding: 14px;
+}
+
+/* Semana: un bloque por día con sus turnos y rutas. */
+.coord-week {
+  display: grid;
+  gap: 10px;
+}
+
+.coord-wday {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  background: var(--c-card-2);
+  padding: 12px;
+}
+
+.coord-wday.is-today {
+  border: 2px solid var(--c-green);
+}
+
+.coord-wday > h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.coord-wturno {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 6px;
+}
+
+.coord-wturno-label {
+  grid-column: 1 / -1;
+  color: var(--c-text);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coord-wroute {
+  display: grid;
+  gap: 2px;
+  min-height: 48px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 12px;
+  background: var(--c-card);
+  color: var(--c-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.coord-wroute:hover {
+  border-color: var(--c-green);
+}
+
+.coord-wroute.is-alert {
+  border: 2px solid var(--c-red);
+}
+
+.coord-wroute-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.coord-wroute-top strong {
+  font-size: 0.98rem;
+  font-weight: 900;
+}
+
+.coord-wroute small {
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.coord-wroute-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--c-red);
+  font-weight: 900;
+}
+
+.coord-wroute-warn .coord-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.coord-wadd {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px dashed var(--c-line-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--c-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  padding: 6px 10px;
+}
+
+.coord-wadd:hover {
+  border-color: var(--c-green);
+  color: var(--c-ink);
+}
+
+.coord-wadd .coord-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Un día puntual */
+.coord-dayview {
+  display: grid;
+  gap: 12px;
+}
+
+.coord-day-pick {
+  display: grid;
+  gap: 8px;
+  align-items: end;
+}
+
+.coord-day-quick {
+  display: flex;
+  gap: 8px;
+}
+
+.coord-day-quick .coord-btn {
+  flex: 1;
+}
+
+.coord-day-title {
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.coord-dayroutes {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-dayroute {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  background: var(--c-card-2);
+  padding: 12px 14px;
+}
+
+.coord-dayroute.is-alert {
+  border: 2px solid var(--c-red);
+}
+
+.coord-stops-mini {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0 0 0 22px;
+}
+
+.coord-stops-mini li {
+  line-height: 1.4;
+}
+
+.coord-stops-mini li.is-alert {
+  color: var(--c-red);
+  font-weight: 800;
+}
+
+.coord-stops-mini small {
+  color: var(--c-text);
+}
+
+/* ---------- Editor de una ruta ---------- */
+
+.coord-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.coord-editor:focus {
+  outline: none;
+}
+
+.coord-editor-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.coord-editor.is-plantilla .coord-editor-mode {
+  border: 2px solid var(--c-green);
+  background: var(--c-green-soft);
+}
+
+.coord-editor.is-dia .coord-editor-mode {
+  border: 2px solid #c99a1a;
+  background: var(--c-warn-bg);
+  color: var(--c-warn-ink);
+}
+
+.coord-editor-mode h3 {
+  font-size: 1.2rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.coord-editor-mode p {
+  line-height: 1.4;
+}
+
+.coord-editor-kicker {
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.coord-editor-sol {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--c-line-strong);
+  border-left: 6px solid var(--c-red);
+  border-radius: 14px;
+  background: var(--c-card-2);
+  padding: 12px 14px;
+}
+
+.coord-editor-team {
+  margin: 0;
+}
+
+.coord-add {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--c-green);
+  border-radius: 16px;
+  background: var(--c-green-soft);
+  padding: 12px;
+}
+
+.coord-add h4,
+.coord-stops-head h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.coord-stops-head h4 span {
+  color: var(--c-text);
+}
+
+.coord-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.coord-results {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-result {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 12px;
+  background: var(--c-card);
+  color: var(--c-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.coord-result:hover {
+  border-color: var(--c-green);
+}
+
+.coord-result > span:not(.coord-badge):not(.coord-result-hora) {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.coord-result small {
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.coord-result-hora {
+  margin-left: auto;
+  border-radius: 8px;
+  background: var(--c-green);
+  color: var(--c-on-green);
+  font-weight: 900;
+  padding: 2px 8px;
+}
+
+.coord-stops-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.coord-stops {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-stop {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-card-2);
+  padding: 10px 12px;
+}
+
+.coord-stop.is-alert {
+  border: 2px solid var(--c-red);
+  background: var(--c-red-soft);
+}
+
+.coord-stop-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.coord-stop-num {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--c-green);
+  color: var(--c-on-green);
+  font-weight: 900;
+}
+
+.coord-stop.is-alert .coord-stop-num {
+  background: var(--c-red);
+}
+
+.coord-stop-name {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.coord-stop-name strong {
+  font-size: 1.02rem;
+  overflow-wrap: anywhere;
+}
+
+.coord-stop-name small {
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.coord-stop-tools {
+  display: flex;
+  gap: 4px;
+}
+
+.coord-icon-btn {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 12px;
+  background: var(--c-card);
+  color: var(--c-ink);
+  cursor: pointer;
+  padding: 0;
+}
+
+.coord-icon-btn:hover:not(:disabled) {
+  border-color: var(--c-green);
+}
+
+.coord-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.coord-icon-btn.is-danger {
+  color: var(--c-red);
+}
+
+.coord-icon.is-up {
+  transform: rotate(180deg);
+}
+
+.coord-stop-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 8px;
+  align-items: end;
+}
+
+.coord-stop-fields .coord-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.coord-shell .coord-stop-fields .coord-field label {
+  font-size: 0.82rem;
+}
+
+.coord-stop-end {
+  grid-column: 1 / -1;
+  color: var(--c-text);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.coord-stop-end:empty {
+  display: none;
+}
+
+.coord-stop-warn {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-stop-warn li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--c-red);
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.coord-stop-warn .coord-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.coord-warn-box {
+  display: grid;
+  gap: 8px;
+  border: 2px solid var(--c-red);
+  border-radius: 16px;
+  background: var(--c-red-soft);
+  color: var(--c-red);
+  padding: 12px 14px;
+}
+
+.coord-warn-box h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.coord-warn-box ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  font-weight: 700;
+}
+
+.coord-warn-box p {
+  color: var(--c-ink);
+  font-size: 0.9rem;
+}
+
+.coord-editor-save {
+  display: grid;
+  gap: 10px;
+}
+
+.coord-save-box {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 16px;
+  background: var(--c-card-2);
+  padding: 12px 14px;
+}
+
+.coord-save-box.is-main {
+  border: 2px solid var(--c-green);
+}
+
+.coord-save-box .coord-btn {
+  width: 100%;
+}
+
+.coord-editor-foot {
+  justify-content: space-between;
+}
+
+/* ---------- Clientes ---------- */
+
+.coord-search {
+  max-width: 520px;
+}
+
+.coord-checks {
+  display: flex;
+  max-height: 240px;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  padding: 8px;
+}
+
+.coord-shell .coord-field .coord-check {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 12px;
+  background: var(--c-field);
+  color: var(--c-ink);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+
+.coord-shell .coord-field .coord-check[hidden] {
+  display: none;
+}
+
+.coord-shell .coord-field .coord-check:has(input:checked) {
+  border-color: var(--c-green);
+  background: var(--c-green-soft);
+}
+
+.coord-shell .coord-check input[type="checkbox"] {
+  width: 20px;
+  min-height: 0;
+  height: 20px;
+  accent-color: var(--c-green);
+  margin: 0;
+  padding: 0;
+}
+
+.coord-check small {
+  color: var(--c-text);
+  font-weight: 600;
+}
+
+.coord-cliente.is-baja {
+  opacity: 0.75;
+}
+
+@media (max-width: 479px) {
+  .coord-seg-btn {
+    font-size: 0.85rem;
   }
 
-  .coord-pay {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+  .coord-seg-btn .coord-icon {
+    display: none;
   }
 
-  .coord-pay .coord-actions {
+  .coord-editor-foot .coord-btn,
+  .coord-dayroute .coord-actions .coord-btn,
+  .coord-sol .coord-actions .coord-btn {
+    flex: 1 1 100%;
+  }
+}
+
+@media (min-width: 720px) {
+  .coord-sol-alert {
+    padding: 18px;
+  }
+
+  .coord-barrios {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .coord-seg {
+    display: inline-grid;
+    justify-self: start;
+    min-width: 420px;
+  }
+
+  .coord-week {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .coord-day-pick {
+    grid-template-columns: minmax(180px, 260px) auto;
+    justify-content: start;
+  }
+
+  .coord-dayroutes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .coord-stop-fields {
+    grid-template-columns: 130px 100px minmax(0, 1fr);
+  }
+
+  .coord-stop-fields .coord-field.is-wide {
     grid-column: auto;
   }
+
+  .coord-stop-end {
+    order: 4;
+  }
+
+  .coord-editor-save {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .coord-add-row {
+    grid-template-columns: minmax(0, 1fr) 160px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .coord-week {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .coord-wturno {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .coord-barrios {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .coord-sol-alert .coord-sol-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+.coord-editor,
+.coord-sol,
+.coord-shell .coord-form {
+  scroll-margin-top: 84px;
 }
