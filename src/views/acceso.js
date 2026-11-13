@@ -60,7 +60,8 @@ function yaIngresado(user) {
           ${homeFor(user.rol) !== "/" ? `<a class="acc-button" href="${homeFor(user.rol)}" data-link>Ir a mi panel</a>` : ""}
           <a class="acc-button is-secondary" href="/salir" data-link>Cerrar sesión</a>
         </div>
-        <details class="acc-pin">
+        ${user.debeCambiarPin ? `<p class="acc-alert" role="alert"><strong>Cambiá tu PIN inicial.</strong> Te lo pasó Juan por WhatsApp: elegí uno propio que solo sepas vos.</p>` : ""}
+        <details class="acc-pin" ${user.debeCambiarPin ? "open" : ""}>
           <summary>Cambiar mi PIN</summary>
           <form class="acc-form" data-acc-form="pin" novalidate>
             <label>PIN actual <input name="actual" type="password" inputmode="numeric" autocomplete="current-password" required /></label>
@@ -133,15 +134,20 @@ async function onSubmit(event) {
   setStatus(form, tipo === "pin" ? "Guardando…" : "Entrando…");
   try {
     if (tipo === "pin") {
-      await session.changePin(data.actual, data.nuevo);
+      const user = await session.changePin(data.actual, data.nuevo);
       form.reset();
       setStatus(form, "Listo: tu PIN quedó cambiado.");
+      if (homeFor(user.rol) !== "/") setTimeout(() => navigate(homeFor(user.rol)), 900);
       return;
     }
     const user = tipo === "setup"
       ? await session.setup({ nombre: data.nombre, usuario: data.usuario, pin: data.pin })
       : await session.login(data.usuario, data.pin);
     estado = { necesitaConfiguracion: false, cargando: false, mensaje: "", error: false };
+    if (user.debeCambiarPin) {
+      navigate("/login");
+      return;
+    }
     const destino = volverA();
     navigate(destino && (ROLE_PAGES[user.rol] || []).includes(destino.slice(1)) ? destino : homeFor(user.rol));
   } catch (error) {

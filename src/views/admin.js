@@ -1504,7 +1504,7 @@ async function handleUsersSubmit(event) {
     }
     setBusy(form, true);
     try {
-      const saved = await usuarios.save({ nombre, usuario, rol: d.rol, pin });
+      const saved = await usuarios.save({ nombre, usuario, rol: d.rol, pin, crear: true });
       ui.credential = { tipo: "alta", usuario: saved.usuario, nombre: saved.nombre, pin };
       drafts.crear = { nombre: "", usuario: "", rol: "paseador", pin: "" };
       ui.showCreate = false;
