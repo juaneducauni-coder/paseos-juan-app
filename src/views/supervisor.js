@@ -690,7 +690,7 @@ function normalizeStop(stop) {
   const dog = (stop.perroId && dogById(stop.perroId)) || (stop.perroNombre && dogByName(stop.perroNombre)) || null;
   const minutos = Number(stop.minutos) || dog?.minutes || null;
   return {
-    perroId: dog?.id || stop.perroId || "",
+    perroId: dog?.id || (/^[A-Za-z0-9_.-]{1,40}$/.test(String(stop.perroId || "")) ? String(stop.perroId) : ""),
     perroNombre: stop.perroNombre || dog?.name || PENDIENTE,
     hora: toMinutes(stop.hora) === null ? "" : String(stop.hora).slice(0, 5),
     minutos,
@@ -1637,26 +1637,26 @@ function StopRow(view, route, item) {
         ${stop.perroId ? `
           <div class="sv-stop-actions" ${busy ? `aria-busy="true"` : ""}>
             ${status.kind === "nosale" ? `
-              <button type="button" class="sv-button sv-button-quiet" id="sv-absent-${domId}" data-sv-absent="${stop.perroId}" data-ruta="${esc(route.code)}" aria-label="Deshacer: ${esc(stop.perroNombre)} sí sale">Deshacer «no sale»</button>
+              <button type="button" class="sv-button sv-button-quiet" id="sv-absent-${domId}" data-sv-absent="${esc(stop.perroId)}" data-ruta="${esc(route.code)}" aria-label="Deshacer: ${esc(stop.perroNombre)} sí sale">Deshacer «no sale»</button>
             ` : `
-              <button type="button" class="sv-button ${status.retirado ? "is-checked" : "sv-button-primary"}" id="sv-pickup-${domId}" data-sv-pickup="${stop.perroId}" data-ruta="${esc(route.code)}" aria-pressed="${status.retirado}" aria-label="${status.retirado ? `Desmarcar retiro de ${esc(stop.perroNombre)}` : `Marcar a ${esc(stop.perroNombre)} como retirado`}">
+              <button type="button" class="sv-button ${status.retirado ? "is-checked" : "sv-button-primary"}" id="sv-pickup-${domId}" data-sv-pickup="${esc(stop.perroId)}" data-ruta="${esc(route.code)}" aria-pressed="${status.retirado}" aria-label="${status.retirado ? `Desmarcar retiro de ${esc(stop.perroNombre)}` : `Marcar a ${esc(stop.perroNombre)} como retirado`}">
                 ${status.retirado ? `${icon("checkCircle", "sv-icon")} Retirado` : "Retirado"}
               </button>
-              <button type="button" class="sv-button ${status.kind === "entregado" ? "is-checked" : ""}" id="sv-deliver-${domId}" data-sv-deliver="${stop.perroId}" data-ruta="${esc(route.code)}" aria-pressed="${status.kind === "entregado"}" ${status.retirado ? "" : "disabled"} aria-label="${status.kind === "entregado" ? `Desmarcar entrega de ${esc(stop.perroNombre)}` : `Marcar a ${esc(stop.perroNombre)} como entregado`}">
+              <button type="button" class="sv-button ${status.kind === "entregado" ? "is-checked" : ""}" id="sv-deliver-${domId}" data-sv-deliver="${esc(stop.perroId)}" data-ruta="${esc(route.code)}" aria-pressed="${status.kind === "entregado"}" ${status.retirado ? "" : "disabled"} aria-label="${status.kind === "entregado" ? `Desmarcar entrega de ${esc(stop.perroNombre)}` : `Marcar a ${esc(stop.perroNombre)} como entregado`}">
                 ${status.kind === "entregado" ? `${icon("checkCircle", "sv-icon")} Entregado` : "Entregado"}
               </button>
-              ${status.retirado ? "" : `<button type="button" class="sv-button sv-button-quiet" id="sv-absent-${domId}" data-sv-absent="${stop.perroId}" data-ruta="${esc(route.code)}" aria-label="${esc(stop.perroNombre)} no sale">No sale</button>`}
+              ${status.retirado ? "" : `<button type="button" class="sv-button sv-button-quiet" id="sv-absent-${domId}" data-sv-absent="${esc(stop.perroId)}" data-ruta="${esc(route.code)}" aria-label="${esc(stop.perroNombre)} no sale">No sale</button>`}
             `}
           </div>
-          <details class="sv-stop-more" data-sv-stop-more="${id}" ${moreOpen ? "open" : ""}>
+          <details class="sv-stop-more" data-sv-stop-more="${esc(id)}" ${moreOpen ? "open" : ""}>
             <summary>Nota para el paseador y pedido de cambio</summary>
             <div class="sv-stop-more-body">
               <label class="sv-field" for="sv-note-${domId}">Nota para el paseador
                 <span class="sv-field-hint" id="sv-note-${domId}-hint">La ve en su ruta. Sin datos de tutores.</span>
-                <input type="text" id="sv-note-${domId}" data-sv-note="${id}" value="${esc(noteValue)}" maxlength="200" aria-describedby="sv-note-${domId}-hint" autocomplete="off" />
+                <input type="text" id="sv-note-${domId}" data-sv-note="${esc(id)}" value="${esc(noteValue)}" maxlength="200" aria-describedby="sv-note-${domId}-hint" autocomplete="off" />
               </label>
               <div class="sv-actions">
-                <button type="button" class="sv-button" id="sv-note-save-${domId}" data-sv-note-save="${stop.perroId}" data-ruta="${esc(route.code)}">Guardar nota</button>
+                <button type="button" class="sv-button" id="sv-note-save-${domId}" data-sv-note-save="${esc(stop.perroId)}" data-ruta="${esc(route.code)}">Guardar nota</button>
                 ${RequestButton(view, route.code, stop.perroId, "Pedir cambio al coordinador")}
               </div>
             </div>
@@ -2025,7 +2025,7 @@ async function saveNote(code, dogId, focusId) {
   if (!found) return;
   const { route, stop } = found;
   const id = paseoId(view.fecha, dogId, view.shift);
-  const nota = String(noteDrafts.has(id) ? noteDrafts.get(id) : document.querySelector(`[data-sv-note="${id}"]`)?.value || "").trim();
+  const nota = String(noteDrafts.has(id) ? noteDrafts.get(id) : document.querySelector(`[data-sv-note="${CSS.escape(id)}"]`)?.value || "").trim();
   if (PHONE_LIKE.test(nota)) {
     setFlash(`control-${route.code}`, "La nota parece tener un teléfono. Sacalo: acá no van datos de tutores.", "error");
     return rerender(focusId);

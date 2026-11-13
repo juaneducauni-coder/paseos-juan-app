@@ -10,6 +10,7 @@ import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/per
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const PERRO_ID = /^[A-Za-z0-9_.-]{0,40}$/;
 const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre"];
 const MAX_RECORD = 20 * 1024;
 
@@ -59,6 +60,12 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     // Miniatura de la foto del perro: solo una imagen embebida, nada más.
     if (col === "fotos" && body.miniatura && !/^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/.test(String(body.miniatura))) {
       throw new HttpError(400, "La miniatura no es una imagen válida.");
+    }
+    // Paradas de rutas y plantillas: el perroId se usa como identificador en las páginas.
+    if ((col === "rutas" || col === "plantillas") && body.paradas !== undefined) {
+      const paradas = body.paradas;
+      const valida = (p) => p && typeof p === "object" && (p.perroId == null || PERRO_ID.test(String(p.perroId)));
+      if (!Array.isArray(paradas) || !paradas.every(valida)) throw new HttpError(400, "Las paradas tienen un perro no válido.");
     }
     if (!puedeEscribir(user.rol, col)) throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
     if (body.fecha && !FECHA.test(body.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
