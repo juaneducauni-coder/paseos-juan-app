@@ -4,6 +4,10 @@
 //
 // Pantallas (barra fija abajo): Ruta (perro en curso + siguientes + listos), Equipo (checklist),
 // Incidente (3 pasos) y Más (día y turno, avisos, datos del turno, salir).
+// Cada perro: "Retiré" → "Foto del paseo" (la foto lo pasa a "En paseo") → "Entregué". Sin foto
+// igual se entrega y queda marcado "sin foto del paseo".
+// Modo ayudante (rol "ayudante", docs/datos-compartidos.md "Tareas del ayudante"): en Ruta ve sus
+// tareas con fotos y botones grandes: integrar, devolver (máx. 2), agua, curación y otra manada.
 //
 // Ruta del día (docs/datos-compartidos.md, "Rutas y horarios"): la arma el coordinador.
 // Ruta efectiva = registro de `rutas` de la fecha si existe; si no, la `plantillas` del día de la
@@ -31,7 +35,7 @@ import {
 } from "../data/realData.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, registros, onDataChange, fotosPerros, archivos } from "../api/client.js";
+import { session, registros, onDataChange, fotosPerros, fotosPaseo, archivos } from "../api/client.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
 // Claves de la versión anterior (todo en el celular). Solo se leen una vez para migrar.
@@ -43,13 +47,16 @@ const INCIDENT_KEY = "paseosJuan_paseador_incidente";
 const ROUTE_PICK_KEY = "paseosJuan_paseador_ruta";
 
 // Cada paso guarda su hora, quién lo marcó y deja el estado del contrato de `paseos`.
-// En la calle se tocan dos botones: "Retiré" (marca retiro y arranca el paseo, mismo horario)
-// y "Entregué". El paso "En paseo" queda como botón chico si alguien marcó solo el retiro.
+// "Retiré" deja el perro "retirado"; la FOTO del paseo (fotosPaseo.sacar) lo pasa a "paseando";
+// "Entregué" lo cierra. La foto no bloquea la entrega: sin foto queda `sinFotoPaseo: true`.
 const STEPS = [
   { label: "Retiro", button: "Retiré", done: "Retirado", field: "horaRetiro", estado: "retirado" },
-  { label: "Paseo", button: "En paseo", done: "En paseo", field: "horaPaseo", estado: "paseando" },
+  { label: "Foto", button: "Foto del paseo", done: "En paseo", field: "horaPaseo", estado: "paseando" },
   { label: "Entrega", button: "Entregué", done: "Entregado", field: "horaEntrega", estado: "entregado" },
 ];
+// Campos de `paseos` que no son pasos: foto del paseo y lo que marca el ayudante.
+// `devuelvePor`: el ayudante dijo "Voy a entregar" (el paseador ve "Lo entrega …").
+const EXTRA_FIELDS = ["fotoPaseoId", "fotoPendiente", "sinFotoPaseo", "horaIntegrado", "horaIntegradoPor", "horaIntegradoPorNombre", "devuelvePor", "devuelvePorNombre"];
 const ESTADO_STEP = { pendiente: 0, retirado: 1, paseando: 2, entregado: 3 };
 const NO_SALE = "no-sale";
 const TURNO_ID = { Mañana: "manana", Tarde: "tarde" };
@@ -66,14 +73,19 @@ const EXTERNAL_DOG = "Perro externo";
 const FORBIDDEN_WORDS = /\b(agresiv\w*|mal[oa]s?|dominantes?)\b/i;
 const INCIDENT_STEPS = ["Qué pasó", "Perros", "Lesión"];
 
-// Checklist del ayudante: corto, 4 interruptores. "Correas" y "Bebederos portátiles" salen del
-// inventario (EQUIPMENT); bolsas y celular cargado no figuran en el inventario.
+// Checklist del ayudante antes de salir (definido por Juan el 13/11/2026): 4 interruptores.
 const HELPER_ITEMS = [
-  { item: "Correas", label: "Correas", icon: "pawPrint" },
+  { item: "Botiquín", label: "Botiquín", sub: "agua oxigenada y gasa", icon: "briefcaseMedical" },
+  { item: "Botella bebedero", label: "Botella bebedero", icon: "droplets" },
   { item: "Bolsas", label: "Bolsas", icon: "shoppingBag" },
-  { item: "Bebederos portátiles", label: "Agua", icon: "droplets" },
   { item: "Celular cargado", label: "Celular cargado", icon: "phone" },
 ];
+
+// Tareas del ayudante.
+const MAX_RETURN = 2;
+const WATER_REMINDER_MIN = 40;
+const CURE_TYPES = ["Raspón", "Corte chico", "Pata", "Otro"];
+const HERD_LINES = ["Dividan los perros y pasen de a grupos", "Calmá a los que se alteran"];
 
 // Checklist del paseador: su equipo según el inventario, agrupado.
 const MY_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian > 0);
@@ -104,6 +116,9 @@ const view = {
   routeChange: null,
   toast: null,
   photoBusy: {},
+  walkBusy: {},
+  // Modo ayudante: perros elegidos para devolver, curación en curso y "otra manada" abierto.
+  helper: { picks: [], cure: null, herd: false, status: "" },
 };
 
 // Lo que dibujó el último render (lo usa el encabezado, que se arma después del contenido).
@@ -575,6 +590,11 @@ function teamNames(iso) {
       add(record.creadoPor, record.creadoPorNombre);
       add(record.actualizadoPor, record.actualizadoPorNombre);
       STEPS.forEach((step) => add(record[`${step.field}Por`], record[`${step.field}PorNombre`]));
+      add(record.horaIntegradoPor, record.horaIntegradoPorNombre);
+      add(record.devuelvePor, record.devuelvePorNombre);
+      // Rutas y plantillas: el coordinador guarda el nombre de la persona además del usuario.
+      add(record.paseador, record.paseadorNombre);
+      add(record.ayudante, record.ayudanteNombre);
     });
   });
   return names;
@@ -612,8 +632,10 @@ function markerOf(record, index, names) {
 // Guarda de a uno, en orden, para que dos toques seguidos no se pisen.
 let saveChain = Promise.resolve();
 
-function saveShared(col, build, { optimisticRecord } = {}) {
-  const key = optimisticRecord ? `${col}:${optimisticRecord.id}` : "";
+function saveShared(col, build, { optimisticRecord: own } = {}) {
+  const key = own ? `${col}:${own.id}` : "";
+  // Dos toques seguidos sobre el mismo registro se suman (no se pisan) mientras viajan.
+  const optimisticRecord = key ? { ...(optimistic.get(key) || {}), ...own } : null;
   if (key) optimistic.set(key, optimisticRecord);
   const job = saveChain.then(async () => {
     const record = typeof build === "function" ? build() : build;
@@ -656,6 +678,9 @@ function snapshotPaseo(state) {
     snap[step.field] = record[step.field] || "";
     snap[`${step.field}Por`] = record[`${step.field}Por`] || "";
     snap[`${step.field}PorNombre`] = record[`${step.field}PorNombre`] || "";
+  });
+  EXTRA_FIELDS.forEach((field) => {
+    snap[field] = ["fotoPendiente", "sinFotoPaseo"].includes(field) ? record[field] === true : record[field] || "";
   });
   return snap;
 }
@@ -789,6 +814,8 @@ function getDraft() {
     // Id del registro en `incidentes` una vez guardado: si se corrige, se actualiza el mismo.
     registroId: typeof draft.registroId === "string" ? draft.registroId : "",
     enviado: draft.enviado === true,
+    // Vino de "Es más grave" (curación del ayudante): WhatsApp a Juan arriba de todo.
+    urgente: draft.urgente === true,
   };
 }
 
@@ -901,10 +928,8 @@ export function walkerDashboard() {
   clockState.iso = sel.now.iso;
   clockState.shift = shiftByClock(sel.now);
   clockState.minute = sel.now.minutes;
-  const stops = stopsOf(plan.shown);
-  const progress = sel.isToday ? progressFor(sel.iso, sel.shift, stops.map((stop) => stop.dog)) : {};
-  const names = teamNames(sel.now.iso);
-  const ctx = { sel, plan, stops, progress, names };
+  const ctx = routeContext(sel, plan);
+  const { stops } = ctx;
   headerInfo = headerFor(ctx);
 
   const screens = { ruta: RouteScreen, equipo: EquipScreen, incidente: IncidentScreen, mas: MoreScreen };
@@ -923,6 +948,13 @@ export function walkerDashboard() {
   `;
 }
 
+// Lo que necesitan las pantallas: selección, rutas, paradas, avance y nombres.
+function routeContext(sel = selection(), plan = routePlan(sel)) {
+  const stops = stopsOf(plan.shown);
+  const progress = sel.isToday ? progressFor(sel.iso, sel.shift, stops.map((stop) => stop.dog)) : {};
+  return { sel, plan, stops, progress, names: teamNames(sel.now.iso) };
+}
+
 function headerFor({ sel, plan, names }) {
   const route = plan.mine[0] || (plan.shown.length === 1 ? plan.shown[0] : null);
   let title = walkerName();
@@ -937,7 +969,7 @@ function headerFor({ sel, plan, names }) {
 }
 
 function WalkerHeader() {
-  const pending = registros.pendingCount();
+  const pending = registros.pendingCount() + fotosPaseo.pendientes();
   return `
     <header class="pw-header">
       <a class="pw-brand" href="/paseador" data-link aria-label="Paseos Juan, ${isHelper() ? "ayudante de paseador" : "paseador"}">
@@ -980,12 +1012,14 @@ function TabBar({ sel, stops }) {
 // Señal y errores: visible arriba de todo. Los anuncios para lector de pantalla van por pw-live.
 function SyncBar() {
   const pending = registros.pendingCount();
+  const photos = fotosPaseo.pendientes();
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const parts = [];
-  if (pending || offline) {
+  if (pending || photos || offline) {
+    const photoText = photos ? ` ${ic("camera", "pw-icon pw-icon--sm pw-inline-icon")}<b data-pw-photos-pending>${photos} ${photos === 1 ? "foto por subir" : "fotos por subir"}</b>.` : "";
     parts.push(`
       <p class="pw-sync-msg pw-sync-msg--offline">${ic("uploadCloud", "pw-icon")}
-        <span>${pending ? `Sin señal: ${pending} ${pending === 1 ? "cambio se envía solo" : "cambios se envían solos"}.` : "Sin señal: seguí marcando, se envía solo."} Fotos: con señal.</span>
+        <span>${pending ? `Sin señal: ${pending} ${pending === 1 ? "cambio se envía solo" : "cambios se envían solos"}.` : offline ? "Sin señal: seguí marcando, se envía solo." : "Subiendo lo pendiente."}${photoText}</span>
       </p>
     `);
   }
@@ -1036,6 +1070,7 @@ function updateToast() {
 
 function RouteScreen(ctx) {
   const { sel, plan, stops, progress } = ctx;
+  if (isHelper() && sel.isToday && plan.shown.length) return HelperScreen(ctx);
   const queue = buildQueue(stops, progress, sel);
   const totals = routeTotals(stops, progress);
   const percent = totals.toWalk ? Math.round((totals.delivered / totals.toWalk) * 100) : 100;
@@ -1159,6 +1194,8 @@ function AlertStrip({ sel, plan, stops }) {
   }
   const notes = plan.shown.filter((route) => route.notas).map((route) => `${plan.shown.length > 1 ? `${route.ruta}: ` : ""}${route.notas}`);
   const list = items.slice(0, 3);
+  const water = sel.isToday && !isHelper() ? groupWater(sel, plan) : "";
+  if (water) list.push(water);
   if (notes.length) list.push(`<p class="pw-strip pw-strip--info">${ic("fileText", "pw-icon")}<span><b>Nota:</b> ${esc(notes.join(" · "))}</span></p>`);
   return list.length ? `<div class="pw-strips">${list.join("")}</div>` : "";
 }
@@ -1175,13 +1212,24 @@ function buildQueue(stops, progress, sel) {
     if (state.noSale) return done.push({ ...entry, kind: "nosale", time: stop.hora });
     if (state.step >= STEPS.length) return done.push({ ...entry, kind: "done", time: state.times[STEPS.length - 1] });
     if (state.step === 0) return active.push({ ...entry, kind: "pickup", time: stop.hora });
-    return active.push({ ...entry, kind: "deliver", time: deliveryTime(stop, state) });
+    // Lo lleva el ayudante ("Voy a entregar"): queda al final, para que el paseador siga con el resto.
+    const handoff = state.record?.devuelvePor && !isMe(state.record.devuelvePor);
+    // Retirado sin foto: lo que sigue es la foto del paseo (a la hora del retiro).
+    if (state.step === 1) return active.push({ ...entry, kind: "photo", handoff, time: state.times[0] || stop.hora });
+    return active.push({ ...entry, kind: "deliver", handoff, time: deliveryTime(stop, state) });
   });
   if (sel.isToday) {
-    const rank = (entry) => (entry.kind === "blocked" ? 2 : entry.kind === "deliver" ? 0 : 1);
-    active.sort((a, b) => (a.kind === "blocked") - (b.kind === "blocked") || (minutesOf(a.time) ?? 9999) - (minutesOf(b.time) ?? 9999) || rank(a) - rank(b));
+    const rank = (entry) => ({ photo: 0, deliver: 1, pickup: 2 })[entry.kind] ?? 3;
+    const last = (entry) => (entry.kind === "blocked" ? 2 : entry.handoff ? 1 : 0);
+    active.sort((a, b) => last(a) - last(b) || (minutesOf(a.time) ?? 9999) - (minutesOf(b.time) ?? 9999) || rank(a) - rank(b));
   }
   return { active, done };
+}
+
+// El perro de la tarjeta grande: el primero que no está bloqueado ni lo lleva el ayudante.
+function heroEntry(queue, sel) {
+  if (!sel.isToday) return queue.active[0] || null;
+  return queue.active.find((item) => item.kind !== "blocked" && !item.handoff) || queue.active.find((item) => item.kind !== "blocked") || null;
 }
 
 // Entrega prevista = retiro real + minutos del paseo (la misma cuenta que usa el supervisor para
@@ -1212,10 +1260,44 @@ function StatusChip(entry, sel) {
   else if (kind === "blocked") chip = { tone: "warn", text: "Sin id" };
   else if (kind === "nosale") chip = { tone: "idle", text: "No sale" };
   else if (kind === "done") chip = { tone: "ok", text: `Entregado${entry.time ? ` ${entry.time}` : ""}` };
+  else if (kind === "photo") chip = { tone: "run", text: `Retirado${state.times[0] ? ` ${state.times[0]}` : ""}` };
   else if (isLate(entry, sel)) chip = { tone: "late", text: kind === "deliver" ? "Entrega tarde" : "Atrasado" };
-  else if (kind === "deliver") chip = { tone: "run", text: state.step === 1 ? "Retirado" : "En paseo" };
+  else if (kind === "deliver") chip = { tone: "run", text: "En paseo" };
   else chip = { tone: "idle", text: "Pendiente" };
   return `<span class="pw-chip-st pw-chip-st--${chip.tone}">${esc(chip.text)}</span>`;
+}
+
+// Ayudante y foto del paseo en cada perro: "Integrado por …", "Lo entrega …", foto chiquita,
+// "Foto por subir" (sin señal) y "Sin foto del paseo" (se entregó sin foto).
+function WalkChips(entry, names, { thumb = true, compact = false } = {}) {
+  const record = entry.state?.record;
+  if (!record || entry.state.noSale) return "";
+  const step = entry.state.step;
+  const chips = [];
+  // En la lista va solo el primer nombre (la tarjeta no crece); en la grande y el detalle, completo.
+  const who = (usuario, nombre) => {
+    if (isMe(usuario)) return "";
+    const full = String(nombre || personName(usuario, names) || "");
+    return compact ? full.split(/\s+/)[0] : full;
+  };
+  const src = thumb && step >= 2 ? walkThumbOf(record) : "";
+  if (src) chips.push(`<span class="pw-walkthumb"><img src="${esc(src)}" alt="Foto del paseo" /></span>`);
+  if (record.fotoPendiente === true && step >= 2) chips.push(`<span class="pw-chip-st pw-chip-st--warn">${ic("uploadCloud", "pw-icon pw-icon--xs")}Foto por subir</span>`);
+  if (step >= STEPS.length && !hasWalkPhoto(record) && (record.sinFotoPaseo === true || !record.horaPaseo)) {
+    chips.push(`<span class="pw-chip-st pw-chip-st--warn">${ic("camera", "pw-icon pw-icon--xs")}Sin foto del paseo</span>`);
+  }
+  if (record.horaIntegrado && step < STEPS.length) {
+    const name = who(record.horaIntegradoPor, record.horaIntegradoPorNombre);
+    chips.push(`<span class="pw-chip-st pw-chip-st--ok">${ic("users", "pw-icon pw-icon--xs")}${esc(name ? `Integrado por ${name}` : "Integrado")}</span>`);
+  }
+  if (record.devuelvePor && step < STEPS.length) {
+    const name = who(record.devuelvePor, record.devuelvePorNombre);
+    chips.push(`<span class="pw-chip-st pw-chip-st--run">${ic("arrowRight", "pw-icon pw-icon--xs")}${esc(name ? `Lo entrega ${name}` : "Lo entregás vos")}</span>`);
+  }
+  if (step >= STEPS.length && record.horaEntregaPor && !isMe(record.horaEntregaPor)) {
+    chips.push(`<span class="pw-chip-st pw-chip-st--soft">${esc(`Lo entregó ${who(record.horaEntregaPor, record.horaEntregaPorNombre)}`)}</span>`);
+  }
+  return chips.join("");
 }
 
 // Bozal y "no juntar" a la vista en cada tarjeta.
@@ -1248,22 +1330,37 @@ function otherMarker(entry, names) {
   return "";
 }
 
-function StepButton(entry, where, { size = "xl" } = {}) {
-  const { stop, kind, state } = entry;
-  if (!["pickup", "deliver"].includes(kind)) return "";
+function StepButton(entry, where, { size = "xl", ghost = false } = {}) {
+  const { stop, kind } = entry;
+  if (!["pickup", "deliver", "photo"].includes(kind)) return "";
+  // Retirado: el botón principal es la cámara; "Entregué" queda como secundario (la foto no bloquea).
+  if (kind === "photo" && !ghost) return WalkPhotoButton(stop, where, size);
   const pickup = kind === "pickup";
   const label = loaded.ready ? (pickup ? "Retiré" : "Entregué") : "Cargando…";
   return `
-    <button class="pw-btn pw-btn--go pw-btn--${size} ${pickup ? "" : "pw-btn--deliver"}" type="button" data-pw-step="${esc(stop.dog.id)}" data-pw-where="${where}" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(`${pickup ? "Retiré" : "Entregué"}: ${stop.dog.name}`)}">
+    <button class="pw-btn ${ghost ? "pw-btn--ghost" : "pw-btn--go"} pw-btn--${size} ${pickup ? "" : "pw-btn--deliver"}" type="button" data-pw-step="${esc(stop.dog.id)}" data-pw-where="${where}" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(`${pickup ? "Retiré" : "Entregué"}: ${stop.dog.name}`)}">
       ${ic(pickup ? "pawPrint" : "check", "pw-icon")}${label}
     </button>
-    ${where === "hero" && state.step === 1 ? `<button class="pw-btn pw-btn--ghost pw-btn--sm" type="button" data-pw-walk="${esc(stop.dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'}>En paseo</button>` : ""}
+  `;
+}
+
+// "Foto del paseo": botón de cámara (abre la cámara de atrás del celular). Sacarla marca el paseo.
+function WalkPhotoButton(stop, where, size = "xl", { ghost = false, label = "" } = {}) {
+  const id = stop.dog.id;
+  const busy = Boolean(view.walkBusy[id]);
+  const off = busy || !loaded.ready;
+  const text = busy ? "Guardando…" : label || (size === "row" ? "Foto" : "Foto del paseo");
+  return `
+    <label class="pw-btn ${ghost ? "pw-btn--ghost" : "pw-btn--go"} pw-btn--${size} pw-walk-btn ${busy ? "is-busy" : ""}" ${off ? 'aria-disabled="true"' : ""}>
+      <input class="pw-file" type="file" accept="image/*" capture="environment" data-pw-walkphoto="${esc(id)}" data-pw-where="${where}" ${off ? "disabled" : ""} aria-label="${esc(`Foto del paseo: ${stop.dog.name}`)}" />
+      ${ic("camera", "pw-icon")}<span>${esc(text)}</span>
+    </label>
   `;
 }
 
 function Hero(queue, ctx) {
   const { sel, stops, names } = ctx;
-  const entry = queue.active.find((item) => item.kind !== "blocked") || (sel.isToday ? null : queue.active[0]);
+  const entry = heroEntry(queue, sel);
   if (!entry) {
     if (!queue.done.length) return "";
     return `
@@ -1277,7 +1374,7 @@ function Hero(queue, ctx) {
   const { stop, kind } = entry;
   const { dog } = stop;
   const late = isLate(entry, sel);
-  const kicker = { pickup: "Retirar", deliver: "Entregar", plan: "Primer retiro" }[kind];
+  const kicker = { pickup: "Retirar", deliver: "Entregar", photo: "Foto del paseo", plan: "Primer retiro" }[kind];
   const marker = otherMarker(entry, names);
   const note = stopNote(stop);
   const group = kind === "pickup" ? queue.active.filter((item) => item !== entry && item.kind === "pickup" && item.time && item.time === entry.time) : [];
@@ -1292,10 +1389,10 @@ function Hero(queue, ctx) {
             <button class="pw-link" type="button" data-pw-open="${esc(dog.id)}" data-pw-where="hero-name" ${dog.id ? "" : "disabled"}>${esc(dog.name)}</button>
           </h2>
           <p class="pw-hero-time">${esc(entry.time || "Sin hora")}</p>
-          ${sel.isToday ? Countdown(entry.time, sel.now.minutes) : ""}
+          ${sel.isToday && kind !== "photo" ? Countdown(entry.time, sel.now.minutes) : ""}
         </div>
       </div>
-      <div class="pw-chips">${kind === "pickup" ? "" : StatusChip(entry, sel)}${SafetyChips(dog, routePartners(stop, stops))}</div>
+      <div class="pw-chips">${kind === "pickup" ? "" : StatusChip(entry, sel)}${WalkChips(entry, names)}${SafetyChips(dog, routePartners(stop, stops))}</div>
       ${marker ? `<p class="pw-hero-note">${ic("users", "pw-icon pw-icon--sm")}${esc(marker)}</p>` : ""}
       ${note ? `<p class="pw-hero-note">${ic("fileText", "pw-icon pw-icon--sm")}${esc(note)}</p>` : ""}
       ${group.length ? `<p class="pw-hero-note">${ic("clock", "pw-icon pw-icon--sm")}A la misma hora: ${esc(listNames(group.map((item) => item.stop.dog.name)))}</p>` : ""}
@@ -1305,6 +1402,7 @@ function Hero(queue, ctx) {
         </div>
         <div class="pw-hero-more">
           ${kind === "pickup" ? `<button class="pw-btn pw-btn--ghost pw-btn--sm" type="button" data-pw-nosale="${esc(dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'}>${ic("x", "pw-icon pw-icon--sm")}No sale</button>` : ""}
+          ${kind === "photo" ? StepButton(entry, "hero-more", { size: "sm", ghost: true }) : ""}
           <button class="pw-btn pw-btn--ghost pw-btn--sm" type="button" data-pw-open="${esc(dog.id)}" data-pw-where="hero-detail">${ic("eye", "pw-icon pw-icon--sm")}Detalle</button>
         </div>
       ` : ""}
@@ -1317,27 +1415,29 @@ function isMulti({ plan }) {
 }
 
 function RowCard(entry, ctx, { actions = true } = {}) {
-  const { sel, stops } = ctx;
+  const { sel, stops, names } = ctx;
   const { stop, kind } = entry;
   const { dog } = stop;
   const late = isLate(entry, sel);
   const multi = isMulti(ctx);
+  // Lo lleva el ayudante: sin botón (si hace falta, "Entregué" está en el detalle).
+  const showAction = actions && sel.isToday && !entry.handoff;
   return `
     <li class="pw-row-card pw-row-card--${kind} ${late ? "is-late" : ""}" ${dueAttrs(entry, sel)}>
       ${AvatarControl(dog, "md", "row")}
       ${dog.id ? `<button class="pw-row-body" type="button" data-pw-open="${esc(dog.id)}" data-pw-where="row">` : `<div class="pw-row-body">`}
         <span class="pw-row-name">${esc(dog.name)}</span>
         <span class="pw-row-meta"><b class="pw-row-time">${esc(entry.time || "--:--")}</b>${multi ? `<small>${esc(stop.route.ruta)}</small>` : ""}${StatusChip(entry, sel)}</span>
-        <span class="pw-row-chips">${SafetyChips(dog, routePartners(stop, stops), { compact: true })}</span>
+        <span class="pw-row-chips">${WalkChips(entry, names, { compact: true })}${SafetyChips(dog, routePartners(stop, stops), { compact: true })}</span>
       ${dog.id ? "</button>" : "</div>"}
-      ${actions && sel.isToday ? `<div class="pw-row-act">${StepButton(entry, "row", { size: "row" })}</div>` : ""}
+      ${showAction ? `<div class="pw-row-act">${StepButton(entry, "row", { size: "row" })}</div>` : ""}
     </li>
   `;
 }
 
 function NextList(queue, ctx) {
   const { sel } = ctx;
-  const hero = queue.active.find((item) => item.kind !== "blocked") || (sel.isToday ? null : queue.active[0]);
+  const hero = heroEntry(queue, sel);
   const rest = queue.active.filter((item) => item !== hero);
   if (!rest.length) return "";
   return `
@@ -1374,6 +1474,257 @@ function stopNote(stop) {
   return stop.nota;
 }
 
+// ---------- pantalla: Ruta del ayudante ----------
+// Sus tareas (definidas por Juan): integrar, devolver de a 2, agua, botiquín y otra manada.
+// Fotos de los perros, botones grandes y casi sin texto. Levantar caca no se registra.
+
+// Paseador: última agua del grupo (la marca el ayudante de su ruta).
+function groupWater(sel, plan) {
+  const routes = plan.shown.filter((route) => route.ayudante && !isMe(route.ayudante));
+  if (!routes.length) return "";
+  const names = teamNames(sel.now.iso);
+  const last = routes
+    .map((route) => ({ hora: watersOf(waterRecord(sel.now.iso, sel.shift, route.ayudante)).pop() || "", who: personName(route.ayudante, names) }))
+    .sort((a, b) => (minutesOf(b.hora) ?? -1) - (minutesOf(a.hora) ?? -1))[0];
+  if (!last.hora) return `<p class="pw-strip pw-strip--idle">${ic("droplets", "pw-icon")}<span><b>Agua:</b> todavía no</span></p>`;
+  return `<p class="pw-strip pw-strip--info">${ic("droplets", "pw-icon")}<span><b>Última agua ${esc(last.hora)}</b> · ${esc(last.who)}</span></p>`;
+}
+
+function HelperScreen(ctx) {
+  if (view.helper.herd) return HerdScreen(ctx);
+  if (view.helper.cure) return CureScreen(ctx);
+  const { sel } = ctx;
+  const groups = helperGroups(ctx);
+  return `
+    <section class="pw-screen pw-helper" aria-labelledby="pw-tab-title">
+      <div class="pw-title-row">
+        <h1 id="pw-tab-title" tabindex="-1">Manada</h1>
+        <span class="pw-title-count" aria-label="${groups.active.length} ${groups.active.length === 1 ? "perro" : "perros"} en la manada">${ic("pawPrint", "pw-icon pw-icon--sm")}${groups.active.length}</span>
+      </div>
+      ${RouteChangeBanner()}
+      ${PlanningBar(sel)}
+      ${IntegrateList(groups, ctx)}
+      ${DeliveringList(groups, ctx)}
+      ${HelperActions(groups, sel)}
+      ${ReturnPicker(groups)}
+      ${NoPhotoList(groups)}
+      ${AlertStrip(ctx)}
+      ${NextPickup(groups)}
+    </section>
+  `;
+}
+
+// 1. Integrar: lo que el paseador marcó "Retiré" y todavía no se integró.
+function IntegrateList(groups, ctx) {
+  if (!groups.toIntegrate.length) return "";
+  return `
+    <section class="pw-hsec" aria-labelledby="pw-int-title">
+      <h2 class="pw-list-title" id="pw-int-title">Integrar <span class="pw-count">${groups.toIntegrate.length}</span></h2>
+      <p class="pw-hint">${ic("users", "pw-icon pw-icon--sm")}Que se olfateen y caminá la primera cuadra con él</p>
+      ${groups.toIntegrate.map(({ stop, state }) => {
+        const { dog } = stop;
+        const by = markerOf(state.record, 0, ctx.names);
+        return `
+          <article class="pw-hcard">
+            <div class="pw-hcard-top">
+              ${AvatarControl(dog, "xl", "int")}
+              <div class="pw-hcard-info">
+                <h3 class="pw-hcard-name">${esc(dog.name)}</h3>
+                <p class="pw-hcard-meta">Retirado ${esc(state.times[0] || "")}${by ? ` · ${esc(by)}` : ""}</p>
+                <div class="pw-chips">${SafetyChips(dog, routePartners(stop, ctx.stops), { compact: true })}</div>
+              </div>
+            </div>
+            <button class="pw-btn pw-btn--go pw-btn--xl" type="button" data-pw-integrate="${esc(dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(`Integrado: ${dog.name}`)}">${ic("check", "pw-icon")}Integrado</button>
+          </article>
+        `;
+      }).join("")}
+    </section>
+  `;
+}
+
+// 2b. Los que el ayudante está devolviendo ("Voy a entregar"): "Entregado" en cada uno.
+function DeliveringList(groups) {
+  if (!groups.delivering.length) return "";
+  return `
+    <section class="pw-hsec" aria-labelledby="pw-dev-title">
+      <h2 class="pw-list-title" id="pw-dev-title">Entregando <span class="pw-count">${groups.delivering.length}</span></h2>
+      <ol class="pw-rows" role="list">
+        ${groups.delivering.map(({ stop, state }) => {
+          const { dog } = stop;
+          const back = deliveryTime(stop, state);
+          return `
+            <li class="pw-row-card pw-row-card--deliver">
+              ${Avatar(dog, "md")}
+              <div class="pw-row-body pw-row-body--static">
+                <span class="pw-row-name">${esc(dog.name)}</span>
+                ${back ? `<span class="pw-row-meta"><b class="pw-row-time">${esc(back)}</b></span>` : ""}
+              </div>
+              <div class="pw-row-act">
+                <button class="pw-btn pw-btn--go pw-btn--row" type="button" data-pw-step="${esc(dog.id)}" data-pw-where="ret" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(`Entregado: ${dog.name}`)}">${ic("check", "pw-icon")}Entregado</button>
+              </div>
+            </li>
+          `;
+        }).join("")}
+      </ol>
+      <button class="pw-btn pw-btn--ghost pw-btn--sm" type="button" data-pw-return-cancel>${ic("undo", "pw-icon pw-icon--sm")}No los llevo</button>
+    </section>
+  `;
+}
+
+// 3 a 5. Agua, botiquín y otra manada: tres botones grandes, siempre a mano.
+function HelperActions(groups, sel) {
+  const record = waterRecord(sel.now.iso, sel.shift);
+  const aguas = watersOf(record);
+  const last = aguas[aguas.length - 1] || "";
+  const hot = heatOn(sel, record);
+  // Recordatorio suave con calor: más de 40 minutos desde la última agua (o desde el primer retiro).
+  const firstPickup = groups.active.map((item) => item.state.times[0]).filter((hora) => minutesOf(hora) !== null).sort((a, b) => minutesOf(a) - minutesOf(b))[0];
+  const from = last || firstPickup || "";
+  const since = from ? sel.now.minutes - minutesOf(from) : null;
+  const remind = hot && since !== null && since > WATER_REMINDER_MIN && groups.active.length > 0;
+  return `
+    <div class="pw-hact" role="group" aria-label="Tareas">
+      <button class="pw-hact-btn pw-hact-btn--water ${remind ? "is-due" : ""}" type="button" data-pw-water>
+        ${ic("droplets", "pw-icon")}<span>Di agua</span>
+      </button>
+      <button class="pw-hact-btn pw-hact-btn--cure" type="button" data-pw-cure-open>
+        ${ic("briefcaseMedical", "pw-icon")}<span>Curación</span>
+      </button>
+      <button class="pw-hact-btn pw-hact-btn--herd" type="button" data-pw-herd-open>
+        ${ic("alertTriangle", "pw-icon")}<span>Otra manada</span>
+      </button>
+    </div>
+    <div class="pw-water-row">
+      <p class="pw-water-last" data-pw-water-last>${ic("droplets", "pw-icon pw-icon--sm")}${last ? `Última agua: <b>${esc(last)}</b>` : "Sin agua todavía"}</p>
+      <button class="pw-pick pw-heat ${record?.calor === true ? "is-on" : ""}" type="button" data-pw-heat aria-pressed="${record?.calor === true}">Hace calor</button>
+    </div>
+    ${remind ? `<p class="pw-strip pw-strip--warn">${ic("droplets", "pw-icon")}<span>Hace calor: ${durationText(since)} sin agua. Ofreceles.</span></p>` : ""}
+  `;
+}
+
+// 2. Devolver: tocar las fotos (máximo 2) → "Voy a entregar".
+function ReturnPicker(groups) {
+  if (!groups.returnable.length) return "";
+  const count = groups.picks.length;
+  const full = groups.room === 0;
+  return `
+    <section class="pw-hsec" aria-labelledby="pw-ret-title">
+      <h2 class="pw-list-title" id="pw-ret-title">Devolver <span class="pw-max">máx. ${MAX_RETURN}</span></h2>
+      <div class="pw-dog-grid" role="group" aria-labelledby="pw-ret-title">
+        ${groups.returnable.map(({ stop }) => {
+          const { dog } = stop;
+          const on = groups.picks.includes(dog.id);
+          return `
+            <button type="button" class="pw-dog-pick pw-ret-pick ${on ? "is-on" : ""}" data-pw-return-pick="${esc(dog.id)}" aria-pressed="${on}" ${full || (!on && count >= groups.room) ? 'aria-disabled="true"' : ""}>
+              ${Avatar(dog, "lg")}
+              <span>${esc(dog.name)}</span>
+              <span class="pw-dog-pick-mark" aria-hidden="true">${on ? ic("check", "pw-icon pw-icon--sm") : ""}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+      <p class="pw-status ${view.helper.status ? "is-warn" : ""}" role="status" data-pw-helper-status>${esc(view.helper.status)}</p>
+      <button class="pw-btn pw-btn--go pw-btn--xl" type="button" data-pw-return-go ${count && loaded.ready ? "" : 'aria-disabled="true"'}>${ic("arrowRight", "pw-icon")}Voy a entregar${count ? ` (${count})` : ""}</button>
+    </section>
+  `;
+}
+
+// Integrados que todavía no tienen la foto del paseo (la puede sacar el ayudante).
+function NoPhotoList(groups) {
+  if (!groups.noPhoto.length) return "";
+  return `
+    <section class="pw-hsec" aria-labelledby="pw-nophoto-title">
+      <h2 class="pw-list-title" id="pw-nophoto-title">${ic("camera", "pw-icon pw-icon--sm")}Foto del paseo</h2>
+      <div class="pw-row">
+        ${groups.noPhoto.map(({ stop }) => WalkPhotoButton(stop, "nophoto", "lg", { ghost: true, label: stop.dog.name })).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function NextPickup(groups) {
+  const next = groups.next[0];
+  if (!next) return "";
+  const more = groups.next.length - 1;
+  return `<p class="pw-source">${ic("clock", "pw-icon pw-icon--sm")}<span>Próximo retiro: <b>${esc(next.stop.dog.name)}</b>${next.stop.hora ? ` ${esc(next.stop.hora)}` : ""}${more > 0 ? ` · ${more} más` : ""}</span></p>`;
+}
+
+// 4. Botiquín: perro (fotos) → qué tiene → agua oxigenada y gasa → "Listo". "Es más grave" abre el incidente.
+function CureScreen(ctx) {
+  const cure = view.helper.cure;
+  const groups = helperGroups(ctx);
+  const pool = groups.active.length ? groups.active.map((item) => item.stop) : ctx.stops.filter((stop) => stop.canSave);
+  const stop = cure.dogId ? ctx.stops.find((item) => item.dog.id === cure.dogId) : null;
+  const grave = `<button class="pw-btn pw-btn--danger pw-btn--xl" type="button" data-pw-cure-grave>${ic("alertTriangle", "pw-icon")}Es más grave</button>`;
+  let body;
+  if (!stop) {
+    body = `
+      <fieldset class="pw-q">
+        <legend>¿Qué perro?</legend>
+        <div class="pw-dog-grid">
+          ${pool.map((item) => `
+            <button type="button" class="pw-dog-pick pw-ret-pick" data-pw-cure-dog="${esc(item.dog.id)}">
+              ${Avatar(item.dog, "lg")}
+              <span>${esc(item.dog.name)}</span>
+            </button>
+          `).join("")}
+        </div>
+      </fieldset>
+      ${grave}
+    `;
+  } else {
+    body = `
+      <div class="pw-cure-dog">
+        ${Avatar(stop.dog, "md")}
+        <p class="pw-hcard-name">${esc(stop.dog.name)}</p>
+      </div>
+      <fieldset class="pw-q">
+        <legend>¿Qué tiene?</legend>
+        <div class="pw-chip-grid">
+          ${CURE_TYPES.map((tipo) => `<button type="button" class="pw-pick ${cure.tipos.includes(tipo) ? "is-on" : ""}" data-pw-cure-tipo="${esc(tipo)}" aria-pressed="${cure.tipos.includes(tipo)}">${esc(tipo)}</button>`).join("")}
+        </div>
+      </fieldset>
+      <div class="pw-switch-list">
+        <button class="pw-switch ${cure.gasa ? "is-on" : ""}" type="button" data-pw-cure-gasa aria-pressed="${cure.gasa}">
+          <span class="pw-switch-icon">${ic("briefcaseMedical", "pw-icon")}</span>
+          <span class="pw-switch-label">Agua oxigenada y gasa</span>
+          <span class="pw-switch-mark" aria-hidden="true">${cure.gasa ? ic("check", "pw-icon") : ""}</span>
+        </button>
+      </div>
+      <p class="pw-status ${view.helper.status ? "is-warn" : ""}" role="status" data-pw-helper-status>${esc(view.helper.status)}</p>
+      <button class="pw-btn pw-btn--go pw-btn--xl" type="button" data-pw-cure-ok>${ic("check", "pw-icon")}Listo</button>
+      ${grave}
+    `;
+  }
+  return `
+    <section class="pw-screen pw-cure" aria-labelledby="pw-tab-title">
+      <div class="pw-title-row">
+        <h1 id="pw-tab-title" tabindex="-1">${ic("briefcaseMedical", "pw-icon")}Curación</h1>
+        <button class="pw-btn pw-btn--ghost pw-btn--sm" type="button" data-pw-cure-back>${ic("arrowLeft", "pw-icon pw-icon--sm")}Volver</button>
+      </div>
+      ${body}
+    </section>
+  `;
+}
+
+// 5. Se cruza otra manada: dos líneas grandes y, si hace falta, aviso al paseador (sin datos de tutores).
+function HerdScreen(ctx) {
+  const route = ctx.plan.helping || ctx.plan.shown[0];
+  const text = `Paseos Juan: se cruza otra manada${route ? ` (ruta ${route.ruta})` : ""}. Dividamos los perros y pasemos de a grupos.`;
+  return `
+    <section class="pw-screen pw-herd" aria-labelledby="pw-tab-title">
+      <div class="pw-title-row">
+        <h1 id="pw-tab-title" tabindex="-1">${ic("alertTriangle", "pw-icon")}Otra manada</h1>
+      </div>
+      <ol class="pw-herd-lines">
+        ${HERD_LINES.map((line) => `<li>${esc(line)}</li>`).join("")}
+      </ol>
+      <a class="pw-btn pw-btn--ghost pw-btn--lg" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener noreferrer">${ic("message", "pw-icon")}Avisar al paseador</a>
+      <button class="pw-btn pw-btn--primary pw-btn--xl" type="button" data-pw-herd-close>${ic("check", "pw-icon")}Listo</button>
+    </section>
+  `;
+}
+
 // ---------- detalle del perro (hoja que sube desde abajo) ----------
 
 function DogSheet(ctx) {
@@ -1395,6 +1746,8 @@ function DogSheet(ctx) {
   const minutes = stop.minutos || dog.minutes;
   const change = lastChange(state.record, names);
   const canAct = sel.isToday && stop.canSave;
+  const walkPhotoId = sel.isToday && SAFE_ID.test(String(state.record?.fotoPaseoId || "")) ? String(state.record.fotoPaseoId) : "";
+  const walkThumb = sel.isToday ? walkThumbOf(state.record) : "";
 
   return `
     <div class="pw-sheet-backdrop" data-pw-close-sheet></div>
@@ -1404,7 +1757,7 @@ function DogSheet(ctx) {
         <div class="pw-sheet-id">
           <h2 id="pw-sheet-title" tabindex="-1">${esc(dog.name)}</h2>
           <p>${esc(dog.unknown ? "Sin ficha" : dog.size)} · ${minutes ? `${minutes} min` : "Duración sin dato"}</p>
-          <p class="pw-sheet-times">${ic("clock", "pw-icon pw-icon--sm")}${stop.hora ? `Retiro ${esc(stop.hora)}` : "Sin hora"}${entry?.kind === "deliver" && entry.time ? ` · vuelve ${esc(entry.time)}` : stop.salida ? ` · vuelve ${esc(stop.salida)}` : ""}</p>
+          <p class="pw-sheet-times">${ic("clock", "pw-icon pw-icon--sm")}${stop.hora ? `Retiro ${esc(stop.hora)}` : "Sin hora"}${entry?.kind === "deliver" && entry.time ? ` · vuelve ${esc(entry.time)}` : entry?.kind === "photo" && deliveryTime(stop, state) ? ` · vuelve ${esc(deliveryTime(stop, state))}` : stop.salida ? ` · vuelve ${esc(stop.salida)}` : ""}</p>
         </div>
         <button class="pw-sheet-close" type="button" data-pw-close-sheet aria-label="Cerrar">${ic("x", "pw-icon")}</button>
       </div>
@@ -1412,9 +1765,10 @@ function DogSheet(ctx) {
       <div class="pw-sheet-photo-actions">
         ${dog.id ? PhotoInput(dog, hasPhoto ? "Cambiar foto" : "Sacar foto", "pw-btn pw-btn--ghost") : ""}
         ${foto?.archivoId ? `<button class="pw-btn pw-btn--ghost" type="button" data-pw-photo-big="${esc(foto.archivoId)}">${ic("eye", "pw-icon")}Ver grande</button>` : ""}
+        ${walkPhotoId ? `<button class="pw-btn pw-btn--ghost pw-walk-view" type="button" data-pw-photo-big="${esc(walkPhotoId)}">${walkThumb ? `<span class="pw-walkthumb"><img src="${esc(walkThumb)}" alt="" /></span>` : ic("camera", "pw-icon")}Foto del paseo</button>` : ""}
       </div>
 
-      ${entry ? `<div class="pw-chips">${StatusChip(entry, sel)}${SafetyChips(dog, partners, { long: true })}</div>` : ""}
+      ${entry ? `<div class="pw-chips">${StatusChip(entry, sel)}${WalkChips(entry, names, { thumb: false })}${SafetyChips(dog, partners, { long: true })}</div>` : ""}
 
       ${alerts.length || extraPartners.length || dog.status !== "Activo" ? `
         <ul class="pw-alerts" aria-label="Seguridad">
@@ -1437,7 +1791,7 @@ function DogSheet(ctx) {
               return `
                 <li class="${index < step ? "is-done" : ""} ${index === step ? "is-next" : ""}">
                   <span class="pw-step-dot" aria-hidden="true">${index < step ? ic("check", "pw-icon pw-icon--sm") : index + 1}</span>
-                  <span>${item.label}<small>${index < step ? esc(state.times[index] || "sin hora") : "—"}</small>${marker ? `<small class="pw-step-who">${esc(marker)}</small>` : ""}</span>
+                  <span>${item.label}<small>${index < step ? esc(state.times[index] || (index === 1 ? "sin foto" : "sin hora")) : "—"}</small>${marker ? `<small class="pw-step-who">${esc(marker)}</small>` : ""}</span>
                   <span class="pw-sr">${index < step ? "hecho" : "pendiente"}</span>
                 </li>
               `;
@@ -1447,6 +1801,7 @@ function DogSheet(ctx) {
         ${change ? `<p class="pw-change-line ${state.record?.pendiente ? "is-pending" : ""}">${esc(change)}</p>` : ""}
         <div class="pw-sheet-actions">
           ${entry && !state.noSale ? StepButton(entry, "sheet", { size: "lg" }) : ""}
+          ${entry?.kind === "photo" && !state.noSale ? StepButton(entry, "sheet-deliver", { size: "lg", ghost: true }) : ""}
           ${!state.noSale && step === 0 ? `<button class="pw-btn pw-btn--ghost" type="button" data-pw-nosale="${esc(dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'}>${ic("x", "pw-icon")}No sale</button>` : ""}
           ${state.noSale || step > 0 ? `<button class="pw-btn pw-btn--ghost" type="button" data-pw-undo="${esc(dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'}>${ic("undo", "pw-icon")}Deshacer paso</button>` : ""}
         </div>
@@ -1467,12 +1822,12 @@ function EquipScreen({ sel, plan, stops, names }) {
   const muzzled = stops.map((stop) => stop.dog).filter(usesMuzzle);
   const short = !isHelper() && muzzled.length > MY_MUZZLES;
 
-  const toggle = ({ item, label, icon: iconName, qty }) => {
+  const toggle = ({ item, label, icon: iconName, qty, sub }) => {
     const on = checked.includes(item);
     return `
       <button class="pw-switch ${on ? "is-on" : ""}" type="button" data-pw-equip="${esc(item)}" aria-pressed="${on}">
         <span class="pw-switch-icon">${ic(iconName, "pw-icon")}</span>
-        <span class="pw-switch-label">${esc(label)}${qty ? ` <small>×${qty}</small>` : ""}</span>
+        <span class="pw-switch-label">${esc(label)}${qty ? ` <small>×${qty}</small>` : ""}${sub ? `<small class="pw-switch-sub">${esc(sub)}</small>` : ""}</span>
         <span class="pw-switch-mark" aria-hidden="true">${on ? ic("check", "pw-icon") : ""}</span>
       </button>
     `;
@@ -1622,6 +1977,7 @@ function IncidentScreen({ sel }) {
         <h1 id="pw-tab-title" tabindex="-1">${ic("alertTriangle", "pw-icon")}Incidente</h1>
         <span class="pw-title-count">${step}/3</span>
       </div>
+      ${draft.urgente ? UrgentStrip(draft, sel) : ""}
       <ol class="pw-stepper" aria-label="Pasos">
         ${INCIDENT_STEPS.map((label, index) => `<li class="${index + 1 < step ? "is-done" : ""} ${index + 1 === step ? "is-on" : ""}" ${index + 1 === step ? 'aria-current="step"' : ""}><span>${index + 1}</span>${label}</li>`).join("")}
       </ol>
@@ -1667,6 +2023,22 @@ function IncidentSent(draft, sel) {
         <button class="pw-btn pw-btn--primary" type="button" data-pw-inc-new>${ic("plus", "pw-icon")}Nuevo</button>
       </div>
     </section>
+  `;
+}
+
+// Desde "Es más grave": aviso corto a Juan antes del reporte (sin datos de tutores).
+function UrgentStrip(draft, sel) {
+  const team = incidentTeam();
+  const text = [
+    "URGENTE - Paseos Juan",
+    `${draft.dogs.join(", ") || "Un perro"} se lastimó y es más que una curación leve.${draft.detalle ? ` ${draft.detalle}.` : ""}`,
+    `Hora: ${draft.hora || sel.now.time} · Ruta: ${team.rutas || PENDIENTE}`,
+    `${isHelper() ? "Ayudante" : "Paseador"}: ${walkerName()}${team.paseador ? ` (con ${team.paseador})` : ""}`,
+    "¿Vamos a la veterinaria?",
+  ].join("\n");
+  return `
+    <p class="pw-strip pw-strip--danger">${ic("heartPulse", "pw-icon")}<span><b>Más que leve:</b> avisá a Juan y va a la veterinaria.</span></p>
+    <a class="pw-btn pw-btn--whatsapp pw-btn--xl" href="${whatsappHref(text)}" target="_blank" rel="noopener noreferrer">${ic("message", "pw-icon")}WhatsApp a Juan</a>
   `;
 }
 
@@ -1739,9 +2111,10 @@ function MoreScreen({ sel, plan, stops, names }) {
         </button>
         <ul class="pw-help" id="pw-help" ${view.open.help ? "" : "hidden"}>
           <li><span class="pw-chip-st pw-chip-st--idle">Pendiente</span><span class="pw-chip-st pw-chip-st--run">En paseo</span><span class="pw-chip-st pw-chip-st--ok">Entregado</span><span class="pw-chip-st pw-chip-st--late">Atrasado</span></li>
-          <li>"Retiré" marca el retiro y arranca el paseo. "Entregué" lo cierra.</li>
+          <li>"Retiré" → "Foto del paseo" (lo pasa a "En paseo") → "Entregué". Sin foto se entrega igual y queda "sin foto del paseo".</li>
+          ${isHelper() ? `<li>Ayudante: "Integrado" cuando ya caminó la primera cuadra con la manada. Devolvé de a 2 como máximo.</li>` : ""}
           <li>Lo que marcás lo ven ${isHelper() ? "el paseador" : "tu ayudante"}, Juan y quien supervisa.</li>
-          <li>Sin señal: seguí marcando, se envía solo. Las fotos necesitan señal.</li>
+          <li>Sin señal: seguí marcando, se envía solo. La foto del paseo se sube sola al volver la señal; la foto de la ficha necesita señal.</li>
           <li>Categoría: <b>SIN EVALUAR</b> salvo otra. ${esc(CATEGORIES["SIN EVALUAR"])}</li>
           <li>Rutas: las arma el coordinador. Base: ${esc(BUSINESS_INFO.officialSources.routes)} (12/11/2026).</li>
         </ul>
@@ -1991,9 +2364,24 @@ function rerender(focusSelector) {
 }
 
 function goTab(tab) {
+  // Curación y "otra manada" se cierran al tocar cualquier botón de la barra (también "Ruta").
+  view.helper.cure = null;
+  view.helper.herd = false;
   view.tab = tab;
   view.detailId = "";
   view.confirmClear = false;
+  render();
+  window.scrollTo({ top: 0, behavior: "auto" });
+  document.getElementById("pw-tab-title")?.focus({ preventScroll: true });
+}
+
+// Curación u "otra manada" del ayudante: ocupan la pantalla Ruta (se vuelve con "Volver"/"Listo").
+function openHelperPanel({ cure = null, herd = false }) {
+  view.tab = "ruta";
+  view.detailId = "";
+  view.helper.cure = cure;
+  view.helper.herd = herd;
+  view.helper.status = "";
   render();
   window.scrollTo({ top: 0, behavior: "auto" });
   document.getElementById("pw-tab-title")?.focus({ preventScroll: true });
@@ -2044,49 +2432,155 @@ function undoTo(stop, snap) {
   scheduleRender();
 }
 
-// "Retiré": marca retiro y paseo a la misma hora. "Entregué": cierra. Con "Deshacer" 5 segundos.
-function advance(id, { walkOnly = false } = {}) {
-  const sel = selection();
-  const stop = findStop(sel, id);
-  if (!canTouch(sel, stop)) return false;
-  const state = progressFor(sel.now.iso, sel.shift, [stop.dog])[id];
-  if (state.noSale || state.step >= STEPS.length) return false;
-  const user = currentUser();
-  const before = snapshotPaseo(state);
-  // Se mandan también las horas (y quién las marcó) anteriores: si no hay señal, la cola guarda el registro completo.
+// Los pasos ya marcados (y quién los marcó) viajan otra vez: si no hay señal, la cola guarda el
+// registro completo.
+function keptSteps(state) {
   const changes = {};
   STEPS.forEach((item, index) => {
-    if (index >= state.step) return;
+    if (index >= state.step || !state.times[index]) return;
     changes[item.field] = state.times[index];
     if (state.record?.[`${item.field}Por`]) {
       changes[`${item.field}Por`] = state.record[`${item.field}Por`];
       changes[`${item.field}PorNombre`] = state.record[`${item.field}PorNombre`] || "";
     }
   });
-  const mark = (index) => {
-    const field = STEPS[index].field;
-    changes[field] = sel.now.time;
-    changes[`${field}Por`] = user.usuario || "";
-    changes[`${field}PorNombre`] = user.nombre || "";
-  };
+  return changes;
+}
+
+function markStep(changes, index, time) {
+  const user = currentUser();
+  const field = STEPS[index].field;
+  changes[field] = time;
+  changes[`${field}Por`] = user.usuario || "";
+  changes[`${field}PorNombre`] = user.nombre || "";
+}
+
+function hasWalkPhoto(record) {
+  return Boolean(record?.fotoPaseoId || record?.fotoPendiente === true);
+}
+
+// "Retiré": deja el perro "retirado" (la foto del paseo lo pasa a "En paseo").
+// "Entregué": lo cierra, con o sin foto. Con "Deshacer" 5 segundos.
+function advance(id) {
+  const sel = selection();
+  const stop = findStop(sel, id);
+  if (!canTouch(sel, stop)) return false;
+  const state = progressFor(sel.now.iso, sel.shift, [stop.dog])[id];
+  if (state.noSale || state.step >= STEPS.length) return false;
+  const before = snapshotPaseo(state);
+  const changes = keptSteps(state);
   let text;
   if (state.step === 0) {
-    mark(0);
-    mark(1);
-    changes.estado = "paseando";
+    markStep(changes, 0, sel.now.time);
+    changes.estado = "retirado";
     text = `${stop.dog.name}: retirado ${sel.now.time}`;
-  } else if (walkOnly) {
-    mark(1);
-    changes.estado = "paseando";
-    text = `${stop.dog.name}: en paseo ${sel.now.time}`;
   } else {
-    mark(2);
+    markStep(changes, 2, sel.now.time);
     changes.estado = "entregado";
-    text = `${stop.dog.name}: entregado ${sel.now.time}`;
+    const noPhoto = !hasWalkPhoto(state.record);
+    changes.sinFotoPaseo = noPhoto;
+    text = `${stop.dog.name}: entregado ${sel.now.time}${noPhoto ? " · sin foto del paseo" : ""}`;
   }
   savePaseo(stop, sel, changes);
   showToast(text, () => undoTo(stop, before));
   return true;
+}
+
+// Foto del paseo: la miniatura propia se ve al instante (la de otro celular se baja con la sesión).
+const localWalkThumbs = new Map();
+const remoteWalkThumbs = new Map();
+
+function walkThumbOf(record) {
+  if (!record) return "";
+  const local = localWalkThumbs.get(record.id);
+  if (local && (record.fotoPaseoId || record.fotoPendiente || record.enviando)) return local;
+  const fileId = String(record.fotoPaseoId || "");
+  if (!fileId || !SAFE_ID.test(fileId) || typeof fetch !== "function" || !session.token()) return "";
+  const known = remoteWalkThumbs.get(fileId);
+  if (known?.url) return known.url;
+  if (known && (known.loading || Date.now() - known.at < 60 * 1000)) return "";
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return "";
+  const entry = { url: "", loading: true, at: Date.now() };
+  remoteWalkThumbs.set(fileId, entry);
+  fetch(`/api/archivos?id=${encodeURIComponent(fileId)}`, { headers: { Authorization: `Bearer ${session.token()}` } })
+    .then((response) => (response.ok ? response.blob() : null))
+    .then((blob) => {
+      if (blob && /^image\//.test(blob.type)) {
+        entry.url = URL.createObjectURL(blob);
+        scheduleRender();
+      }
+    })
+    .catch(() => null)
+    .finally(() => {
+      entry.loading = false;
+      entry.at = Date.now();
+    });
+  return "";
+}
+
+// "Foto del paseo": sacarla marca el paseo (src/api/client.js, fotosPaseo.sacar). Sin señal se
+// marca igual y la foto se sube sola después.
+function takeWalkPhoto(id, file) {
+  if (!file || !id) return;
+  const sel = selection();
+  const stop = findStop(sel, id);
+  if (!canTouch(sel, stop)) return;
+  const state = progressFor(sel.now.iso, sel.shift, [stop.dog])[id];
+  if (state.noSale || state.step >= STEPS.length) return;
+  if (!/^image\//.test(file.type || "")) {
+    view.syncError = "Eso no es una foto. Probá de nuevo.";
+    announceError(view.syncError);
+    scheduleRender();
+    return;
+  }
+  const iso = sel.now.iso;
+  const changes = keptSteps(state);
+  if (state.step === 0) markStep(changes, 0, sel.now.time);
+  const user = currentUser();
+  const paseo = {
+    id: paseoId(iso, stop.dog.id, sel.shift),
+    fecha: iso,
+    perroId: stop.dog.id,
+    perroNombre: stop.dog.name,
+    turno: sel.shift,
+    ruta: stop.route.ruta,
+    ...changes,
+    horaPaseoPor: user.usuario || "",
+    horaPaseoPorNombre: user.nombre || "",
+    sinFotoPaseo: false,
+  };
+  const before = snapshotPaseo(state);
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const key = `paseos:${paseo.id}`;
+  const shown = { ...(optimistic.get(key) || {}), ...paseo, estado: "paseando", horaPaseo: sel.now.time, ...(offline ? { fotoPendiente: true } : {}) };
+  optimistic.set(key, shown);
+  try {
+    const previous = localWalkThumbs.get(paseo.id);
+    if (previous) URL.revokeObjectURL(previous);
+    localWalkThumbs.set(paseo.id, URL.createObjectURL(file));
+  } catch {
+    // Sin vista previa: se ve cuando llegue del servidor.
+  }
+  view.walkBusy[id] = true;
+  scheduleRender();
+  announce(`${stop.dog.name}: guardando la foto del paseo…`);
+  const job = saveChain.then(async () => {
+    try {
+      const saved = await fotosPaseo.sacar(paseo, file);
+      if (view.syncError) view.syncError = "";
+      const pending = saved?.pendiente || saved?.fotoPendiente;
+      showToast(pending ? `${stop.dog.name}: en paseo · foto por subir` : `${stop.dog.name}: en paseo ${sel.now.time}`, () => undoTo(stop, before));
+    } catch (error) {
+      localWalkThumbs.delete(paseo.id);
+      view.syncError = `La foto no se guardó: ${error?.message || "error del servidor"} Probá de nuevo.`;
+      announceError(view.syncError);
+    } finally {
+      if (optimistic.get(key) === shown) optimistic.delete(key);
+      delete view.walkBusy[id];
+      scheduleRender();
+    }
+  });
+  saveChain = job.catch(() => null);
 }
 
 function markNoSale(id) {
@@ -2101,7 +2595,6 @@ function markNoSale(id) {
 }
 
 // Deshacer desde el detalle (más tarde que los 5 segundos): un paso para atrás.
-// Si el retiro y el paseo se marcaron juntos con "Retiré", vuelve a pendiente de una.
 function stepBack(id) {
   const sel = selection();
   const stop = findStop(sel, id);
@@ -2115,9 +2608,9 @@ function stepBack(id) {
     return true;
   }
   if (!state.step) return false;
-  const record = state.record || {};
-  const together = state.step === 2 && state.times[0] && state.times[0] === state.times[1] && (record.horaRetiroPor || "") === (record.horaPaseoPor || "");
-  const keep = together ? 0 : state.step - 1;
+  // Si se entregó sin foto, vuelve a "retirado" (no a un paseo sin foto).
+  let keep = state.step - 1;
+  if (keep === 2 && !state.times[1]) keep = 1;
   const changes = { estado: keep ? STEPS[keep - 1].estado : "pendiente" };
   STEPS.forEach((item, index) => {
     changes[item.field] = index < keep ? state.times[index] : "";
@@ -2126,9 +2619,199 @@ function stepBack(id) {
       changes[`${item.field}PorNombre`] = "";
     }
   });
+  if (keep < 2) Object.assign(changes, { fotoPaseoId: "", fotoPendiente: false });
+  if (keep < 3) Object.assign(changes, { sinFotoPaseo: false, devuelvePor: "", devuelvePorNombre: "" });
+  if (keep < 1) Object.assign(changes, { horaIntegrado: "", horaIntegradoPor: "", horaIntegradoPorNombre: "" });
   savePaseo(stop, sel, changes);
   showToast(`${stop.dog.name}: ${keep ? STEPS[keep - 1].done.toLowerCase() : "pendiente"}`, () => undoTo(stop, before));
   return true;
+}
+
+// ---------- acciones del ayudante ----------
+
+// "Integrado": el perro ya se olfateó con la manada y caminó la primera cuadra con el ayudante.
+function integrate(id) {
+  const sel = selection();
+  const stop = findStop(sel, id);
+  if (!canTouch(sel, stop)) return false;
+  const state = progressFor(sel.now.iso, sel.shift, [stop.dog])[id];
+  if (state.noSale || state.step < 1 || state.step >= STEPS.length) return false;
+  const user = currentUser();
+  const before = snapshotPaseo(state);
+  savePaseo(stop, sel, { horaIntegrado: sel.now.time, horaIntegradoPor: user.usuario || "", horaIntegradoPorNombre: user.nombre || "" });
+  showToast(`${stop.dog.name}: integrado`, () => undoTo(stop, before));
+  return true;
+}
+
+// Perros del grupo (retirados o en paseo) para las tareas del ayudante.
+function helperGroups({ sel, stops, progress }) {
+  const items = stops.filter((stop) => stop.canSave).map((stop) => ({ stop, state: stateOf(progress, stop) }));
+  const active = items.filter((item) => !item.state.noSale && item.state.step >= 1 && item.state.step < STEPS.length);
+  const mine = (item) => isMe(item.state.record?.devuelvePor);
+  const byOther = (item) => Boolean(item.state.record?.devuelvePor) && !mine(item);
+  const delivering = active.filter(mine);
+  // Para devolver: los que ya están integrados (los recién retirados tienen su tarjeta arriba).
+  const returnable = active.filter((item) => item.state.record?.horaIntegrado && !mine(item) && !byOther(item));
+  const picks = view.helper.picks.filter((dogId) => returnable.some((item) => item.stop.dog.id === dogId));
+  view.helper.picks = picks;
+  return {
+    items,
+    active,
+    toIntegrate: active.filter((item) => !item.state.record?.horaIntegrado),
+    noPhoto: active.filter((item) => item.state.step === 1 && item.state.record?.horaIntegrado && !hasWalkPhoto(item.state.record)),
+    delivering,
+    returnable,
+    picks,
+    room: Math.max(0, MAX_RETURN - delivering.length),
+    next: sel.isToday ? items.filter((item) => item.state.step === 0 && !item.state.noSale) : [],
+  };
+}
+
+// Elegir hasta 2 perros tocando su foto (un tercero no se puede).
+function toggleReturnPick(id, ctx) {
+  const groups = helperGroups(ctx);
+  if (!groups.returnable.some((item) => item.stop.dog.id === id)) return;
+  if (groups.picks.includes(id)) {
+    view.helper.picks = groups.picks.filter((value) => value !== id);
+    view.helper.status = "";
+    return;
+  }
+  if (groups.picks.length >= groups.room) {
+    view.helper.status = groups.room < MAX_RETURN ? `Máximo ${MAX_RETURN} a la vez: entregá los que llevás.` : `Máximo ${MAX_RETURN} a la vez`;
+    return;
+  }
+  view.helper.picks = [...groups.picks, id];
+  view.helper.status = "";
+}
+
+// "Voy a entregar": el paseador ve "Lo entrega <ayudante>" y sigue buscando al resto.
+function startReturn(ctx) {
+  const groups = helperGroups(ctx);
+  const chosen = groups.returnable.filter((item) => groups.picks.includes(item.stop.dog.id)).slice(0, groups.room);
+  if (!chosen.length) {
+    view.helper.status = "Tocá la foto de 1 o 2 perros.";
+    return false;
+  }
+  const sel = selection();
+  const user = currentUser();
+  const befores = chosen.map((item) => [item.stop, snapshotPaseo(item.state)]);
+  chosen.forEach((item) => savePaseo(item.stop, sel, { devuelvePor: user.usuario || "", devuelvePorNombre: user.nombre || "" }));
+  view.helper.picks = [];
+  view.helper.status = "";
+  showToast(`Llevás a ${listNames(chosen.map((item) => item.stop.dog.name))}`, () => {
+    befores.forEach(([stop, snap]) => undoTo(stop, snap));
+  });
+  return true;
+}
+
+function cancelReturn(id) {
+  const sel = selection();
+  const stop = findStop(sel, id);
+  if (!canTouch(sel, stop)) return false;
+  const state = progressFor(sel.now.iso, sel.shift, [stop.dog])[id];
+  const before = snapshotPaseo(state);
+  savePaseo(stop, sel, { devuelvePor: "", devuelvePorNombre: "" });
+  showToast(`${stop.dog.name}: vuelve a la manada`, () => undoTo(stop, before));
+  return true;
+}
+
+// Agua: cada "Di agua" suma la hora al checklist del ayudante del día (`aguas`).
+function waterRecord(iso, shift, usuario = currentUser().usuario) {
+  return recordsFor("checklists", iso).get(checklistId(iso, shift, usuario)) || null;
+}
+
+function watersOf(record) {
+  return (Array.isArray(record?.aguas) ? record.aguas : [])
+    .map((hora) => String(hora))
+    .filter((hora) => minutesOf(hora) !== null)
+    .sort((a, b) => minutesOf(a) - minutesOf(b));
+}
+
+function saveWaters(iso, shift, aguas) {
+  const record = { id: checklistId(iso, shift), fecha: iso, turno: shift, aguas };
+  return saveShared("checklists", record, { optimisticRecord: record });
+}
+
+function giveWater() {
+  const sel = selection();
+  if (!sel.isToday) return false;
+  const iso = sel.now.iso;
+  const time = sel.now.time;
+  saveWaters(iso, sel.shift, [...watersOf(waterRecord(iso, sel.shift)), time]);
+  showToast(`Agua ${time}`, () => {
+    const rest = watersOf(waterRecord(iso, sel.shift));
+    const index = rest.lastIndexOf(time);
+    if (index >= 0) rest.splice(index, 1);
+    saveWaters(iso, sel.shift, rest);
+    scheduleRender();
+  });
+  return true;
+}
+
+function toggleHeat() {
+  const sel = selection();
+  const iso = sel.now.iso;
+  const on = waterRecord(iso, sel.shift)?.calor === true;
+  const record = { id: checklistId(iso, sel.shift), fecha: iso, turno: sel.shift, calor: !on };
+  saveShared("checklists", record, { optimisticRecord: record });
+  announce(on ? "Sin calor." : `Hace calor: aviso de agua cada ${WATER_REMINDER_MIN} minutos.`);
+}
+
+// Calor: lo marca el ayudante, o hay un aviso de clima con "calor" para hoy.
+function heatOn(sel, record) {
+  if (record?.calor === true) return true;
+  return activeNotices(sel.now.iso).some((aviso) => /clima/i.test(aviso.tipo || "") && /calor/i.test(`${aviso.mensaje || ""} ${aviso.titulo || ""}`));
+}
+
+// Curación leve del botiquín: va a `incidentes` con riesgo bajo.
+function saveCure(ctx) {
+  const cure = view.helper.cure;
+  const stop = ctx.stops.find((item) => item.dog.id === cure?.dogId);
+  if (!cure || !stop) return false;
+  if (!cure.tipos.length) {
+    view.helper.status = "Tocá qué tiene.";
+    return false;
+  }
+  const sel = selection();
+  const tipos = cure.tipos.join(", ");
+  saveShared("incidentes", {
+    fecha: sel.now.iso,
+    hora: sel.now.time,
+    perros: [stop.dog.id],
+    perroNombre: stop.dog.name,
+    tipos: cure.tipos,
+    tipo: "curación leve",
+    riesgo: "bajo",
+    lesiones: "Leve",
+    conducta: `Curación leve: ${tipos}`,
+    accion: cure.gasa ? "Agua oxigenada y gasa" : "",
+    ruta: stop.route.ruta,
+    titulo: `Curación leve: ${stop.dog.name} · ${tipos}`,
+  });
+  view.helper.cure = null;
+  view.helper.status = "";
+  showToast(`Curación de ${stop.dog.name} guardada`);
+  return true;
+}
+
+// "Es más grave": abre el incidente completo con lo que ya se sabe y el WhatsApp a Juan arriba.
+function escalateCure(ctx) {
+  const cure = view.helper.cure;
+  const stop = ctx.stops.find((item) => item.dog.id === cure?.dogId);
+  const tipos = cure?.tipos || [];
+  writeJSON(INCIDENT_KEY, {
+    step: 3,
+    tipos: ["Se lastimó"],
+    detalle: tipos.length ? `Lastimadura: ${tipos.join(", ")}` : "",
+    dogs: stop ? [stop.dog.name] : [],
+    lesiones: "Sí",
+    hora: selection().now.time,
+    urgente: true,
+  });
+  view.incidentSavedText = "";
+  view.incidentStatus = "";
+  view.helper.cure = null;
+  view.helper.status = "";
 }
 
 // ---------- eventos ----------
@@ -2159,6 +2842,19 @@ function handlePaseadorClick(event) {
         const file = photo.files?.[0];
         photo.value = "";
         uploadPhoto(photo.dataset.pwPhoto, file);
+      });
+    }
+    return false;
+  }
+
+  const walkPhoto = target.closest("[data-pw-walkphoto]");
+  if (walkPhoto) {
+    if (!walkPhoto.dataset.pwListening) {
+      walkPhoto.dataset.pwListening = "1";
+      walkPhoto.addEventListener("change", () => {
+        const file = walkPhoto.files?.[0];
+        walkPhoto.value = "";
+        takeWalkPhoto(walkPhoto.dataset.pwWalkphoto, file);
       });
     }
     return false;
@@ -2261,20 +2957,120 @@ function handlePaseadorClick(event) {
     return true;
   }
 
-  const walkButton = target.closest("[data-pw-walk]");
-  if (walkButton) {
-    if (advance(walkButton.dataset.pwWalk, { walkOnly: true })) rerender('[data-pw-where="hero"]');
-    return true;
-  }
-
   const stepButton = target.closest("[data-pw-step]");
   if (stepButton) {
     const id = stepButton.dataset.pwStep;
     const where = stepButton.dataset.pwWhere;
     if (!advance(id)) return true;
-    if (where === "sheet") rerender("#pw-sheet-title");
-    else if (where === "hero") rerender('[data-pw-step][data-pw-where="hero"]');
-    else rerender(`[data-pw-step="${CSS.escape(id)}"][data-pw-where="row"]`);
+    if (where === "sheet" || where === "sheet-deliver") rerender("#pw-sheet-title");
+    else if (where === "hero" || where === "hero-more") rerender('[data-pw-where="hero"]');
+    else if (where === "ret") rerender('[data-pw-step][data-pw-where="ret"], [data-pw-return-pick], #pw-tab-title');
+    else rerender(`[data-pw-step="${CSS.escape(id)}"][data-pw-where="row"], [data-pw-walkphoto="${CSS.escape(id)}"][data-pw-where="row"]`);
+    return true;
+  }
+
+  // ----- ayudante -----
+  const integrateButton = target.closest("[data-pw-integrate]");
+  if (integrateButton) {
+    if (integrate(integrateButton.dataset.pwIntegrate)) rerender("[data-pw-integrate], [data-pw-water]");
+    return true;
+  }
+
+  const returnPick = target.closest("[data-pw-return-pick]");
+  if (returnPick) {
+    const id = returnPick.dataset.pwReturnPick;
+    toggleReturnPick(id, routeContext());
+    rerender(`[data-pw-return-pick="${CSS.escape(id)}"]`);
+    if (view.helper.status) announce(view.helper.status);
+    return true;
+  }
+
+  if (target.closest("[data-pw-return-go]")) {
+    const ok = startReturn(routeContext());
+    rerender(ok ? '[data-pw-step][data-pw-where="ret"]' : "[data-pw-return-go]");
+    if (!ok) announce(view.helper.status);
+    return true;
+  }
+
+  if (target.closest("[data-pw-return-cancel]")) {
+    helperGroups(routeContext()).delivering.forEach((item) => cancelReturn(item.stop.dog.id));
+    rerender("[data-pw-return-pick], #pw-tab-title");
+    return true;
+  }
+
+  if (target.closest("[data-pw-water]")) {
+    if (giveWater()) rerender("[data-pw-water]");
+    return true;
+  }
+
+  if (target.closest("[data-pw-heat]")) {
+    toggleHeat();
+    rerender("[data-pw-heat]");
+    return true;
+  }
+
+  if (target.closest("[data-pw-cure-open]")) {
+    openHelperPanel({ cure: { dogId: "", tipos: [], gasa: false } });
+    return true;
+  }
+
+  const cureDog = target.closest("[data-pw-cure-dog]");
+  if (cureDog && view.helper.cure) {
+    view.helper.cure.dogId = cureDog.dataset.pwCureDog;
+    view.helper.status = "";
+    rerender("#pw-tab-title");
+    return true;
+  }
+
+  const cureTipo = target.closest("[data-pw-cure-tipo]");
+  if (cureTipo && view.helper.cure) {
+    const tipo = cureTipo.dataset.pwCureTipo;
+    const list = view.helper.cure.tipos;
+    view.helper.cure.tipos = list.includes(tipo) ? list.filter((item) => item !== tipo) : [...list, tipo];
+    view.helper.status = "";
+    rerender(`[data-pw-cure-tipo="${CSS.escape(tipo)}"]`);
+    return true;
+  }
+
+  if (target.closest("[data-pw-cure-gasa]") && view.helper.cure) {
+    view.helper.cure.gasa = !view.helper.cure.gasa;
+    rerender("[data-pw-cure-gasa]");
+    return true;
+  }
+
+  if (target.closest("[data-pw-cure-ok]")) {
+    if (saveCure(routeContext())) {
+      rerender("[data-pw-cure-open]");
+    } else {
+      rerender("[data-pw-cure-tipo]");
+      announce(view.helper.status);
+    }
+    return true;
+  }
+
+  if (target.closest("[data-pw-cure-grave]")) {
+    escalateCure(routeContext());
+    goTab("incidente");
+    return true;
+  }
+
+  if (target.closest("[data-pw-cure-back]")) {
+    if (view.helper.cure?.dogId) view.helper.cure.dogId = "";
+    else view.helper.cure = null;
+    view.helper.status = "";
+    rerender(view.helper.cure ? "#pw-tab-title" : "[data-pw-cure-open]");
+    return true;
+  }
+
+  if (target.closest("[data-pw-herd-open]")) {
+    openHelperPanel({ herd: true });
+    announce(`${HERD_LINES.join(". ")}.`);
+    return true;
+  }
+
+  if (target.closest("[data-pw-herd-close]")) {
+    view.helper.herd = false;
+    rerender("[data-pw-herd-open]");
     return true;
   }
 
@@ -2481,6 +3277,15 @@ function handlePaseadorChange(event) {
       const file = photo.files?.[0];
       photo.value = "";
       uploadPhoto(photo.dataset.pwPhoto, file);
+    }
+    return true;
+  }
+  const walkPhoto = event.target.closest?.("[data-pw-walkphoto]");
+  if (walkPhoto) {
+    if (!walkPhoto.dataset.pwListening) {
+      const file = walkPhoto.files?.[0];
+      walkPhoto.value = "";
+      takeWalkPhoto(walkPhoto.dataset.pwWalkphoto, file);
     }
     return true;
   }

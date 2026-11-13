@@ -27,7 +27,7 @@ import {
   plantillasDesdePlanilla,
   sumarMinutos,
 } from "../data/realData.js";
-import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros } from "../api/client.js";
+import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros, usuarios } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
 
@@ -301,6 +301,37 @@ function personName(value) {
   const n = normalize(value);
   const member = TEAM.find((t) => t.id === n || normalize(t.name) === n || normalize(t.name.split(" ")[0]) === n);
   return member ? member.name : value;
+}
+
+// Nombre de la persona para guardar en la ruta (paseadorNombre / ayudanteNombre): así paseador y
+// supervisor muestran "Sebastián" y no el usuario. Sale del equipo autorizado, de la lista de
+// usuarios (solo si entra el admin) o de lo que esa persona ya cargó en la app. Si no se conoce, "".
+let userNames = null;
+
+function ensureUserNames() {
+  if (userNames || session.user()?.rol !== "admin") return;
+  userNames = new Map();
+  usuarios
+    .list()
+    .then((list) => list.forEach((u) => u.usuario && u.nombre && userNames.set(normalize(u.usuario), String(u.nombre))))
+    .catch(() => {});
+}
+
+function knownName(usuario, previos = {}) {
+  const n = normalize(usuario);
+  if (!n) return "";
+  const member = TEAM.find((t) => t.id === n || normalize(t.name) === n);
+  if (member) return member.name;
+  if (userNames?.get(n)) return userNames.get(n);
+  if (previos[n]) return previos[n];
+  for (const col of COL_NAMES) {
+    for (const r of cached(col)) {
+      for (const [who, name] of [["creadoPor", "creadoPorNombre"], ["actualizadoPor", "actualizadoPorNombre"], ["paseador", "paseadorNombre"], ["ayudante", "ayudanteNombre"]]) {
+        if (r[name] && normalize(r[who]) === n) return String(r[name]);
+      }
+    }
+  }
+  return "";
 }
 
 /* ------------------------------------------------------------------ */
@@ -822,7 +853,13 @@ function cleanStops(paradas) {
 }
 
 function openEditor(route, { modo, fecha = "", nuevo = false, solicitud = null } = {}) {
+  ensureUserNames();
+  // Nombres que ya tenía guardados la ruta (se mantienen si sigue la misma persona).
+  const previos = {};
+  if (route.paseador && route.paseadorNombre) previos[normalize(route.paseador)] = String(route.paseadorNombre);
+  if (route.ayudante && route.ayudanteNombre) previos[normalize(route.ayudante)] = String(route.ayudanteNombre);
   editor = {
+    nombresPrevios: previos,
     modo,
     fecha,
     nuevo,
@@ -906,7 +943,9 @@ function routeRecordFromEditor() {
     turno: editor.turno,
     ruta: editor.ruta,
     paseador: editor.paseador.trim(),
+    paseadorNombre: knownName(editor.paseador, editor.nombresPrevios),
     ayudante: editor.ayudante.trim(),
+    ayudanteNombre: knownName(editor.ayudante, editor.nombresPrevios),
     supervisor: editor.supervisor.trim(),
     notas: editor.notas.trim(),
     paradas: cleanStops(editor.paradas),
