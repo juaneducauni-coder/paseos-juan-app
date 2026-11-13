@@ -1,0 +1,257 @@
+/* Página de precios (/precios): corta, clara, mobile first. Usa los tokens de landing.css. */
+
+.precios-main {
+  display: grid;
+  gap: 16px;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 116px 16px 48px;
+}
+
+.precios-head h1 {
+  margin: 0 0 12px;
+  font-family: Sora, Montserrat, Inter, system-ui, sans-serif;
+  font-size: clamp(2.1rem, 6vw, 3.4rem);
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.precios-fecha {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.precios-aviso {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--public-muted);
+  font-weight: 700;
+}
+
+.precios-aviso .line-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--green);
+}
+
+.precios-card,
+.precios-cta {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--public-card);
+  box-shadow: var(--soft-shadow);
+  padding: 20px 16px;
+}
+
+.precios-card h2,
+.precios-cta h2 {
+  margin: 0 0 4px;
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.precios-sub {
+  margin: 0 0 14px;
+  color: var(--public-muted);
+}
+
+.precios-table-wrap {
+  overflow-x: auto;
+}
+
+.precios-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  table-layout: fixed;
+}
+
+.precios-table thead th:first-child {
+  width: 28%;
+}
+
+.precios-table th,
+.precios-table td {
+  border-top: 1px solid var(--line);
+  padding: 12px 4px;
+  text-align: right;
+}
+
+.precios-table thead th {
+  border-top: 0;
+  color: var(--public-muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.precios-table tbody th {
+  color: var(--green);
+  font-weight: 900;
+  text-align: left;
+}
+
+.precios-table tbody th small {
+  display: block;
+  color: var(--public-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.precios-table td {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.precios-descuentos {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.precios-descuentos li {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  border-radius: 18px;
+  background: var(--public-tint);
+  padding: 14px 6px;
+}
+
+.precios-descuentos strong {
+  color: var(--green);
+  font-size: 1.6rem;
+  font-weight: 950;
+}
+
+.precios-descuentos span {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.precios-consultar {
+  display: grid;
+  gap: 0;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.precios-consultar li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.precios-consultar li:first-child {
+  border-top: 0;
+}
+
+.precios-consultar strong {
+  display: block;
+  color: var(--ink);
+}
+
+.precios-consultar span {
+  color: var(--public-muted);
+  font-size: 0.92rem;
+}
+
+.precios-consultar .secondary-button {
+  flex: none;
+  min-height: 48px;
+  padding: 0 16px;
+  font-size: 0.82rem;
+}
+
+.precios-cta {
+  display: grid;
+  gap: 12px;
+  border: 0;
+  background: #015f3d;
+  color: #ffffff;
+}
+
+.precios-cta p {
+  margin: 0;
+  color: #e3efe8;
+}
+
+.precios-cta small {
+  color: #e3efe8;
+}
+
+.precios-cta-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.precios-cta .primary-button {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #015f3d;
+  box-shadow: none;
+}
+
+.precios-cta .secondary-button {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: transparent;
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .precios-cta {
+  background: #123528;
+}
+
+html[data-theme="dark"] .precios-cta p,
+html[data-theme="dark"] .precios-cta small {
+  color: #c9d8cf;
+}
+
+html[data-theme="dark"] .precios-cta .primary-button {
+  border-color: #5cc497;
+  background: #5cc497;
+  color: #0b120e;
+}
+
+html[data-theme="dark"] .precios-cta .secondary-button {
+  border-color: rgba(238, 243, 239, 0.5);
+  background: transparent;
+  color: #eef3ef;
+}
+
+@media (min-width: 640px) {
+  .precios-main {
+    padding: 132px 24px 64px;
+  }
+
+  .precios-card,
+  .precios-cta {
+    padding: 26px 28px;
+  }
+
+  .precios-table td {
+    font-size: 1.15rem;
+  }
+
+  .precios-cta-actions {
+    grid-template-columns: repeat(2, max-content);
+  }
+}

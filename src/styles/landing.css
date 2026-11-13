@@ -78,65 +78,6 @@
   font-size: 1.16rem;
 }
 
-.discount-card {
-  display: grid;
-  gap: 10px;
-  border: 1px solid rgba(2, 95, 64, 0.16);
-  border-radius: 24px;
-  background: rgba(250, 248, 242, 0.86);
-  box-shadow: var(--soft-shadow);
-  padding: 22px;
-}
-
-.discount-card h3 {
-  margin: 0 0 4px;
-  font-size: 0.86rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.tariff-table {
-  display: grid;
-  grid-template-columns: 180px repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  align-items: stretch;
-}
-
-.tariff-sizes {
-  display: grid;
-  gap: 12px;
-  align-content: end;
-  padding: 24px 18px;
-}
-
-.benefits-panel,
-.single-prices-panel,
-.products-panel {
-  align-content: start;
-}
-
-.benefit-group {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-}
-
-.benefit-group ul {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding-left: 18px;
-  color: var(--text);
-}
-
-.single-price-row {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-}
-
 .contact-section > :first-child {
   justify-self: end;
 }
@@ -181,13 +122,6 @@
     gap: 34px;
   }
 
-  .tariff-table {
-    grid-template-columns: 1fr;
-  }
-
-  .tariff-sizes {
-    display: none;
-  }
 }
 
 @media (max-width: 760px) {
@@ -222,29 +156,6 @@
 
 .contact-section h2 {
   font-size: clamp(2.2rem, 3.4vw, 3.45rem);
-}
-
-.promo-panel {
-  display: grid;
-  gap: 14px;
-  align-content: start;
-  border-color: rgba(2, 95, 64, 0.28);
-  background: linear-gradient(160deg, rgba(234, 244, 239, 0.95), rgba(250, 248, 242, 0.95));
-}
-
-.promo-panel h3 {
-  margin: 0;
-  color: var(--ink);
-  line-height: 1.25;
-}
-
-.promo-panel p:not(.eyebrow) {
-  margin: 0;
-  color: var(--text);
-}
-
-.promo-panel .eyebrow {
-  margin: 0;
 }
 
 .evaluation-form [aria-invalid] {
@@ -335,4 +246,636 @@
 .evaluation-form input[type="file"] {
   padding: 10px;
   background: var(--card, #fff);
+}
+
+/* ---- E-028: presentación con servicios, sin precios (13/11/2026) ---- */
+
+:root {
+  --public-muted: #4a514c;
+  --public-card: #ffffff;
+  --public-tint: rgba(1, 95, 61, 0.09);
+}
+
+html[data-theme="dark"] {
+  --public-muted: #b4c0b8;
+  --public-card: #161e1a;
+  --public-tint: rgba(92, 196, 151, 0.14);
+}
+
+/* Encabezado público: accesos directos a Precios y Tienda en pantallas medianas y grandes */
+.header-link {
+  display: none;
+  min-height: 42px;
+  align-items: center;
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  padding: 0 12px;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.header-link:hover,
+.header-link.is-current {
+  color: var(--green);
+  background: var(--public-tint);
+}
+
+@media (min-width: 761px) {
+  .header-link {
+    display: inline-flex;
+  }
+}
+
+.menu-nav a[aria-current="page"] {
+  color: #9fbd72;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.footer-links a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--ink);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.footer-links a:hover {
+  color: var(--green);
+}
+
+.footer p {
+  color: var(--public-muted);
+}
+
+.anchor-alias {
+  position: relative;
+  top: -110px;
+  display: block;
+}
+
+/* Servicios */
+.services-section,
+.how-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 72px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.services-heading h2,
+.how-section h2,
+.prices-strip h2 {
+  margin-bottom: 0;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.services-heading {
+  max-width: 720px;
+  margin-bottom: 28px;
+}
+
+.services-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.service-card {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background: var(--public-card);
+  box-shadow: var(--soft-shadow);
+  padding: 22px;
+}
+
+.service-card h3 {
+  margin: 4px 0 0;
+  font-size: 1.2rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.service-card p {
+  margin: 0;
+  color: var(--public-muted);
+}
+
+.service-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--public-tint);
+  color: var(--green);
+}
+
+.service-icon .line-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.service-button {
+  width: 100%;
+  margin-top: 6px;
+}
+
+/* La tarjeta de la tienda adelanta su marca propia: negro y verde */
+.service-card--shop {
+  border-color: #1f2a24;
+  background: #0b0f0d;
+  color: #f2f5f3;
+}
+
+.service-card--shop p {
+  color: #c4cec8;
+}
+
+.service-card--shop .service-icon {
+  background: rgba(92, 196, 151, 0.16);
+  color: #5cc497;
+}
+
+.service-card--shop .primary-button,
+html[data-theme="dark"] .service-card--shop .primary-button {
+  border-color: #5cc497;
+  background: #5cc497;
+  color: #0b0f0d;
+}
+
+.service-card--promo {
+  border: 2px solid var(--green);
+  background: linear-gradient(160deg, var(--public-tint), var(--public-card) 70%);
+}
+
+@media (min-width: 640px) {
+  .services-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .services-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Franja "Ver precios" */
+.prices-strip {
+  display: grid;
+  gap: 18px;
+  align-items: center;
+  max-width: 1132px;
+  margin: 8px auto 0;
+  border-radius: 28px;
+  background: #015f3d;
+  color: #ffffff;
+  padding: 28px 22px;
+  scroll-margin-top: 110px;
+}
+
+.prices-strip p {
+  margin: 10px 0 0;
+  color: #e3efe8;
+}
+
+.prices-strip .primary-button {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #015f3d;
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .prices-strip {
+  background: #123528;
+  color: #eef3ef;
+}
+
+html[data-theme="dark"] .prices-strip p {
+  color: #c9d8cf;
+}
+
+html[data-theme="dark"] .prices-strip .primary-button {
+  border-color: #5cc497;
+  background: #5cc497;
+  color: #0b120e;
+}
+
+@media (min-width: 761px) {
+  .prices-strip {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 36px 40px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .prices-strip {
+    margin-inline: 16px;
+  }
+}
+
+/* Cómo trabajamos */
+.how-section {
+  display: grid;
+  gap: 28px;
+}
+
+.how-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.how-list li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.how-list strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.05rem;
+}
+
+.how-list p {
+  margin: 4px 0 0;
+  color: var(--public-muted);
+}
+
+@media (min-width: 900px) {
+  .how-section {
+    grid-template-columns: minmax(250px, 0.7fr) minmax(0, 1fr);
+    gap: 48px;
+  }
+
+  .how-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+}
+
+.trust-section details p {
+  color: var(--public-muted);
+}
+
+@media (max-width: 760px) {
+  .services-section,
+  .how-section {
+    padding: 56px 16px;
+  }
+}
+
+/* ---- Formulario rápido de evaluación ---- */
+
+.quick-form {
+  grid-template-columns: minmax(0, 1fr);
+  width: min(100%, 720px);
+}
+
+.quick-form [hidden] {
+  display: none !important;
+}
+
+.evaluation-heading p:not(.eyebrow) {
+  color: var(--public-muted);
+}
+
+.quick-required,
+.quick-optional {
+  background: var(--public-card);
+}
+
+.quick-field {
+  color: var(--ink);
+}
+
+.req {
+  color: var(--green);
+}
+
+.field-with-mic {
+  position: relative;
+  display: block;
+}
+
+.field-with-mic:has(.mic-mini) input,
+.field-with-mic:has(.mic-mini) textarea {
+  padding-right: 56px;
+}
+
+.quick-form input:not([type="file"]):not([type="radio"]):not([type="checkbox"]) {
+  min-height: 52px;
+  font-size: 1rem;
+}
+
+.mic-mini {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 0;
+  border-radius: 12px;
+  background: var(--public-tint);
+  color: var(--green);
+  cursor: pointer;
+}
+
+.mic-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.mic-mini.is-listening,
+.voice-button.is-listening {
+  border-color: #b3261e;
+  background: #b3261e;
+  color: #ffffff;
+}
+
+.is-dictating {
+  border-color: var(--green) !important;
+  box-shadow: 0 0 0 4px var(--public-tint) !important;
+}
+
+/* Botones de opción (radio y casillas con aspecto de botón) */
+.choice-group {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.evaluation-board .choice-group legend {
+  float: none;
+  width: auto;
+  font-size: 1rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.choice-group legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice {
+  position: relative;
+  display: inline-flex;
+  color: var(--ink);
+}
+
+.choice input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.choice > span {
+  display: inline-flex;
+  min-width: 48px;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--public-card);
+  font-weight: 800;
+  padding: 0 18px;
+}
+
+.choice input:checked + span {
+  border-color: var(--green);
+  background: var(--green);
+  color: #ffffff;
+}
+
+html[data-theme="dark"] .choice input:checked + span {
+  color: #0b120e;
+}
+
+.choice input:focus-visible + span {
+  outline: 3px solid #2f9a6c;
+  outline-offset: 2px;
+}
+
+.choice-group--days .choice-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.choice-group--days .choice {
+  display: flex;
+}
+
+.choice-group--days .choice > span {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+}
+
+/* Dictado por voz */
+.voice-field {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-field label {
+  color: var(--ink);
+}
+
+.voice-field textarea {
+  min-height: 120px;
+  font-size: 1rem;
+}
+
+.voice-button {
+  display: inline-flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 2px solid var(--green);
+  border-radius: 16px;
+  background: var(--public-tint);
+  color: var(--green);
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 900;
+  padding: 0 22px;
+}
+
+.voice-button .mic-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.voice-hint {
+  margin: 0;
+  color: var(--public-muted);
+  font-size: 0.92rem;
+}
+
+.quick-more {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0 16px;
+}
+
+.quick-more summary {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  color: var(--green);
+}
+
+.quick-more[open] {
+  padding-bottom: 16px;
+}
+
+.quick-note {
+  margin: 0;
+  color: var(--public-muted);
+  font-size: 0.92rem;
+}
+
+/* Continuar con Google */
+.google-box {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.google-button {
+  width: 100%;
+  max-width: 400px;
+  min-height: 44px;
+}
+
+.google-connected {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.link-button {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 850;
+  padding: 0 4px;
+  text-decoration: underline;
+}
+
+.google-or {
+  margin: 0;
+  color: var(--public-muted);
+  font-size: 0.88rem;
+}
+
+/* Barra fija con "Enviar": queda a la vista mientras se completa el formulario.
+   Va por encima de los botones flotantes (WhatsApp y accesibilidad) sin taparlos. */
+.quick-submit-bar {
+  position: sticky;
+  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  background: rgba(250, 248, 242, 0.97);
+  box-shadow: 0 16px 40px rgba(15, 31, 19, 0.18);
+  padding: 10px 10px 10px 16px;
+}
+
+html[data-theme="dark"] .quick-submit-bar {
+  background: rgba(22, 30, 26, 0.97);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.quick-submit-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.quick-missing {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.quick-submit-bar .evaluation-status {
+  font-size: 0.86rem;
+  line-height: 1.3;
+}
+
+.quick-submit {
+  flex: none;
+  min-width: 132px;
+  min-height: 56px;
+  font-size: 1.05rem;
+}
+
+.quick-submit[aria-disabled="true"],
+html[data-theme="dark"] .quick-submit[aria-disabled="true"] {
+  border-color: var(--line-strong);
+  background: var(--line);
+  color: var(--public-muted);
+  box-shadow: none;
+}
+
+@media (max-width: 760px) {
+  .contact-section {
+    padding-inline: 16px;
+  }
+
+  .quick-form .evaluation-board {
+    padding: 18px 16px;
+  }
+
+  .quick-submit {
+    min-width: 112px;
+  }
 }

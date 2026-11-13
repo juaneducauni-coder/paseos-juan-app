@@ -1,5 +1,7 @@
 @import "./styles/base.css";
 @import "./styles/landing.css";
+@import "./styles/precios.css";
+@import "./styles/tienda.css";
 @import "./styles/acceso.css";
 @import "./styles/cliente.css";
 @import "./styles/paseador.css";

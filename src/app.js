@@ -16,6 +16,8 @@ import {
 import { startLavaLamp, hydrateReveal } from "./ui/lava.js";
 import { initAccessibility, onAccessibilityChange } from "./ui/accesibilidad.js";
 import { landingPage, registerLandingEvents } from "./views/landing.js";
+import { preciosPage } from "./views/precios.js";
+import { tiendaPage, registerTiendaEvents } from "./views/tienda.js";
 import { loginPage, registroPage, sinPermisoPage, registerAccesoEvents } from "./views/acceso.js";
 import { session, ROLE_PAGES, onDataChange, flushPending } from "./api/client.js";
 import { clientDashboard, registerClienteEvents } from "./views/cliente.js";
@@ -40,9 +42,12 @@ export function navigate(path) {
     return;
   }
 
+  const changesPage = normalizePath(path.split("?")[0]) !== normalizePath(window.location.pathname);
   window.history.pushState({}, "", path);
   state.menuOpen = false;
   render();
+  // Al pasar a otra página (por ejemplo de la presentación a /precios), arrancar arriba.
+  if (changesPage) window.scrollTo({ top: 0, behavior: "instant" });
 }
 
 window.addEventListener("popstate", render);
@@ -57,6 +62,7 @@ window.addEventListener("storage", (e) => {
 
 registerSharedEvents();
 registerLandingEvents();
+registerTiendaEvents();
 registerAccesoEvents();
 registerClienteEvents();
 registerPaseadorEvents();
@@ -82,6 +88,18 @@ export function render() {
 
   if (path === "/") {
     app.innerHTML = landingPage();
+    hydrateAfterRender();
+    return;
+  }
+
+  if (path === "/precios") {
+    app.innerHTML = preciosPage();
+    hydrateAfterRender();
+    return;
+  }
+
+  if (path === "/tienda") {
+    app.innerHTML = tiendaPage();
     hydrateAfterRender();
     return;
   }
