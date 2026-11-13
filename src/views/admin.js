@@ -1,6 +1,7 @@
 // Vista del rol Admin (Juan Buitrago, fundador).
 // Datos fijos: src/data/realData.js (BASE RUTAS, precios). Datos del día: servidor compartido
-// (src/api/client.js): paseos, incidentes, checklists y pedidos. Usuarios: /api/usuarios.
+// (src/api/client.js): paseos, incidentes, checklists, pedidos, rutas, plantillas y avisos.
+// Solo admin: pagos (registro de apoyo) y resumen de clientes. Usuarios: /api/usuarios.
 // Lo que no está confirmado se rotula como "Pendiente de confirmar".
 // Las marcas de "hecho" de las prioridades se guardan solo en este dispositivo.
 import {
@@ -19,10 +20,11 @@ import {
   CATEGORIES,
   formatPeso,
   goesOn,
+  plantillasDesdePlanilla,
 } from "../data/realData.js";
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, registros, usuarios, onDataChange, hoyAR, ROLE_PAGES } from "../api/client.js";
+import { session, registros, usuarios, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS } from "../api/client.js";
 
 const DONE_KEY = "paseosJuanAdmin_prioridadesHechas";
 const OPEN_KEY = "paseosJuanAdmin_seccionesAbiertas";
@@ -30,7 +32,13 @@ const TIME_ZONE = "America/Argentina/Buenos_Aires";
 const SIZES = ["Pequeño", "Mediano", "Grande"];
 const SHIFT_MORNING = SHIFTS.manana.label;
 const SHIFT_AFTERNOON = SHIFTS.tarde.label;
-const LIVE_COLS = ["paseos", "incidentes", "checklists", "pedidos"];
+const LIVE_COLS = ["paseos", "incidentes", "checklists", "pedidos", "rutas", "plantillas", "avisos"];
+// Solo admin: registro de apoyo de pagos y clientes (para el resumen por barrio, sin teléfonos).
+const ADMIN_COLS = ["pagos", "clientes"];
+// Un perro está atrasado si pasaron más de estos minutos desde la hora prevista y no se retiró.
+const LATE_MINUTES = 10;
+const PAGO_MEDIOS = ["Efectivo", "Transferencia", "Naranja X"];
+const LIBRO = "Libro contable del Sistema de Gestión";
 
 // Último mensaje de estado (se escribe en la región aria-live después de cada render).
 let pendingStatus = "";
@@ -48,11 +56,16 @@ const ui = {
   openDogs: new Set(), // listas de perros abiertas en "El día en vivo"
   liveDay: null,
   liveError: "",
-  msgs: { users: null, live: null },
+  adminLoaded: false,
+  adminError: "",
+  pagosMes: null, // "AAAA-MM" o "todos"; null = mes actual
+  lateSignature: "",
+  msgs: { users: null, live: null, pagos: null },
 };
 
 // Lo que se va escribiendo en los formularios, para no perderlo si la página se vuelve a dibujar.
-const drafts = { crear: { nombre: "", usuario: "", rol: "paseador", pin: "" }, reset: { pin: "" }, roles: {} };
+const emptyPago = () => ({ fecha: hoyAR(), concepto: "", monto: "", medio: "", pasadoAlLibro: false });
+const drafts = { crear: { nombre: "", usuario: "", rol: "paseador", pin: "" }, reset: { pin: "" }, roles: {}, pago: emptyPago() };
 
 /* ---------- Utilidades ---------- */
 
@@ -147,8 +160,9 @@ function isAdminPage() {
 /* ---------- El día en vivo (datos compartidos) ---------- */
 
 function liveOpts(col, hoy) {
-  // Los pedidos nuevos pueden ser de días anteriores: se piden todos.
-  return col === "pedidos" ? {} : { desde: hoy };
+  // Pedidos nuevos y avisos vigentes pueden ser de días anteriores; las plantillas no tienen fecha
+  // (se repiten cada semana); pagos y clientes se miran completos.
+  return ["pedidos", "plantillas", "avisos", ...ADMIN_COLS].includes(col) ? {} : { desde: hoy };
 }
 
 function shiftOf(record) {
@@ -162,6 +176,85 @@ function shiftOf(record) {
 
 function recordTime(record) {
   return record.hora || timeAR(record.creadoEn);
+}
+
+// Minutos desde la medianoche, en hora de Argentina.
+function nowMinutesAR(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return (get("hour") % 24) * 60 + get("minute");
+}
+
+function toMinutes(hhmm) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || "").trim());
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+// Separa la mañana de la tarde por la hora (el sábado la planilla dice "Mañana" con horas de tarde).
+const MIDDAY = 13 * 60 + 30;
+
+function normText(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// Ruta efectiva de hoy: el cambio del día (rutas) manda sobre la plantilla semanal. Si el servidor
+// todavía no tiene plantilla para este día, se usan los horarios de BASE RUTAS con aviso.
+function effectiveRoutes(hoy, dayName) {
+  const rutasHoy = registros.cached("rutas", liveOpts("rutas", hoy)).filter((ruta) => ruta.fecha === hoy);
+  const plantillas = registros.cached("plantillas", liveOpts("plantillas", hoy)).filter((p) => normText(p.dia) === normText(dayName));
+  const fromSheet = !plantillas.length;
+  const base = fromSheet ? plantillasDesdePlanilla().filter((p) => normText(p.dia) === normText(dayName)) : plantillas;
+  const byCode = new Map();
+  base.forEach((p) => byCode.set(p.ruta || p.id, { ...p, fuente: fromSheet ? "planilla" : "plantilla" }));
+  rutasHoy.forEach((r) => byCode.set(r.ruta || String(r.id).slice(11), { ...r, fuente: "dia" }));
+  const firstTime = (route) => (route.paradas || []).map((stop) => stop.hora || "99:99").sort()[0] || "99:99";
+  const list = [...byCode.values()].sort((a, b) => firstTime(a).localeCompare(firstTime(b)) || String(a.ruta).localeCompare(String(b.ruta)));
+  return { list, fromSheet: list.some((route) => route.fuente === "planilla") };
+}
+
+// Cumplimiento por ruta: a tiempo / atrasados (hora prevista + 10 min sin retiro) / entregados.
+function routeCompliance(routes, paseos, nowMin) {
+  const sameDog = (stop, paseo) => (stop.perroId && paseo.perroId
+    ? stop.perroId === paseo.perroId
+    : normText(stop.perroNombre) && normText(stop.perroNombre) === normText(paseo.perroNombre));
+  const stopsOfDog = (stop) => routes.reduce((sum, route) => sum + (route.paradas || []).filter((other) => sameDog(stop, other)).length, 0);
+
+  return routes.map((route) => {
+    const shift = shiftOf({ turno: route.turno });
+    const stops = (route.paradas || []).map((stop) => {
+      const candidates = paseos.filter((paseo) => sameDog(stop, paseo));
+      const paseo = candidates.find((item) => shiftOf(item) === shift)
+        || (candidates.length === 1 && stopsOfDog(stop) === 1 ? candidates[0] : null);
+      const estado = paseo?.estado || "pendiente";
+      const prevista = toMinutes(stop.hora);
+      let status = "a-tiempo";
+      if (estado === "entregado") status = "entregado";
+      else if (estado === "no-sale") status = "no-sale";
+      else if (estado === "pendiente" && prevista !== null && nowMin > prevista + LATE_MINUTES) status = "atrasado";
+      return { ...stop, paseo, estado, status, prevista, atraso: status === "atrasado" ? nowMin - prevista : 0 };
+    });
+    const count = (status) => stops.filter((stop) => stop.status === status).length;
+    return {
+      route,
+      shift,
+      stops,
+      aTiempo: count("a-tiempo"),
+      atrasados: count("atrasado"),
+      entregados: count("entregado"),
+      noSale: count("no-sale"),
+    };
+  });
+}
+
+// Avisos por barrio vigentes hoy: desde su fecha hasta "vigenteHasta" (si no tiene, solo ese día).
+function avisosVigentes(hoy) {
+  return registros.cached("avisos", liveOpts("avisos", hoy))
+    .filter((aviso) => {
+      const desde = aviso.fecha || String(aviso.creadoEn || "").slice(0, 10);
+      const hasta = aviso.vigenteHasta || desde;
+      return desde && desde <= hoy && hasta >= hoy;
+    })
+    .sort((a, b) => String(b.creadoEn || "").localeCompare(String(a.creadoEn || "")));
 }
 
 function liveData() {
@@ -191,18 +284,46 @@ function liveData() {
       pendientes: count("pendiente"),
     };
   });
-  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts };
+  const nowMin = nowMinutesAR();
+  const effective = effectiveRoutes(hoy, todayInfo().dayName);
+  const compliance = routeCompliance(effective.list, paseos, nowMin);
+  const late = compliance.flatMap((item) => item.stops.filter((stop) => stop.status === "atrasado").map((stop) => ({ ...stop, route: item.route })));
+  // Atrasos del turno actual: misma mitad del día que ahora.
+  const lateNow = late.filter((stop) => (stop.prevista < MIDDAY) === (nowMin < MIDDAY));
+  const avisos = avisosVigentes(hoy);
+  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos };
+}
+
+function lateSignature(live) {
+  return live.late.map((stop) => `${stop.route.ruta}:${stop.perroId || stop.perroNombre}`).join("|");
 }
 
 // Primera carga del día: se pide todo una vez (para poder mostrar errores) y después
 // registros.watch lo refresca solo cada minuto con la pestaña visible.
 function startLive() {
   const hoy = hoyAR();
+  if (!ui.adminLoaded) {
+    ui.adminLoaded = true;
+    refreshAdminData().finally(() => {
+      ADMIN_COLS.forEach((col) => registros.watch(col, liveOpts(col, hoy)));
+    });
+  }
   if (ui.liveDay === hoy) return;
   ui.liveDay = hoy;
   refreshLive(false).finally(() => {
     LIVE_COLS.forEach((col) => registros.watch(col, liveOpts(col, hoy)));
   });
+}
+
+// Pagos y clientes (solo admin). Los errores se muestran en la sección de pagos.
+async function refreshAdminData() {
+  const hoy = hoyAR();
+  const results = await Promise.allSettled(ADMIN_COLS.map((col) => registros.list(col, liveOpts(col, hoy))));
+  const errors = [...new Set(results.filter((r) => r.status === "rejected").map((r) => r.reason?.message || "No se pudieron traer los datos."))];
+  const before = ui.adminError;
+  ui.adminError = errors.join(" ");
+  if (ui.adminError) setMsg("pagos", `No se pudieron traer pagos o clientes: ${ui.adminError}`, true);
+  if (before !== ui.adminError) rerender();
 }
 
 async function refreshLive(manual) {
@@ -219,21 +340,24 @@ async function refreshLive(manual) {
 
 /* ---------- Usuarios y accesos ---------- */
 
-const ROLE_LABELS = { admin: "Admin", coordinador: "Coordinador", supervisor: "Supervisor", paseador: "Paseador", marketing: "Marketing" };
+// Etiquetas de los roles: ROLE_LABELS de src/api/client.js (incluye "Ayudante de paseador").
 const PAGE_LABELS = { admin: "Admin", coordinador: "Coordinación", supervisor: "Supervisor", paseador: "Paseador" };
-// Qué datos ve y carga cada rol (api/_lib/permisos.js y docs/datos-compartidos.md), en una línea.
+// Qué hace y qué datos ve cada rol (tabla de roles de docs/datos-compartidos.md, 13/11/2026,
+// y api/_lib/permisos.js), en una línea.
 const ROLE_DATA = {
-  admin: "ve y carga todo, y crea usuarios.",
-  coordinador: "ve paseos, incidentes, rutas y cierres; carga pedidos, fichas, observaciones y pagos de apoyo. No ve checklists.",
-  supervisor: "ve y carga paseos, checklists, incidentes, observaciones, rutas y cierres; ve fichas. No ve pedidos ni pagos.",
-  paseador: "ve y carga paseos, checklists, incidentes y observaciones; ve las rutas. No ve pedidos, fichas ni pagos.",
-  marketing: "ve y carga pedidos (incluye los del formulario web). Nada de la operación.",
+  admin: "todo: usuarios, pagos e indicadores. Es el único que ve y carga pagos.",
+  coordinador: "arma las rutas y los horarios (plantilla semanal y cambios del día), gestiona los clientes, atiende pedidos, carga fichas y avisa lo que pasa en cada barrio. Ve paseos, incidentes y cierres. No ve plata ni checklists.",
+  supervisor: "controla que se cumplan los paseos del momento: quién falta retirar, atrasos, entregas, incidentes y equipo. Carga paseos, checklists, incidentes, cierres y avisos. Ve las rutas pero no las arma. No ve clientes, pedidos ni plata.",
+  paseador: "hace su ruta del turno, en orden y con horario: carga paseos, checklists, incidentes y observaciones. Ve rutas y avisos. No ve clientes, pedidos, fichas ni plata.",
+  ayudante: "acompaña al paseador en su ruta: marca pasos y reporta incidentes y observaciones. Ve rutas y avisos. Sin datos de clientes ni plata.",
+  marketing: "pedidos (incluye los del formulario web) y avisos por barrio para comunicar. Nada de la operación ni plata.",
 };
 
 function roleLine(rol) {
-  const pages = (ROLE_PAGES[rol] || []).filter((page) => PAGE_LABELS[page]).map((page) => PAGE_LABELS[page]);
+  const pages = (ROLE_PAGES[rol] || []).filter((page) => PAGE_LABELS[page])
+    .map((page) => (rol === "ayudante" && page === "paseador" ? "Paseador (modo ayudante)" : PAGE_LABELS[page]));
   const panels = pages.length ? `Paneles: ${listJoin(pages)}.` : "Todavía no tiene panel.";
-  return `${panels} Datos: ${ROLE_DATA[rol] || PENDIENTE}`;
+  return `${panels} Qué hace: ${ROLE_DATA[rol] || PENDIENTE}`;
 }
 
 function loadUsers() {
@@ -394,8 +518,8 @@ function routeFor(shift) {
   return shift === SHIFT_MORNING ? SHIFTS.manana.route : SHIFTS.tarde.routes.join(" o ");
 }
 
-// Hasta 3 prioridades calculadas, en orden: incidente de hoy, seguridad, pedidos web nuevos,
-// datos, evaluación.
+// Hasta 3 prioridades calculadas, en orden: incidente de hoy, atrasos del turno actual,
+// pedidos web nuevos, cruces de seguridad, datos, evaluación.
 function buildPriorities(live = liveData()) {
   const { conflicts } = safetyConflicts();
   const statusIssues = REAL_DOGS.filter((dog) => dog.status !== "Activo");
@@ -424,22 +548,36 @@ function buildPriorities(live = liveData()) {
     });
   }
 
-  if (conflicts.length) {
-    const main = conflicts.map((c) => c.a).concat(conflicts.map((c) => c.b));
-    const counts = main.reduce((acc, name) => ({ ...acc, [name]: (acc[name] || 0) + 1 }), {});
-    const center = Object.keys(counts).sort((x, y) => counts[y] - counts[x])[0];
-    const others = [...new Set(conflicts.flatMap((c) => [c.a, c.b]).filter((name) => name !== center))];
-    const shifts = [...new Set(conflicts.map((c) => c.shift))];
-    const routes = shifts.map(routeFor).join(" y ");
-    priorities.push({
-      id: "seguridad-cruces",
-      tag: "Seguridad",
-      tone: "danger",
-      title: `${center} comparte turno con perros marcados “no juntar”`,
-      detail: `Según BASE RUTAS, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (ruta ${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
-      action: `Confirmá con Sebastián cómo se separa a ${center} de ${listJoin(others)} en la ruta ${routes}.`,
-      target: "adm-seguridad",
-      targetLabel: "Ver los cruces",
+  if (live.lateNow.length) {
+    const count = live.lateNow.length;
+    const turno = live.nowMin < MIDDAY ? "mañana" : "tarde";
+    const sorted = live.lateNow.slice().sort((x, y) => y.atraso - x.atraso);
+    const worst = sorted[0];
+    const names = sorted.slice(0, 3).map((stop) => `${stop.perroNombre} (${stop.hora}, ${stop.route.ruta})`);
+    const routes = [...new Set(sorted.map((stop) => stop.route.ruta))];
+    const contact = worst.route.supervisor || nameOf(worst.route.paseador) || "el supervisor del turno";
+    // Si hoy nadie marcó ningún paseo en la app, lo más probable es que no se esté usando:
+    // se dice así en vez de dar a todos por atrasados.
+    if (!live.paseos.length) {
+      priorities.push({
+        id: `atrasos-sin-marcas-${live.hoy}-${turno}`,
+        tag: "Atrasos",
+        tone: "warning",
+        title: `Nadie marcó retiros hoy: ${plural(count, "perro figura", "perros figuran")} pasados de hora en el turno ${turno}`,
+        detail: `Según la ruta de hoy, ${listJoin(names)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""} ya tendrían que estar retirados. En la app no hay ningún paseo marcado hoy.`,
+        action: `Preguntale a ${contact} si el equipo está marcando los retiros en la página del paseador.`,
+        target: "adm-cumplimiento",
+        targetLabel: "Ver el cumplimiento",
+      });
+    } else priorities.push({
+      id: `atrasos-${live.hoy}-${turno}-${count}`,
+      tag: "Atrasos",
+      tone: "warning",
+      title: `${plural(count, "perro atrasado", "perros atrasados")} en el turno ${turno}`,
+      detail: `${listJoin(names)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Pasaron más de ${LATE_MINUTES} minutos de la hora prevista y nadie marcó el retiro.`,
+      action: `Preguntale a ${contact} qué pasa con ${worst.perroNombre} (retiro previsto ${worst.hora}, ruta ${routes.join(" y ")}).`,
+      target: "adm-cumplimiento",
+      targetLabel: count === 1 ? "Ver el atraso" : "Ver los atrasos",
     });
   }
 
@@ -459,6 +597,25 @@ function buildPriorities(live = liveData()) {
         : `Respondé los ${count} pedidos nuevos, empezando por el más viejo: “${oldest}”.`,
       target: "adm-vivo",
       targetLabel: count === 1 ? "Ver el pedido" : "Ver los pedidos",
+    });
+  }
+
+  if (conflicts.length) {
+    const main = conflicts.map((c) => c.a).concat(conflicts.map((c) => c.b));
+    const counts = main.reduce((acc, name) => ({ ...acc, [name]: (acc[name] || 0) + 1 }), {});
+    const center = Object.keys(counts).sort((x, y) => counts[y] - counts[x])[0];
+    const others = [...new Set(conflicts.flatMap((c) => [c.a, c.b]).filter((name) => name !== center))];
+    const shifts = [...new Set(conflicts.map((c) => c.shift))];
+    const routes = shifts.map(routeFor).join(" y ");
+    priorities.push({
+      id: "seguridad-cruces",
+      tag: "Seguridad",
+      tone: "danger",
+      title: `${center} comparte turno con perros marcados “no juntar”`,
+      detail: `Según BASE RUTAS, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (ruta ${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
+      action: `Confirmá con Sebastián cómo se separa a ${center} de ${listJoin(others)} en la ruta ${routes}.`,
+      target: "adm-seguridad",
+      targetLabel: "Ver los cruces",
     });
   }
 
@@ -556,6 +713,7 @@ export function adminDashboard() {
   startLive();
   if (ui.users === null && !ui.usersLoading && !ui.usersError) loadUsers();
   const live = liveData();
+  ui.lateSignature = lateSignature(live);
   const priorities = buildPriorities(live);
   const done = readDone();
   const open = openSections();
@@ -579,6 +737,8 @@ export function adminDashboard() {
       <div class="adm-sections">
         ${ReviewSection(open)}
         ${LoadSection(open)}
+        ${ClientesSection(open)}
+        ${PagosSection(open)}
         ${FactsSection(open)}
         ${TeamSection(open)}
         ${PricesSection(open)}
@@ -776,6 +936,123 @@ function checklistLine(record) {
   return { complete, text: items.length ? `${ok} de ${items.length} ítems` : "" };
 }
 
+const STOP_STATUS = {
+  "a-tiempo": { label: "A tiempo", tone: "ok" },
+  atrasado: { label: "Atrasado", tone: "danger" },
+  entregado: { label: "Entregado", tone: "ok" },
+  "no-sale": { label: "No sale", tone: "warning" },
+};
+
+const ROUTE_SOURCE = {
+  dia: "Cambio del día",
+  plantilla: "Plantilla semanal",
+  planilla: "Planilla BASE RUTAS",
+};
+
+function stopLine(stop) {
+  const estado = ESTADOS[stop.estado] || { label: stop.estado };
+  const parts = [`Retiro previsto ${stop.hora || PENDIENTE.toLowerCase()}`];
+  if (stop.status === "atrasado") parts.push(`${stop.atraso} min de atraso`);
+  else if (stop.paseo) parts.push(estado.label);
+  if (stop.paseo?.horaRetiro) parts.push(`retirado ${stop.paseo.horaRetiro}`);
+  if (stop.paseo?.horaEntrega) parts.push(`entregado ${stop.paseo.horaEntrega}`);
+  return parts.join(" · ");
+}
+
+function RouteCard(item) {
+  const { route, stops } = item;
+  const salen = stops.length - item.noSale;
+  const openKey = `ruta-${route.ruta}`;
+  const people = [
+    route.paseador ? `Paseador: ${nameOf(route.paseador)}` : "Paseador: sin asignar",
+    route.ayudante ? `Ayudante: ${nameOf(route.ayudante)}` : "",
+    route.supervisor ? `Supervisa: ${route.supervisor}` : "",
+  ].filter(Boolean).join(" · ");
+  const late = stops.filter((stop) => stop.status === "atrasado").sort((a, b) => b.atraso - a.atraso);
+
+  return `
+    <article class="adm-shift adm-route ${late.length ? "has-late" : ""}" aria-labelledby="adm-route-${esc(route.ruta)}">
+      <h4 id="adm-route-${esc(route.ruta)}">${esc(route.ruta || "Ruta sin código")} <span class="adm-th-sub">${esc(route.turno || "Turno sin indicar")} · ${esc(ROUTE_SOURCE[route.fuente] || "")}</span></h4>
+      <p class="adm-dog-meta">${esc(people)}</p>
+      ${stops.length ? `
+        <ul class="adm-route-stats" aria-label="Cumplimiento de ${esc(route.ruta)}">
+          <li class="is-ok"><strong>${item.aTiempo}</strong> a tiempo</li>
+          <li class="${item.atrasados ? "is-late" : ""}"><strong>${item.atrasados}</strong> ${item.atrasados === 1 ? "atrasado" : "atrasados"}</li>
+          <li><strong>${item.entregados}</strong> de ${salen} ${item.entregados === 1 ? "entregado" : "entregados"}</li>
+          ${item.noSale ? `<li><strong>${item.noSale}</strong> no ${item.noSale === 1 ? "sale" : "salen"}</li>` : ""}
+        </ul>
+        ${late.length ? `
+          <ul class="adm-late-list" aria-label="Atrasados de ${esc(route.ruta)}">
+            ${late.map((stop) => `<li><strong>${esc(stop.perroNombre || "Perro sin nombre")}</strong> <span>retiro ${esc(stop.hora)} · ${stop.atraso} min sin retiro</span></li>`).join("")}
+          </ul>
+        ` : ""}
+        <details class="adm-inner adm-dogs" data-adm-dogs="${esc(openKey)}" ${ui.openDogs.has(openKey) ? "open" : ""}>
+          <summary>Ver las ${stops.length} paradas en orden</summary>
+          <ol class="adm-dog-list adm-stop-list">
+            ${stops.map((stop) => {
+              let st = STOP_STATUS[stop.status];
+              if (stop.status === "a-tiempo") {
+                st = stop.estado === "pendiente"
+                  ? { label: "Por retirar · a tiempo", tone: "neutral" }
+                  : { label: `${(ESTADOS[stop.estado] || { label: stop.estado }).label} · a tiempo`, tone: "info" };
+              }
+              return `
+                <li>
+                  <span class="adm-dog-name">${esc(stop.hora || "--:--")} · ${esc(stop.perroNombre || "Perro sin nombre")}</span>
+                  <span class="adm-pill adm-pill--${st.tone}">${esc(st.label)}${stop.paseo?.pendiente ? " · sin enviar" : ""}</span>
+                  <span class="adm-dog-meta">${esc(stopLine(stop))}${stop.nota ? ` · Nota: ${esc(stop.nota)}` : ""}</span>
+                </li>
+              `;
+            }).join("")}
+          </ol>
+        </details>
+      ` : `<p class="adm-empty">Esta ruta no tiene paradas cargadas.</p>`}
+    </article>
+  `;
+}
+
+function CompliancePanel(live) {
+  const { compliance, effective, late } = live;
+  return `
+    <div class="adm-compliance" id="adm-cumplimiento" tabindex="-1" role="region" aria-labelledby="adm-compliance-title">
+      <h3 id="adm-compliance-title">${icon("route", "adm-icon-sm")} Cumplimiento por ruta ${late.length ? `<span class="adm-count adm-count--danger">${plural(late.length, "atrasado", "atrasados")}</span>` : ""}</h3>
+      <p class="adm-note">Atrasado = pasaron más de ${LATE_MINUTES} minutos de la hora prevista y nadie marcó el retiro. Hora de Argentina.</p>
+      ${effective.fromSheet ? `
+        <p class="adm-warn-box">${icon("alertCircle", "adm-icon-sm")} <span>Todavía no hay plantilla de hoy cargada en la app: se usan los horarios de la planilla BASE RUTAS (12/11/2026). Paseadores sin asignar: ${PENDIENTE.toLowerCase()}.</span></p>
+      ` : ""}
+      ${compliance.length ? `
+        <div class="adm-live-grid">${compliance.map(RouteCard).join("")}</div>
+      ` : `<p class="adm-empty">Hoy no hay rutas: ni cambios del día, ni plantilla, ni paseos en la planilla.</p>`}
+    </div>
+  `;
+}
+
+const AVISO_TONES = { "perro suelto": "danger", seguridad: "danger", "obra o corte": "warning", clima: "info", "cambio de horario": "info" };
+
+function AvisosPanel(live) {
+  const { avisos } = live;
+  return `
+    <div class="adm-avisos" id="adm-avisos" role="region" aria-labelledby="adm-avisos-title">
+      <h3 id="adm-avisos-title">${icon("mapPin", "adm-icon-sm")} Avisos por barrio vigentes <span class="adm-count">${avisos.length}</span></h3>
+      ${avisos.length ? `
+        <ul class="adm-aviso-list">
+          ${avisos.map((aviso) => `
+            <li class="adm-aviso">
+              <div class="adm-aviso-head">
+                <strong>${esc(aviso.barrio || "Barrio sin indicar")}</strong>
+                <span class="adm-pill adm-pill--${AVISO_TONES[aviso.tipo] || "neutral"}">${esc(aviso.tipo || "otro")}</span>
+                <span class="adm-muted">${aviso.vigenteHasta ? `Hasta el ${esc(ymdToAR(aviso.vigenteHasta))}` : "Solo hoy"}</span>
+              </div>
+              <p>${esc(aviso.mensaje || aviso.titulo || "")}</p>
+              ${byLine(aviso, true) ? `<p class="adm-note">${esc(byLine(aviso, true))}.</p>` : ""}
+            </li>
+          `).join("")}
+        </ul>
+      ` : `<p class="adm-empty">No hay avisos vigentes por barrio.</p>`}
+    </div>
+  `;
+}
+
 function LivePanel(live) {
   const offline = navigator.onLine === false;
   const { checklists, pedidosNuevos } = live;
@@ -796,6 +1073,9 @@ function LivePanel(live) {
       ${live.incidentes.length ? IncidentList(live.incidentes) : `
         <p class="adm-live-ok">${icon("checkCircle", "adm-icon-sm")} Sin incidentes cargados hoy.</p>
       `}
+
+      ${CompliancePanel(live)}
+      ${AvisosPanel(live)}
 
       <div class="adm-live-grid">
         ${live.shifts.map(ShiftCard).join("")}
@@ -1222,12 +1502,13 @@ const ROLE_PANELS = {
   supervisor: { panel: "Supervisor", path: "/supervisor" },
 };
 
-// Permisos configurados en la app (ver canDo en src/store/paseosJuanStore.js), en palabras simples.
+// Roles definidos por Juan el 13/11/2026 (docs/datos-compartidos.md), en palabras simples.
 const ROLE_PERMISSIONS = [
-  { role: "Admin", who: ROLE_OWNERS.admin, can: ["Ve y decide sobre todo el sistema", "Equipo, permisos, precios y reportes"] },
-  { role: "Coordinador", who: `${ROLE_OWNERS.coordinador} (${PENDIENTE.toLowerCase()})`, can: ["Alta de perros", "Editar datos del cliente", "Responder el chat de clientes", "Registrar pagos de apoyo", "Revisar documentación", "Derivar al supervisor"] },
-  { role: "Supervisor", who: ROLE_OWNERS.supervisor, can: ["Armar rutas y asignar perros", "Responder el chat de clientes", "Gestionar ausencias", "Controlar a los paseadores", "Revisar alertas"] },
-  { role: "Paseador", who: ROLE_OWNERS.paseador, can: ["Ver su ruta", "Marcar retiro, paseo y entrega", "Reportar incidentes", "Subir fotos", "Leer el chat interno"] },
+  { role: "Admin", who: ROLE_OWNERS.admin, can: ["Ve y decide sobre todo el sistema", "Usuarios, pagos e indicadores", "Único rol que ve y carga pagos"] },
+  { role: "Coordinador", who: `${ROLE_OWNERS.coordinador} (${PENDIENTE.toLowerCase()})`, can: ["Armar rutas y horarios (plantilla semanal y cambios del día)", "Gestionar los clientes de los paseos", "Atender pedidos y cargar fichas", "Avisar lo que pasa en cada barrio", "No ve plata"] },
+  { role: "Supervisor", who: ROLE_OWNERS.supervisor, can: ["Controlar los paseos del momento", "Quién falta retirar y atrasos contra el horario", "Entregas, incidentes y equipo", "Ve las rutas, no las arma"] },
+  { role: "Paseador", who: ROLE_OWNERS.paseador, can: ["Hacer su ruta del turno, en orden y con horario", "Marcar retiro, paseo y entrega", "Reportar incidentes"] },
+  { role: "Ayudante de paseador", who: PENDIENTE, can: ["Acompañar al paseador en su ruta", "Marcar pasos", "Reportar incidentes", "Sin datos de clientes"] },
   { role: "Cliente", who: "Cada tutor, solo su perro", can: ["Ver la ficha de su perro", "Escribir al chat", "Subir carnet de vacunas", "Subir comprobante", "Ver sus pagos", "Ver el estado del paseo"] },
 ];
 
@@ -1314,6 +1595,189 @@ function PricesSection(open) {
   `);
 }
 
+/* ---------- Pagos (registro de apoyo, solo admin) ---------- */
+
+function monthLabel(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  if (!y || !m) return ym;
+  const text = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 15)));
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// "15.000", "15000", "15.000,50" o "$ 15000" → número. Si no se entiende, NaN.
+function parseMonto(value) {
+  let text = String(value || "").replace(/[$\s]/g, "");
+  if (text.includes(",")) text = text.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(text)) text = text.replace(/\./g, "");
+  return /^\d+(\.\d+)?$/.test(text) ? Number(text) : NaN;
+}
+
+function pagosData() {
+  const all = registros.cached("pagos", liveOpts("pagos")).slice()
+    .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(b.creadoEn || "").localeCompare(String(a.creadoEn || "")));
+  const current = hoyAR().slice(0, 7);
+  const months = [...new Set([current, ...all.map((p) => String(p.fecha || "").slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m))])].sort().reverse();
+  const mes = ui.pagosMes && (ui.pagosMes === "todos" || months.includes(ui.pagosMes)) ? ui.pagosMes : current;
+  const filtered = mes === "todos" ? all : all.filter((p) => String(p.fecha || "").startsWith(mes));
+  const faltan = all.filter((p) => !p.pasadoAlLibro);
+  const total = filtered.reduce((sum, p) => sum + (Number(p.monto) || 0), 0);
+  const deOtros = all.filter((p) => {
+    const rol = ui.users?.find((user) => user.usuario === p.creadoPor)?.rol;
+    return rol && rol !== "admin";
+  });
+  return { all, months, mes, filtered, faltan, faltanMes: filtered.filter((p) => !p.pasadoAlLibro), total, deOtros };
+}
+
+function PagoRow(pago) {
+  const creator = ui.users?.find((user) => user.usuario === pago.creadoPor);
+  const fromOther = creator && creator.rol !== "admin";
+  const monto = Number(pago.monto);
+  const hasMonto = pago.monto !== "" && pago.monto !== null && pago.monto !== undefined && Number.isFinite(monto);
+  return `
+    <li class="adm-pago ${pago.pasadoAlLibro ? "" : "is-missing"}">
+      <div class="adm-pago-main">
+        <span class="adm-pago-date">${esc(ymdToAR(pago.fecha) || dateAR(pago.creadoEn) || PENDIENTE)}</span>
+        <strong class="adm-pago-concept">${esc(pago.concepto || "Sin concepto")}</strong>
+        <span class="adm-pago-amount">${hasMonto ? esc(formatPeso(monto)) : PENDIENTE}</span>
+      </div>
+      <div class="adm-pago-meta">
+        <span class="adm-pill adm-pill--neutral">${esc(pago.medio || "Medio sin indicar")}</span>
+        <span class="adm-pill ${pago.pasadoAlLibro ? "adm-pill--ok" : "adm-pill--warning"}">${pago.pasadoAlLibro ? "Pasado al Libro" : "Falta pasar al Libro"}</span>
+        ${pago.pendiente ? `<span class="adm-pill adm-pill--info">Se enviará cuando haya señal</span>` : ""}
+        ${fromOther ? `<span class="adm-pill adm-pill--info">Lo cargó ${esc(ROLE_LABELS[creator.rol] || creator.rol)} antes del cambio</span>` : ""}
+      </div>
+      ${byLine(pago, true) ? `<p class="adm-note">${esc(byLine(pago, true))}.</p>` : ""}
+      <button class="adm-link-button" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
+        ${pago.pasadoAlLibro ? "Desmarcar “pasado al Libro”" : "Marcar como pasado al Libro"}
+      </button>
+    </li>
+  `;
+}
+
+function PagosSection(open) {
+  const data = pagosData();
+  const d = drafts.pago;
+  const shown = data.filtered.slice(0, 20);
+  const mesText = data.mes === "todos" ? "todos los meses" : monthLabel(data.mes).toLowerCase();
+
+  return Section("adm-pagos", open, {
+    title: "Pagos · registro de apoyo",
+    summary: data.faltan.length ? `${plural(data.faltan.length, "pago falta", "pagos faltan")} pasar al Libro contable` : "Nada pendiente de pasar al Libro contable",
+    iconName: "receipt",
+  }, `
+    <div class="adm-official">
+      ${icon("fileCheck", "adm-icon")}
+      <div>
+        <strong>Fuente oficial: ${LIBRO}</strong>
+        <p>Esto es un registro de apoyo para no olvidarte de nada: cada pago se tiene que pasar al Libro contable. Solo el admin lo ve y lo carga.</p>
+      </div>
+    </div>
+
+    <form class="adm-form" id="adm-pago-form" data-adm-form="pago" novalidate aria-labelledby="adm-pago-title">
+      <h3 id="adm-pago-title">Cargar un pago</h3>
+      <div class="adm-form-grid">
+        <label class="adm-field" for="adm-pago-fecha">
+          <span>Fecha</span>
+          <input class="adm-input" id="adm-pago-fecha" type="date" required value="${esc(d.fecha)}" data-adm-draft="pago" data-adm-key="fecha" />
+        </label>
+        <label class="adm-field" for="adm-pago-monto">
+          <span>Monto <small>en pesos</small></span>
+          <input class="adm-input" id="adm-pago-monto" inputmode="decimal" autocomplete="off" maxlength="15" required placeholder="Ej. 35000" value="${esc(d.monto)}" data-adm-draft="pago" data-adm-key="monto" />
+        </label>
+        <label class="adm-field" for="adm-pago-concepto">
+          <span>Concepto</span>
+          <input class="adm-input" id="adm-pago-concepto" autocomplete="off" maxlength="120" required placeholder="Ej. Plan 2, semana del 09/11" value="${esc(d.concepto)}" data-adm-draft="pago" data-adm-key="concepto" />
+        </label>
+        <label class="adm-field" for="adm-pago-medio">
+          <span>Medio <small>elegí o escribí</small></span>
+          <input class="adm-input" id="adm-pago-medio" list="adm-pago-medios" autocomplete="off" maxlength="40" placeholder="Ej. Efectivo" value="${esc(d.medio)}" data-adm-draft="pago" data-adm-key="medio" />
+          <datalist id="adm-pago-medios">${PAGO_MEDIOS.map((medio) => `<option value="${esc(medio)}"></option>`).join("")}</datalist>
+        </label>
+      </div>
+      <label class="adm-check" for="adm-pago-libro">
+        <input id="adm-pago-libro" type="checkbox" ${d.pasadoAlLibro ? "checked" : ""} data-adm-draft="pago" data-adm-key="pasadoAlLibro" />
+        <span>Ya lo pasé al Libro contable</span>
+      </label>
+      <div class="adm-form-actions">
+        <button class="adm-button adm-button--primary" id="adm-pago-guardar" type="submit">${icon("plus", "adm-icon-sm")} Guardar pago</button>
+      </div>
+    </form>
+    ${MsgRegion("pagos")}
+
+    <div class="adm-pagos-head">
+      <label class="adm-field adm-field--inline" for="adm-pagos-mes">
+        <span>Mes</span>
+        <select class="adm-input adm-input--sm" id="adm-pagos-mes" data-adm-pagos-mes>
+          ${data.months.map((m) => `<option value="${m}" ${m === data.mes ? "selected" : ""}>${esc(monthLabel(m))}</option>`).join("")}
+          <option value="todos" ${data.mes === "todos" ? "selected" : ""}>Todos los meses</option>
+        </select>
+      </label>
+      <p class="adm-pagos-summary">
+        <strong>${plural(data.filtered.length, "pago", "pagos")}</strong> en ${esc(mesText)} · suma ${esc(formatPeso(data.total))} ·
+        <strong class="${data.faltanMes.length ? "adm-text-warning" : ""}" data-adm-pagos-faltan>${data.faltanMes.length} sin pasar al Libro</strong>${data.mes !== "todos" && data.faltan.length !== data.faltanMes.length ? ` (${data.faltan.length} contando todos los meses)` : ""}
+      </p>
+    </div>
+    ${data.deOtros.length ? `<p class="adm-note">${data.deOtros.length === 1 ? "1 pago lo cargó" : `${data.deOtros.length} pagos los cargó`} otro rol antes del cambio de roles (el coordinador ya no ve plata). Se ven acá con la marca “antes del cambio”.</p>` : ""}
+    ${shown.length ? `
+      <ul class="adm-pago-list" aria-label="Pagos de ${esc(mesText)}">${shown.map(PagoRow).join("")}</ul>
+      ${data.filtered.length > shown.length ? `<p class="adm-note">Se muestran los últimos ${shown.length}. Hay ${plural(data.filtered.length - shown.length, "pago más", "pagos más")} en ${esc(mesText)}.</p>` : ""}
+    ` : `<p class="adm-empty">No hay pagos cargados en ${esc(mesText)}.</p>`}
+    <p class="adm-note">La suma es solo de este registro de apoyo: no reemplaza al Libro contable.</p>
+  `);
+}
+
+/* ---------- Clientes (resumen de solo lectura) ---------- */
+
+const CLIENT_STATES = [["activo", "Activos"], ["pausa", "En pausa"], ["baja", "Baja"]];
+
+// Solo cuenta por barrio y estado: no se lee ni se muestra ningún dato de contacto.
+function clientesResumen() {
+  const list = registros.cached("clientes", liveOpts("clientes"));
+  const rows = new Map();
+  list.forEach((cliente) => {
+    const barrio = String(cliente.barrio || "").trim() || "Sin barrio";
+    if (!rows.has(barrio)) rows.set(barrio, { barrio, activo: 0, pausa: 0, baja: 0, otro: 0 });
+    const row = rows.get(barrio);
+    const estado = String(cliente.estado || "").toLowerCase();
+    if (CLIENT_STATES.some(([key]) => key === estado)) row[estado] += 1;
+    else row.otro += 1;
+  });
+  const sorted = [...rows.values()].sort((a, b) => b.activo - a.activo || a.barrio.localeCompare(b.barrio));
+  const totals = { activo: 0, pausa: 0, baja: 0, otro: 0 };
+  sorted.forEach((row) => Object.keys(totals).forEach((key) => { totals[key] += row[key]; }));
+  return { total: list.length, rows: sorted, totals };
+}
+
+function ClientesSection(open) {
+  const data = clientesResumen();
+  const withOther = data.totals.otro > 0;
+  return Section("adm-clientes", open, {
+    title: "Clientes por barrio",
+    summary: data.total ? `${plural(data.totals.activo, "activo", "activos")} · ${data.totals.pausa} en pausa · ${data.totals.baja} de baja` : "Todavía no hay clientes cargados en la app",
+    iconName: "mapPin",
+  }, `
+    <p class="adm-lead">Resumen de solo lectura de lo que carga el coordinador. Sin teléfonos ni domicilios.</p>
+    ${data.total ? `
+      <div class="adm-table-wrap">
+        <table class="adm-table adm-clients">
+          <caption class="adm-sr-only">Clientes por barrio y estado</caption>
+          <thead>
+            <tr><th scope="col">Barrio</th>${CLIENT_STATES.map(([, label]) => `<th scope="col">${label}</th>`).join("")}${withOther ? `<th scope="col">Sin estado</th>` : ""}</tr>
+          </thead>
+          <tbody>
+            ${data.rows.map((row) => `
+              <tr><th scope="row">${esc(row.barrio)}</th>${CLIENT_STATES.map(([key]) => `<td>${row[key]}</td>`).join("")}${withOther ? `<td>${row.otro}</td>` : ""}</tr>
+            `).join("")}
+          </tbody>
+          <tfoot>
+            <tr><th scope="row">Total</th>${CLIENT_STATES.map(([key]) => `<td>${data.totals[key]}</td>`).join("")}${withOther ? `<td>${data.totals.otro}</td>` : ""}</tr>
+          </tfoot>
+        </table>
+      </div>
+    ` : `<p class="adm-empty">El coordinador todavía no cargó clientes en la app.</p>`}
+  `);
+}
+
 function FinanceSection(open) {
   const billing = theoreticalBilling();
 
@@ -1326,7 +1790,7 @@ function FinanceSection(open) {
       ${icon("fileCheck", "adm-icon")}
       <div>
         <strong>Fuente oficial: Libro contable</strong>
-        <p>Lo cobrado, lo pendiente, las deudas y los costos están en el ${esc(BUSINESS_INFO.officialSources.money)}. Esta página no muestra montos reales.</p>
+        <p>Lo cobrado, lo pendiente, las deudas y los costos están en el ${esc(BUSINESS_INFO.officialSources.money)}. Esta sección no muestra montos cobrados: los pagos que anotes de apoyo están en <a class="adm-inline-link" href="#adm-pagos" data-adm-goto="adm-pagos">Pagos</a>.</p>
       </div>
     </div>
 
@@ -1362,7 +1826,7 @@ function SourcesFooter() {
   return `
     <footer class="adm-sources">
       <p><strong>Datos actualizados al ${DATA_UPDATED}.</strong> Perros: ${esc(sources.dogs)}. Rutas: ${esc(sources.routes)}. Plata: ${esc(sources.money)}.</p>
-      <p>Esta página no guarda datos de tutores, teléfonos, domicilios ni pagos.</p>
+      <p>Esta página no muestra teléfonos ni domicilios de tutores. Los pagos anotados acá son un registro de apoyo (solo admin): la fuente oficial es el ${LIBRO}.</p>
     </footer>
   `;
 }
@@ -1390,6 +1854,7 @@ function summaryText() {
     shiftText("manana", "Mañana"),
     shiftText("tarde", "Tarde"),
     `Incidentes de hoy: ${live.incidentes.length}. Pedidos nuevos: ${live.pedidosNuevos.length}.`,
+    `Perros atrasados (más de ${LATE_MINUTES} min sin retiro): ${live.late.length}. Avisos por barrio vigentes: ${live.avisos.length}.`,
     "",
     `Carga semanal: ${load.weekTotal} salidas. Más carga: ${listJoin(load.busiest)} (${load.maxTotal}).`,
     "",
@@ -1462,6 +1927,11 @@ function handleAdminClick(event) {
     ui.credential = null;
     ui.users = null;
     ui.usersError = "";
+    // Al volver a entrar se piden de nuevo los datos (y no queda un pago a medio escribir).
+    ui.liveDay = null;
+    ui.adminLoaded = false;
+    ui.pagosMes = null;
+    drafts.pago = emptyPago();
     navigate("/salir");
     return true;
   }
@@ -1485,6 +1955,11 @@ async function handleUsersSubmit(event) {
   event.preventDefault();
   if (ui.busy) return;
   const tipo = form.dataset.admForm;
+
+  if (tipo === "pago") {
+    await savePago(form);
+    return;
+  }
 
   if (tipo === "crear") {
     const d = drafts.crear;
@@ -1546,6 +2021,56 @@ async function handleUsersSubmit(event) {
       ui.busy = false;
       rerender();
     }
+  }
+}
+
+async function savePago(form) {
+  const d = drafts.pago;
+  const concepto = d.concepto.trim();
+  const medio = d.medio.trim();
+  const monto = parseMonto(d.monto);
+  let problem = "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha)) problem = "Elegí la fecha del pago.";
+  else if (concepto.length < 2) problem = "Escribí el concepto (por ejemplo, el plan y la semana).";
+  else if (!Number.isFinite(monto) || monto <= 0) problem = "Escribí el monto en pesos, solo números (por ejemplo 35000).";
+  if (problem) {
+    setMsg("pagos", problem, true);
+    rerender();
+    return;
+  }
+  setBusy(form, true);
+  try {
+    const saved = await registros.save("pagos", { fecha: d.fecha, concepto, monto, medio, pasadoAlLibro: d.pasadoAlLibro === true });
+    drafts.pago = emptyPago();
+    ui.pagosMes = d.fecha.slice(0, 7);
+    setMsg("pagos", saved.pendiente
+      ? "Se enviará cuando haya señal. Queda anotado en este dispositivo."
+      : `Listo: pago de ${formatPeso(monto)} guardado${d.pasadoAlLibro ? "" : ". Acordate de pasarlo al Libro contable"}.`);
+  } catch (error) {
+    setMsg("pagos", error.message || "No se pudo guardar el pago.", true);
+  } finally {
+    ui.busy = false;
+    rerender();
+  }
+}
+
+async function togglePagoLibro(id) {
+  const pago = registros.cached("pagos", liveOpts("pagos")).find((item) => item.id === id);
+  if (!pago || ui.busy) return;
+  ui.busy = true;
+  const next = !pago.pasadoAlLibro;
+  try {
+    const saved = await registros.save("pagos", { id, fecha: pago.fecha, pasadoAlLibro: next });
+    const what = `${pago.concepto || "El pago"}${pago.fecha ? ` del ${ymdToAR(pago.fecha)}` : ""}`;
+    setMsg("pagos", saved.pendiente
+      ? "Se enviará cuando haya señal."
+      : next ? `Listo: ${what} quedó como pasado al Libro.` : `Listo: ${what} quedó como pendiente de pasar al Libro.`);
+  } catch (error) {
+    setMsg("pagos", error.message || "No se pudo cambiar la marca.", true);
+  } finally {
+    ui.busy = false;
+    rerender();
+    focusLater(`[data-adm-pago-libro="${CSS.escape(id)}"]`);
   }
 }
 
@@ -1682,16 +2207,32 @@ function handleUsersClick(event) {
     return true;
   }
 
+  const libro = event.target.closest("[data-adm-pago-libro]");
+  if (libro) {
+    togglePagoLibro(libro.dataset.admPagoLibro);
+    return true;
+  }
+
   return false;
 }
 
 function handleDraftInput(event) {
+  const month = event.target.closest?.("[data-adm-pagos-mes]");
+  if (month) {
+    if (event.type === "change" && ui.pagosMes !== month.value) {
+      ui.pagosMes = month.value;
+      rerender();
+      announce(`Pagos de ${month.value === "todos" ? "todos los meses" : monthLabel(month.value).toLowerCase()}.`);
+    }
+    return;
+  }
   const field = event.target.closest?.("[data-adm-draft]");
   if (!field) return;
   const form = field.dataset.admDraft;
   const key = field.dataset.admKey;
-  if (form === "roles") drafts.roles[key] = field.value;
-  else drafts[form][key] = field.value;
+  const value = field.type === "checkbox" ? field.checked : field.value;
+  if (form === "roles") drafts.roles[key] = value;
+  else drafts[form][key] = value;
   if (form === "crear" && key === "rol") {
     const hint = document.querySelector("[data-adm-role-hint]");
     if (hint) hint.innerHTML = `<strong>${esc(ROLE_LABELS[field.value] || field.value)}:</strong> ${esc(roleLine(field.value))}`;
@@ -1770,8 +2311,18 @@ export function registerAdminEvents() {
   document.addEventListener("change", handleDraftInput);
   // Una sola vez: cuando llegan datos nuevos del día, se vuelve a dibujar el panel.
   onDataChange((col) => {
-    if (LIVE_COLS.includes(col)) rerender();
+    if (LIVE_COLS.includes(col) || ADMIN_COLS.includes(col)) rerender();
   });
+  // Los atrasos cambian con la hora aunque no lleguen datos nuevos: se revisa cada 30 segundos
+  // y solo se vuelve a dibujar si cambió quién está atrasado.
+  setInterval(() => {
+    if (!isAdminPage() || session.user()?.rol !== "admin" || document.visibilityState !== "visible") return;
+    const signature = lateSignature(liveData());
+    if (signature !== ui.lateSignature) {
+      ui.lateSignature = signature;
+      rerender();
+    }
+  }, 30 * 1000);
   window.addEventListener("online", () => rerender());
   window.addEventListener("offline", () => rerender());
 }

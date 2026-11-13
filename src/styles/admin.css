@@ -61,6 +61,8 @@ html[data-theme="dark"] .adm-shell {
   --adm-focus: #7dd4ae;
   --adm-shadow: 0 14px 38px rgba(0, 0, 0, 0.35);
   --adm-header-bg: rgba(15, 21, 18, 0.94);
+  /* Controles nativos (calendario de la fecha, casillas) en oscuro. */
+  color-scheme: dark;
 }
 
 .adm-shell :focus-visible {
@@ -1650,6 +1652,274 @@ html[data-theme="dark"] .adm-shell {
   color: var(--adm-green);
   font-weight: 800;
   text-underline-offset: 3px;
+}
+
+/* El día en vivo: cumplimiento por ruta y avisos por barrio */
+
+.adm-compliance,
+.adm-avisos {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  scroll-margin-top: 90px;
+}
+
+.adm-compliance > h3,
+.adm-avisos > h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--adm-ink);
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.adm-count--danger {
+  background: var(--adm-danger-bg);
+  color: var(--adm-danger);
+}
+
+.adm-warn-box {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid var(--adm-warning-line);
+  border-radius: 12px;
+  background: var(--adm-warning-bg);
+  color: var(--adm-warning);
+  font-weight: 700;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.adm-warn-box .adm-icon-sm {
+  margin-top: 2px;
+}
+
+.adm-route h4 {
+  color: var(--adm-ink);
+  font-size: 1.05rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.adm-route.has-late {
+  border: 2px solid var(--adm-danger-line);
+}
+
+.adm-route-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-route-stats li {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--adm-line);
+  border-radius: 12px;
+  background: var(--adm-surface);
+  color: var(--adm-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 8px 10px;
+}
+
+.adm-route-stats strong {
+  color: var(--adm-ink);
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.adm-route-stats li.is-late {
+  border-color: var(--adm-danger-line);
+  background: var(--adm-danger-bg);
+  color: var(--adm-danger);
+}
+
+.adm-route-stats li.is-late strong {
+  color: var(--adm-danger);
+}
+
+.adm-late-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-late-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  border-left: 4px solid var(--adm-danger);
+  color: var(--adm-ink);
+  padding-left: 8px;
+}
+
+.adm-late-list span {
+  color: var(--adm-danger);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.adm-stop-list li {
+  border-bottom: 1px solid var(--adm-line);
+  padding-bottom: 6px;
+}
+
+.adm-stop-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.adm-aviso-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-aviso {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--adm-line);
+  border-left: 5px solid var(--adm-info);
+  border-radius: 12px;
+  background: var(--adm-surface-2);
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.adm-aviso-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.adm-aviso > p:not(.adm-note) {
+  color: var(--adm-ink);
+  line-height: 1.5;
+}
+
+/* Pagos (registro de apoyo) */
+
+.adm-check {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.adm-check input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: var(--adm-green);
+}
+
+.adm-pagos-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+}
+
+.adm-field--inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adm-pagos-summary {
+  flex: 1 1 260px;
+  color: var(--adm-ink);
+  line-height: 1.5;
+}
+
+.adm-text-warning {
+  color: var(--adm-warning);
+}
+
+.adm-pago-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-pago {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--adm-line);
+  border-left: 5px solid var(--adm-green);
+  border-radius: 12px;
+  background: var(--adm-surface);
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.adm-pago.is-missing {
+  border-left-color: var(--adm-warning);
+}
+
+.adm-pago-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.adm-pago-date {
+  color: var(--adm-muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.adm-pago-concept {
+  flex: 1 1 160px;
+  color: var(--adm-ink);
+}
+
+.adm-pago-amount {
+  color: var(--adm-ink);
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.adm-pago-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.adm-pago .adm-link-button {
+  justify-self: start;
+}
+
+.adm-clients td {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.adm-clients thead th:not(:first-child) {
+  text-align: right;
 }
 
 /* ---------- Responsive ---------- */
