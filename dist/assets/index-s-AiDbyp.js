@@ -240,7 +240,7 @@
         <div class="dog-glass-card">
           <span class="glass-icon">${g(`radar`)}</span>
           <strong>Seguimiento del paseo</strong>
-          <span>Te avisamos cuando lo retiramos y cuando vuelve.</span>
+          <span>Registramos el retiro, la foto del paseo y la entrega.</span>
         </div>
       </div>
       <a class="scroll-indicator" href="#servicios" data-link aria-label="Bajar a servicios">
