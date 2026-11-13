@@ -30,6 +30,7 @@ La lista y lo que se sabe de cada uno está en `asistente/proyectos.md`. Es la f
 | `paseos-juan` | Operación de Paseos Juan: perros, fichas, paseos, incidentes, equipo. |
 | `proyectos-juan` | Los otros 7 proyectos: tareas, ideas, mensajes y seguimiento. |
 | `juan-3-0` | Coordinador: reparte trabajos entre chats e IAs y sigue su estado en el Centro de mando. |
+| `experto-mascotas` | Experto en perros y mascotas: paseos y seguridad, conducta, señales de alarma, alimentación, calor, equipo, gatos, productos, mensajes y capacitación. |
 
 ## Modos (`.claude/commands/`)
 
