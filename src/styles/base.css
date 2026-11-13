@@ -4026,3 +4026,13 @@ html[data-theme="dark"] select:focus {
     height: 44px;
   }
 }
+
+/* Oculto a la vista pero presente (campo trampa para robots, textos para lectores) */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

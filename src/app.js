@@ -15,7 +15,9 @@ import {
 } from "./ui/shared.js";
 import { startLavaLamp, hydrateReveal } from "./ui/lava.js";
 import { initAccessibility, onAccessibilityChange } from "./ui/accesibilidad.js";
-import { landingPage, authPage, registerLandingEvents } from "./views/landing.js";
+import { landingPage, registerLandingEvents } from "./views/landing.js";
+import { loginPage, registroPage, sinPermisoPage, registerAccesoEvents } from "./views/acceso.js";
+import { session, ROLE_PAGES, onDataChange, flushPending } from "./api/client.js";
 import { clientDashboard, registerClienteEvents } from "./views/cliente.js";
 import { walkerShell, walkerDashboard, registerPaseadorEvents } from "./views/paseador.js";
 import { supervisorShell, supervisorDashboard, registerSupervisorEvents } from "./views/supervisor.js";
@@ -55,6 +57,7 @@ window.addEventListener("storage", (e) => {
 
 registerSharedEvents();
 registerLandingEvents();
+registerAccesoEvents();
 registerClienteEvents();
 registerPaseadorEvents();
 registerSupervisorEvents();
@@ -84,27 +87,30 @@ export function render() {
   }
 
   if (path === "/login") {
-    app.innerHTML = authPage("login");
+    app.innerHTML = loginPage();
+    hydrateAfterRender();
+    return;
+  }
+
+  if (path === "/salir") {
+    // Primero se cambia la dirección y después se borra la sesión, sin volver a dibujar dos veces.
+    window.history.replaceState({}, "", "/login");
+    session.clear();
+    app.innerHTML = loginPage();
     hydrateAfterRender();
     return;
   }
 
   if (path === "/registro" || path === "/register") {
-    app.innerHTML = authPage("register");
-    hydrateAfterRender();
-    return;
-  }
-
-  const directRole = path.slice(1);
-  if (ROLES[directRole] && directRole !== "visitante") {
-    app.innerHTML = dashboardPage(directRole);
+    app.innerHTML = registroPage();
     hydrateAfterRender();
     return;
   }
 
   const legacyMatch = path.match(/^\/dashboard\/([a-z]+)$/);
-  if (legacyMatch && ROLES[legacyMatch[1]]) {
-    app.innerHTML = dashboardPage(legacyMatch[1]);
+  const roleKey = legacyMatch ? legacyMatch[1] : path.slice(1);
+  if (ROLES[roleKey] && roleKey !== "visitante") {
+    app.innerHTML = guardedDashboard(roleKey);
     hydrateAfterRender();
     return;
   }
@@ -113,6 +119,18 @@ export function render() {
   hydrateAfterRender();
 }
 
+
+// Los paneles del equipo piden usuario. La página del cliente es de ejemplo y queda abierta.
+function guardedDashboard(roleKey) {
+  if (roleKey === "cliente") return dashboardPage(roleKey);
+  const user = session.user();
+  if (!user) {
+    window.history.replaceState({}, "", `/login?volver=/${roleKey}`);
+    return loginPage();
+  }
+  if (!(ROLE_PAGES[user.rol] || []).includes(roleKey)) return sinPermisoPage(roleKey);
+  return dashboardPage(roleKey);
+}
 
 function hydrateAfterRender() {
   let overlay = document.getElementById("global-overlay");
@@ -183,6 +201,14 @@ function dashboardPage(roleKey) {
 }
 
 initAccessibility();
+// Si la sesión cambia (ingreso, salida o vencimiento), se vuelve a dibujar la página.
+onDataChange((col) => {
+  if (col === "sesion") render();
+});
+if (session.user()) {
+  session.refresh().catch(() => {});
+  flushPending();
+}
 onAccessibilityChange(() => startLavaLamp());
 render();
 

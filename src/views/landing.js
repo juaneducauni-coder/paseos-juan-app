@@ -1,21 +1,10 @@
 // Página pública (landing) y pantallas de ingreso/registro.
 import { BUSINESS, PROMO, PLAN_SIZES, PLANS, DISCOUNTS, SINGLE_WALK_PRICES } from "../data/mock.js";
-import { whatsappLink, icon, shell, priceCard, faqItem, clickHandlers } from "../ui/shared.js";
-import { navigate } from "../app.js";
+import { whatsappLink, icon, shell, priceCard, faqItem } from "../ui/shared.js";
+import { enviarEvaluacion } from "../api/client.js";
 
 function isPromoActive(now = new Date()) {
   return now <= new Date(`${PROMO.until}T23:59:59-03:00`);
-}
-
-function getLoginRouteByEmail(email) {
-  const normalizedEmail = email.toLowerCase();
-
-  if (normalizedEmail.includes("admin")) return "/admin";
-  if (normalizedEmail.includes("coordinador")) return "/coordinador";
-  if (normalizedEmail.includes("supervisor")) return "/supervisor";
-  if (normalizedEmail.includes("paseador") || normalizedEmail.includes("sebastian")) return "/paseador";
-
-  return "/cliente";
 }
 
 export function landingPage() {
@@ -115,6 +104,7 @@ function CTASection() {
         </p>
       </div>
       <form class="evaluation-form" id="evaluacion" data-evaluation-form novalidate>
+        <label class="visually-hidden" aria-hidden="true">No completar <input name="sitio" tabindex="-1" autocomplete="off" /></label>
         <fieldset class="evaluation-board">
           <legend>Datos del perro</legend>
           <p>Información básica para entender tamaño, edad y contexto general.</p>
@@ -325,52 +315,6 @@ function Footer() {
   `;
 }
 
-export function authPage(mode) {
-  const isLogin = mode === "login";
-  return shell(`
-    <main class="auth-layout">
-      <section class="auth-copy reveal">
-        <p class="eyebrow">${isLogin ? "Acceso" : "Nuevo perfil"}</p>
-        <h1>${isLogin ? "Entrar a Paseos Juan" : "Crear cuenta"}</h1>
-        <p>
-          La misma base de perfiles soporta cliente, paseador y roles operativos.
-          Luego puede conectarse a autenticación real sin cambiar el routing.
-        </p>
-      </section>
-      <form class="auth-card reveal">
-        ${isLogin ? "" : `<label>Nombre <input name="clientName" placeholder="Tu nombre" /></label>`}
-        <label>Email <input name="email" type="email" placeholder="nombre@email.com" /></label>
-        <label>Contraseña <input name="password" type="password" placeholder="********" /></label>
-        ${isLogin ? "" : `
-          <label>Nombre del perro <input name="dogName" placeholder="Ej. Luna" /></label>
-          <label>Tamaño del perro
-            <select name="dogSize">
-              <option>Pequeño</option>
-              <option selected>Mediano</option>
-              <option>Grande</option>
-            </select>
-          </label>
-          <label>Tipo de usuario
-            <select name="userType">
-              <option>Cliente</option>
-              <option>Paseador</option>
-              <option>Coordinador</option>
-              <option>Supervisor</option>
-            </select>
-          </label>
-        `}
-        ${isLogin
-          ? `<button class="primary-button" type="button" data-login>Ingresar</button>`
-          : `<button class="primary-button" type="button" data-demo-register>Crear cuenta demo</button>`
-        }
-        <a href="${isLogin ? "/registro" : "/login"}" data-link>
-          ${isLogin ? "Crear una cuenta" : "Ya tengo cuenta"}
-        </a>
-      </form>
-    </main>
-  `);
-}
-
 function handleEvaluationSubmit(event) {
   const form = event.target.closest("[data-evaluation-form]");
   if (!form) return;
@@ -387,40 +331,20 @@ function handleEvaluationSubmit(event) {
   }
 
   status.classList.remove("is-error");
-  status.textContent = "Listo. Se abrió WhatsApp con tus respuestas: solo falta tocar Enviar.";
-  window.open(whatsappLink(buildEvaluationMessage(new FormData(form))), "_blank", "noopener");
-}
-
-// Clicks de la vista landing. Devuelve true si atendió el click (corta la cadena).
-function handleLandingClick(event) {
-  const demoRegister = event.target.closest("[data-demo-register]");
-  if (demoRegister) {
-    event.preventDefault();
-    const form = demoRegister.closest("form");
-    const demoClient = {
-      name: form?.querySelector("[name='clientName']")?.value?.trim() || "Cliente demo",
-      email: form?.querySelector("[name='email']")?.value?.trim() || "cliente@demo.com",
-      dogName: form?.querySelector("[name='dogName']")?.value?.trim() || "Mi perro",
-      dogSize: form?.querySelector("[name='dogSize']")?.value || "Mediano",
-    };
-    localStorage.setItem("paseosJuanDemoClient", JSON.stringify(demoClient));
-    navigate("/cliente");
-    return true;
-  }
-
-  const loginButton = event.target.closest("[data-login]");
-  if (loginButton) {
-    event.preventDefault();
-    const form = loginButton.closest("form");
-    const email = form?.querySelector("[name='email']")?.value?.trim() || "";
-    navigate(getLoginRouteByEmail(email));
-    return true;
-  }
-
-  return false;
+  const formData = new FormData(form);
+  // WhatsApp se abre primero (en el mismo toque) para que el navegador no lo bloquee.
+  window.open(whatsappLink(buildEvaluationMessage(formData)), "_blank", "noopener");
+  status.textContent = "Se abrió WhatsApp con tus respuestas: solo falta tocar Enviar.";
+  // Además, el pedido queda guardado en la app para que el equipo lo vea.
+  enviarEvaluacion(Object.fromEntries(formData))
+    .then(() => {
+      status.textContent = "Listo: recibimos tu pedido y se abrió WhatsApp con tus respuestas. Solo falta tocar Enviar.";
+    })
+    .catch(() => {
+      status.textContent = "Se abrió WhatsApp con tus respuestas: tocá Enviar para que nos llegue.";
+    });
 }
 
 export function registerLandingEvents() {
-  clickHandlers.push(handleLandingClick);
   document.addEventListener("submit", handleEvaluationSubmit);
 }
