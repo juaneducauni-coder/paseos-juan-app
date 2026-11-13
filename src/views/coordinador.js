@@ -7,8 +7,13 @@
 // - ARCHIVOS: ve y sube el carnet de vacunas y documentos de cada cliente y perro (`archivos`).
 //   Los comprobantes de pago NO se muestran en esta página (los abre solo el admin).
 //
+// - FOTOS: cada perro tiene su foto (`fotos`); quien la ve sin foto puede sacarla con «Foto».
+//
+// Diseño (E024): celular primero, una mano. Barra fija abajo (Inicio · Rutas · Clientes · Más),
+// tarjetas con foto del perro, pocas letras y botones grandes. Lo que se usa poco va a «Más».
+//
 // Los datos viven en el servidor (src/api/client.js, ver docs/datos-compartidos.md).
-// En este dispositivo solo quedan comodidades: qué secciones están abiertas y la vista de rutas elegida.
+// En este dispositivo solo quedan comodidades: la pestaña abierta, secciones plegadas y la vista de rutas.
 import {
   PENDIENTE,
   DATA_UPDATED,
@@ -22,7 +27,7 @@ import {
   plantillasDesdePlanilla,
   sumarMinutos,
 } from "../data/realData.js";
-import { session, registros, onDataChange, hoyAR, archivos as archivosApi } from "../api/client.js";
+import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
 
@@ -70,13 +75,21 @@ function removeKey(key) {
 /* Mensajes de estado (aria-live)                                      */
 /* ------------------------------------------------------------------ */
 
-let flash = null;
-let lastDeleted = null;
+// Un solo aviso flotante (abajo, encima de la barra). Si trae «Deshacer», dura 5 segundos.
+let toast = null;
+let toastTimer = 0;
 
-function setFlash(sectionKey, text, tone = "ok") {
-  flash = { section: sectionKey, text, tone };
+// local: el «Deshacer» es de algo que todavía no se guardó (el editor): se borra al cerrarlo.
+function showToast(text, { tone = "ok", undo = null, local = false } = {}) {
+  toast = { text, tone, undo, local };
   if (tone === "error") announceError(text);
   else announce(text);
+  window.clearTimeout(toastTimer);
+  const ms = undo ? 5000 : tone === "error" ? 9000 : 3500;
+  toastTimer = window.setTimeout(() => {
+    toast = null;
+    scheduleRerender();
+  }, ms);
 }
 
 // Regiones aria-live persistentes (fuera de #app, para que sobrevivan al redibujado).
@@ -307,6 +320,7 @@ const COLS = {
   observaciones: () => ({ desde: haceDias(6) }),
   incidentes: () => ({ desde: haceDias(6) }),
   archivos: () => ({}),
+  fotos: () => ({}),
 };
 const COL_NAMES = Object.keys(COLS);
 const LEGACY_COLS = ["pedidos", "fichas", "resueltos"];
@@ -444,7 +458,7 @@ function whoLine(record, { web = false } = {}) {
     parts.push(`Último cambio${quien ? ` de ${esc(quien)}` : ""}: ${fmtStamp(record.actualizadoEn)}`);
   }
   const pending = record.pendiente
-    ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Sin señal: se enviará cuando vuelva.</span></p>`
+    ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Se envía con señal.</span></p>`
     : "";
   return `${parts.length ? `<p class="coord-meta">${parts.join(" · ")}</p>` : ""}${pending}`;
 }
@@ -455,28 +469,28 @@ function whoLine(record, { web = false } = {}) {
 
 const busy = new Set();
 
-async function guardar(col, data, { section: sectionKey, ok }) {
+// undo: función que deja todo como estaba (se ofrece «Deshacer» 5 segundos).
+async function guardar(col, data, { ok, undo = null }) {
   try {
     const result = await registros.save(col, data);
-    setFlash(sectionKey, result.pendiente ? `${ok} Sin señal: se enviará cuando vuelva.` : ok);
+    showToast(result.pendiente ? "Guardado en el celular. Se envía solo con señal." : ok, { undo });
     return result;
   } catch (error) {
-    setFlash(sectionKey, `No se pudo guardar: ${error.message}`, "error");
+    showToast(`No se pudo guardar: ${error.message}`, { tone: "error" });
     return null;
   } finally {
     scheduleRerender();
   }
 }
 
-async function borrar(col, record, { section: sectionKey, ok, undo = true }) {
+async function borrar(col, record, { ok, undo = true }) {
   try {
     await registros.remove(col, record.id);
-    lastDeleted = undo ? { col, record, section: sectionKey } : null;
-    setFlash(sectionKey, ok);
-    flash.undo = undo;
+    const { pendiente, ...copia } = record;
+    showToast(ok, { undo: undo ? () => guardar(col, copia, { ok: "Listo, se recuperó." }) : null });
     return true;
   } catch (error) {
-    setFlash(sectionKey, `No se pudo borrar: ${error.message}`, "error");
+    showToast(`No se pudo borrar: ${error.message}`, { tone: "error" });
     return false;
   } finally {
     scheduleRerender();
@@ -784,7 +798,7 @@ let rutasFecha = "";
 let soloSinCarnet = false;
 
 function rutasVista() {
-  return readJSON(SECTIONS_KEY, {}).rutasVista === "dia" ? "dia" : "semana";
+  return readJSON(SECTIONS_KEY, {}).rutasVista === "semana" ? "semana" : "dia";
 }
 
 function setRutasVista(vista) {
@@ -824,6 +838,10 @@ function openEditor(route, { modo, fecha = "", nuevo = false, solicitud = null }
     plantillaId: route.plantillaId || (modo === "plantilla" ? route.id : ""),
     existeDia: modo === "dia" && route.origen === "dia" ? route : null,
     soloDia: modo === "plantilla" ? nextDatesFor(route.dia)[0] || "" : "",
+    // Dónde se guarda: "dia" (solo ese día) o "semana" (todas las semanas). Se elige antes de guardar.
+    destino: modo === "plantilla" ? "semana" : "dia",
+    picker: false,
+    agregados: 0,
     solicitudId: solicitud?.id || "",
     precarga: "",
     respuesta: "",
@@ -835,6 +853,7 @@ function openEditor(route, { modo, fecha = "", nuevo = false, solicitud = null }
 }
 
 function closeEditor() {
+  if (toast?.local) toast = null;
   editor = null;
   editorQuery = "";
   editorHora = "";
@@ -856,7 +875,8 @@ function editorWarnings() {
   return routeWarnings(editor, others);
 }
 
-function addStop(dog, nombreLibre) {
+function addStop(dog, nombreLibre, { keepQuery = false } = {}) {
+  const query = editorQuery;
   const hora = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(editor);
   editor.paradas.push({
     perroId: dog?.id || "",
@@ -866,8 +886,13 @@ function addStop(dog, nombreLibre) {
     nota: dog?.incompatibleWith?.length ? `No juntar con ${listJoin(dog.incompatibleWith)}` : hasMuzzle(dog) ? "Bozal" : "",
   });
   editor.sucio = true;
-  editorQuery = "";
+  editorQuery = keepQuery ? query : "";
   editorHora = "";
+}
+
+// Fecha del cambio de un día (según desde dónde se abrió el editor).
+function editorFechaDia() {
+  return editor.modo === "plantilla" ? editor.soloDia : editor.fecha;
 }
 
 function sortStops() {
@@ -893,10 +918,10 @@ function editorError() {
   if (!ROUTE_CODE.test(code)) return ["El código de la ruta tiene que ser como PJ_1M (letras, números y guion bajo).", "coord-ed-ruta"];
   editor.ruta = code;
   if (editor.nuevo) {
-    const taken = editor.modo === "plantilla"
+    const taken = editor.destino === "semana"
       ? getPlantillas().some((p) => p.id === plantillaId(code, editor.dia))
-      : effectiveRoutes(editor.fecha).some((r) => r.ruta === code);
-    if (taken) return [`Ya hay una ruta ${code} ese día. Elegí otro código o editá la que existe.`, "coord-ed-ruta"];
+      : effectiveRoutes(editorFechaDia()).some((r) => r.ruta === code);
+    if (taken) return [`Ya hay una ruta ${code} ese día. Cambiá el código.`, "coord-ed-ruta"];
   }
   const sinHora = editor.paradas.findIndex((s) => !validHora(s.hora));
   if (sinHora >= 0) return [`Falta la hora de retiro de ${editor.paradas[sinHora].perroNombre || "un perro"}.`, `coord-ed-hora-${sinHora}`];
@@ -965,7 +990,7 @@ function aplicarSolicitud(s) {
       if (hora) editorHora = hora;
       addStop(dog, s.perroNombre);
       editor.precarga = `Ya agregué a ${nombre} a las ${editor.paradas[editor.paradas.length - 1].hora}. Revisá y guardá.`;
-    } else editor.precarga = "No dice qué perro agregar: buscalo abajo.";
+    } else editor.precarga = "No dice qué perro: tocá «Agregar perro».";
   } else {
     editor.precarga = "Este cambio se hace a mano: revisá el pedido y ajustá la ruta.";
   }
@@ -1290,6 +1315,13 @@ function serializeForm(formEl) {
   const groups = new Set();
   formEl.querySelectorAll("[name]").forEach((fieldEl) => {
     if (fieldEl.type === "file") return;
+    if (fieldEl.type === "radio") {
+      if (groups.has(fieldEl.name)) return;
+      groups.add(fieldEl.name);
+      const marcado = formEl.querySelector(`[name="${fieldEl.name}"]:checked`);
+      values[fieldEl.name] = marcado ? marcado.value : "";
+      return;
+    }
     if (fieldEl.type === "checkbox") {
       if (groups.has(fieldEl.name)) return;
       groups.add(fieldEl.name);
@@ -1303,96 +1335,114 @@ function serializeForm(formEl) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Navegación: Inicio · Rutas · Clientes · Más                         */
+/* ------------------------------------------------------------------ */
+
+const TABS = ["inicio", "rutas", "clientes", "mas"];
+const SUBS = ["cambios", "pedidos", "avisos", "fichas", "datos", "docs", "incidentes"];
+let view = null;
+
+function getView() {
+  if (!view) {
+    const saved = readJSON(SECTIONS_KEY, {});
+    const tab = TABS.includes(saved.tab) ? saved.tab : "inicio";
+    view = { tab, sub: tab === "mas" && SUBS.includes(saved.sub) ? saved.sub : "" };
+  }
+  return view;
+}
+
+// "mas:pedidos" → pestaña Más, sección Pedidos.
+function goView(target) {
+  const [tab, sub = ""] = String(target || "inicio").split(":");
+  view = { tab: TABS.includes(tab) ? tab : "inicio", sub: SUBS.includes(sub) ? sub : "" };
+  if (view.sub) view.tab = "mas";
+  writeJSON(SECTIONS_KEY, { ...readJSON(SECTIONS_KEY, {}), tab: view.tab, sub: view.sub });
+}
+
+function toTop(focusId = "coord-view-title") {
+  requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+    document.getElementById(focusId)?.focus({ preventScroll: true });
+  });
+}
+
+// Formularios que ocupan toda la pantalla (con «Guardar» fijo abajo).
+let clienteFormOpen = false;
+let avisoFormOpen = false;
+let pedidoFormOpen = false;
+let altaFormOpen = false;
+let pedidosFiltro = "nuevo";
+const fotoBusy = new Set();
+
+/* ------------------------------------------------------------------ */
 /* Componentes                                                         */
 /* ------------------------------------------------------------------ */
 
-function field(form, name, label, { value = "", placeholder = "", hint = "", type = "text", required = false, span = false, attrs = "" } = {}) {
-  const id = `coord-${form}-${name}`;
-  return `
-    <div class="coord-field ${span ? "is-wide" : ""}">
-      <label for="${id}">${label}${required ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
-      <input id="${id}" name="${name}" type="${type}" value="${esc(value)}" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""} ${required ? "required" : ""} ${hint ? `aria-describedby="${id}-hint"` : ""} ${attrs} />
-      ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
-    </div>
-  `;
-}
+// Íconos que no están en el set compartido.
+const EXTRA_ICONS = {
+  menu: `<circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />`,
+  arrowUp: `<path d="M12 19V5" /><path d="m6 11 6-6 6 6" />`,
+  arrowDown: `<path d="M12 5v14" /><path d="m6 13 6 6 6-6" />`,
+  arrowLeft: `<path d="M19 12H5" /><path d="m11 6-6 6 6 6" />`,
+  search: `<circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />`,
+  check: `<path d="m5 12 5 5 9-10" />`,
+  trash: `<path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" />`,
+};
 
-function selectField(form, name, label, options, { value = "", hint = "", span = false, required = false } = {}) {
-  const id = `coord-${form}-${name}`;
-  const opts = options.map((option) => (Array.isArray(option) ? option : [option, option]));
-  return `
-    <div class="coord-field ${span ? "is-wide" : ""}">
-      <label for="${id}">${label}${required ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
-      <select id="${id}" name="${name}" ${hint ? `aria-describedby="${id}-hint"` : ""}>
-        ${opts.map(([val, text]) => `<option value="${esc(val)}" ${val === value ? "selected" : ""}>${esc(text)}</option>`).join("")}
-      </select>
-      ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
-    </div>
-  `;
-}
-
-function textArea(form, name, label, { value = "", placeholder = "", hint = "", span = true, attrs = "", required = false } = {}) {
-  const id = `coord-${form}-${name}`;
-  return `
-    <div class="coord-field ${span ? "is-wide" : ""}">
-      <label for="${id}">${label}${required ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
-      <textarea id="${id}" name="${name}" rows="3" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""} ${hint ? `aria-describedby="${id}-hint"` : ""} ${attrs}>${esc(value)}</textarea>
-      ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
-    </div>
-  `;
-}
-
-function daysField(form, days) {
-  return `
-    <div class="coord-field is-wide">
-      <span class="coord-label" id="coord-${form}-dias-label">Días</span>
-      <div class="coord-days" role="group" aria-labelledby="coord-${form}-dias-label">
-        ${SERVICE_DAYS.map((day) => `
-          <label class="coord-day"><input type="checkbox" id="coord-${form}-dia-${slugDia(day)}" name="dias" value="${day}" ${days.includes(day) ? "checked" : ""} /><span>${day}</span></label>
-        `).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function feedback(sectionKey) {
-  if (!flash || flash.section !== sectionKey) return "";
-  const undo = flash.undo ? `<button class="coord-link" type="button" id="coord-undo-${sectionKey}" data-coord-undo>Deshacer</button>` : "";
-  return `<p class="coord-flash is-${flash.tone}">${icon(flash.tone === "error" ? "alertCircle" : "checkCircle", "coord-icon")}<span>${esc(flash.text)}</span>${undo}</p>`;
+function ic(name, cls = "coord-icon") {
+  if (!EXTRA_ICONS[name]) return icon(name, cls);
+  return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${EXTRA_ICONS[name]}</svg>`;
 }
 
 function button(label, attrs, variant = "secondary", iconName = "") {
-  return `<button class="coord-btn is-${variant}" type="button" ${attrs}>${iconName ? icon(iconName, "coord-icon") : ""}<span>${label}</span></button>`;
+  return `<button class="coord-btn is-${variant}" type="button" ${attrs}>${iconName ? ic(iconName) : ""}<span>${label}</span></button>`;
 }
 
-function section({ key, id, iconName, title, intro, badges = "", body, open = false }) {
+// Chip de estado: siempre con texto. Tonos: neutral (gris), info (azul), ok (verde), warn (amarillo), alert (rojo).
+function chip(text, tone = "neutral", iconName = "") {
+  return `<span class="cd-chip is-${tone}">${iconName ? ic(iconName, "coord-icon is-xs") : ""}<span>${text}</span></span>`;
+}
+
+function shortList(names, max = 2) {
+  if (names.length <= max) return listJoin(names);
+  return `${names.slice(0, max).join(", ")} +${names.length - max}`;
+}
+
+function firstName(value) {
+  return String(personName(value) || "").split(" ")[0];
+}
+
+// Foto del perro (miniatura) o círculo con la inicial.
+function Ava(dog, name = "", size = "md") {
+  const src = dog?.id ? fotosPerros.de(dog.id) : null;
+  const n = String(name || dog?.name || "?").trim();
+  if (src) return `<img class="cd-ava is-${size}" src="${esc(src)}" alt="" loading="lazy" decoding="async" />`;
+  return `<span class="cd-ava is-${size} is-initial" aria-hidden="true">${esc((n[0] || "?").toUpperCase())}</span>`;
+}
+
+// Botón de cámara para el perro que todavía no tiene foto.
+function FotoBtn(dog, { compact = false } = {}) {
+  if (!dog?.id || fotosPerros.de(dog.id)) return "";
+  const busy = fotoBusy.has(dog.id);
   return `
-    <details class="coord-section" id="${id}" ${isOpen(key, open) ? "open" : ""}>
-      <summary id="${id}-summary" data-coord-toggle="${key}">
-        <span class="coord-section-icon">${icon(iconName, "coord-icon")}</span>
-        <span class="coord-section-title">
-          <h2>${title}</h2>
-          <small>${intro}</small>
-        </span>
-        <span class="coord-section-badges">${badges}</span>
-        <span class="coord-chevron">${icon("chevronDown", "coord-icon")}</span>
-      </summary>
-      <div class="coord-section-body">${body}</div>
-    </details>
+    <label class="cd-foto-btn ${compact ? "is-compact" : ""} ${busy ? "is-busy" : ""}">
+      ${ic("camera")}<span>${busy ? "Subiendo" : "Foto"}</span><span class="coord-sr-only"> de ${esc(dog.name)}</span>
+      <input type="file" accept="image/*" capture="environment" data-coord-foto="${esc(dog.id)}" ${busy ? "disabled" : ""} />
+    </label>
   `;
 }
 
-function badge(text, tone = "neutral") {
-  return `<span class="coord-badge is-${tone}">${text}</span>`;
+// Seguridad siempre a la vista: bozal (rojo) y «no juntar» (amarillo).
+function safetyChips(dog, { choca = false } = {}) {
+  if (!dog) return "";
+  const out = [];
+  if (hasMuzzle(dog)) out.push(chip("Bozal", "alert", "alertTriangle"));
+  if (dog.incompatibleWith?.length) out.push(chip(`No juntar: ${esc(shortList(dog.incompatibleWith))}`, choca ? "alert" : "warn", choca ? "alertTriangle" : ""));
+  return out.join("");
 }
 
-function safetyChips(dog) {
-  if (!dog?.safety?.length) return "";
-  return `
-    <ul class="coord-safety" aria-label="Indicaciones de seguridad de ${esc(dog.name)}">
-      ${dog.safety.map((note) => `<li class="${/bozal|no juntar/i.test(note) ? "is-alert" : ""}">${icon(/bozal|no juntar/i.test(note) ? "alertTriangle" : "users", "coord-icon")}${esc(note)}</li>`).join("")}
-    </ul>
-  `;
+function carnetChip(dog) {
+  return tieneCarnet(dog) ? chip("Carnet", "ok", "check") : chip("Sin carnet", "warn");
 }
 
 function dataList(rows, className = "") {
@@ -1405,34 +1455,105 @@ function dataList(rows, className = "") {
   `;
 }
 
-function warnList(list, id) {
-  if (!list.length) return "";
+function field(form, name, label, { value = "", placeholder = "", hint = "", type = "text", required = false, span = false, attrs = "" } = {}) {
+  const id = `coord-${form}-${name}`;
   return `
-    <div class="coord-warn-box" role="note" ${id ? `id="${id}"` : ""}>
-      <h3>${icon("alertTriangle", "coord-icon")}<span>${list.length === 1 ? "1 aviso para revisar" : `${list.length} avisos para revisar`}</span></h3>
-      <ul>${list.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>
-      <p>No bloquea el guardado: revisalo antes de mandar la ruta.</p>
+    <div class="coord-field ${span ? "is-wide" : ""}">
+      <label for="${id}">${label}${required ? ' <span class="coord-required">*<span class="coord-sr-only"> obligatorio</span></span>' : ""}</label>
+      <input id="${id}" name="${name}" type="${type}" value="${esc(value)}" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""} ${required ? "required" : ""} ${hint ? `aria-describedby="${id}-hint"` : ""} ${attrs} />
+      ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
     </div>
   `;
 }
 
-function carnetChip(dog) {
-  const ok = tieneCarnet(dog);
-  return `<span class="coord-carnet ${ok ? "is-ok" : "is-missing"}">${icon(ok ? "fileCheck" : "alertCircle", "coord-icon")}<span>Carnet: ${ok ? "cargado" : "falta"}</span></span>`;
+function selectField(form, name, label, options, { value = "", hint = "", span = false } = {}) {
+  const id = `coord-${form}-${name}`;
+  const opts = options.map((option) => (Array.isArray(option) ? option : [option, option]));
+  return `
+    <div class="coord-field ${span ? "is-wide" : ""}">
+      <label for="${id}">${label}</label>
+      <select id="${id}" name="${name}" ${hint ? `aria-describedby="${id}-hint"` : ""}>
+        ${opts.map(([val, text]) => `<option value="${esc(val)}" ${val === value ? "selected" : ""}>${esc(text)}</option>`).join("")}
+      </select>
+      ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
+    </div>
+  `;
+}
+
+function textArea(form, name, label, { value = "", placeholder = "", hint = "", span = true, attrs = "", required = false } = {}) {
+  const id = `coord-${form}-${name}`;
+  return `
+    <div class="coord-field ${span ? "is-wide" : ""}">
+      <label for="${id}">${label}${required ? ' <span class="coord-required">*<span class="coord-sr-only"> obligatorio</span></span>' : ""}</label>
+      <textarea id="${id}" name="${name}" rows="3" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""} ${hint ? `aria-describedby="${id}-hint"` : ""} ${attrs}>${esc(value)}</textarea>
+      ${hint ? `<small id="${id}-hint">${hint}</small>` : ""}
+    </div>
+  `;
+}
+
+// Botones de un toque que completan un campo (barrio, fecha…).
+function quickFill(targetId, options, current = "") {
+  return `
+    <div class="cd-chiprow" role="group" aria-label="Opciones rápidas">
+      ${options.map(([value, text]) => `<button type="button" class="cd-pill" data-coord-set-field="${targetId}" data-value="${esc(value)}" aria-pressed="${normalize(value) === normalize(current)}">${esc(text)}</button>`).join("")}
+    </div>
+  `;
+}
+
+// Días como botones (checkbox con forma de chip).
+function daysField(form, days) {
+  return `
+    <div class="coord-field is-wide">
+      <span class="coord-label" id="coord-${form}-dias-label">Días</span>
+      <div class="cd-chiprow" role="group" aria-labelledby="coord-${form}-dias-label">
+        ${SERVICE_DAYS.map((day) => `
+          <label class="cd-pill is-check"><input type="checkbox" id="coord-${form}-dia-${slugDia(day)}" name="dias" value="${day}" ${days.includes(day) ? "checked" : ""} /><span>${DAY_SHORT[day]}</span><span class="coord-sr-only"> ${day}</span></label>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+// Sección plegable ("?" o "Más"): se recuerda abierta o cerrada en el dispositivo.
+function fold(key, summary, body, { open = false, id = "" } = {}) {
+  return `
+    <details class="cd-fold" ${id ? `id="${id}"` : ""} ${isOpen(key, open) ? "open" : ""}>
+      <summary data-coord-toggle="${key}"><span>${summary}</span>${ic("chevronDown", "coord-icon cd-chev")}</summary>
+      <div class="cd-fold-body">${body}</div>
+    </details>
+  `;
+}
+
+// Plegable que se recuerda solo mientras la página está abierta (una tarjeta).
+function cardMore(memKey, summary, body, forceOpen = false) {
+  return `
+    <details class="cd-fold is-card" ${forceOpen || openCards.has(memKey) ? "open" : ""}>
+      <summary data-coord-mem-toggle="${esc(memKey)}"><span>${summary}</span>${ic("chevronDown", "coord-icon cd-chev")}</summary>
+      <div class="cd-fold-body">${body}</div>
+    </details>
+  `;
+}
+
+function warnList(list) {
+  if (!list.length) return "";
+  return `<ul class="cd-warns">${list.map((text) => `<li>${ic("alertTriangle")}<span>${esc(text)}</span></li>`).join("")}</ul>`;
+}
+
+function emptyState(text, iconName = "checkCircle") {
+  return `<p class="cd-empty">${ic(iconName)}<span>${text}</span></p>`;
 }
 
 function ArchivoItem(a, scope) {
   const titulo = `${tipoLabel(a.tipo)}${a.perroNombre ? ` de ${a.perroNombre}` : ""}`;
-  const formato = a.mime === "application/pdf" ? "PDF" : a.mime ? "Foto" : "";
   const meta = [
-    a.creadoPor === "web" ? "Llegó por la página web" : a.creadoPorNombre ? `Subido por ${a.creadoPorNombre}` : "",
+    a.creadoPor === "web" ? "Web" : a.creadoPorNombre || "",
     a.creadoEn ? fmtStamp(a.creadoEn) : fmtDate(a.fecha),
-    [formato, fmtTamano(a.tamano)].filter(Boolean).join(", "),
-    a.ubicacion === "drive" ? "Guardado en Drive" : "",
+    fmtTamano(a.tamano),
+    a.ubicacion === "drive" ? "Drive" : "",
   ].filter(Boolean).join(" · ");
   return `
     <li class="coord-file">
-      <span class="coord-file-icon">${icon(esCarnet(a) ? "fileCheck" : "fileText", "coord-icon")}</span>
+      <span class="coord-file-icon">${ic(esCarnet(a) ? "fileCheck" : "fileText")}</span>
       <span class="coord-file-text">
         <b>${esc(titulo)}</b>
         ${meta ? `<small>${esc(meta)}</small>` : ""}
@@ -1447,21 +1568,16 @@ function ArchivoItem(a, scope) {
 function AdjuntosPedido(pedido) {
   const adjuntos = archivosDePedido(pedido);
   const scope = `pedido-${pedido.id}`;
-  if (!adjuntos.length) {
-    return pedido.origen === "web" && estadoDe(pedido) !== "resuelto"
-      ? `<p class="coord-meta">${icon("alertCircle", "coord-icon")}<span>No mandó el carnet de vacunas: pedíselo al tutor.</span></p>${fileFeedback(scope)}`
-      : fileFeedback(scope);
-  }
+  if (!adjuntos.length) return fileFeedback(scope);
   return `
     <div class="coord-attach">
       ${adjuntos.map((a) => {
         const carnet = esCarnet(a);
-        const quien = a.creadoEn ? `Llegó el ${fmtStamp(a.creadoEn)}` : "";
         return `
           <p class="coord-attach-row">
-            ${icon(carnet ? "fileCheck" : "fileText", "coord-icon")}
-            <span><b>${carnet ? "Carnet de vacunas adjunto" : `${esc(tipoLabel(a.tipo))} adjunto`}</b>${quien ? `<small>${esc(quien)}</small>` : ""}</span>
-            ${button(`${carnet ? "Ver carnet" : "Ver"}<span class="coord-sr-only"> (se abre en otra pestaña)</span>`, `data-coord-archivo-abrir="${esc(a.id)}" data-scope="${esc(scope)}"`, "secondary", "eye")}
+            ${ic(carnet ? "fileCheck" : "fileText")}
+            <span><b>${carnet ? "Carnet adjunto" : `${esc(tipoLabel(a.tipo))} adjunto`}</b>${a.creadoEn ? `<small>${esc(fmtStamp(a.creadoEn))}</small>` : ""}</span>
+            ${button(`Ver<span class="coord-sr-only"> ${carnet ? "carnet" : "archivo"} (se abre en otra pestaña)</span>`, `data-coord-archivo-abrir="${esc(a.id)}" data-scope="${esc(scope)}"`, "secondary", "eye")}
           </p>`;
       }).join("")}
     </div>
@@ -1473,7 +1589,7 @@ function AdjuntosPedido(pedido) {
 function filePicker(id, text, attrs, hintId) {
   return `
     <label class="coord-btn is-secondary coord-file-pick" for="${id}">
-      ${icon("camera", "coord-icon")}<span>${text}</span>
+      ${ic("camera")}<span>${text}</span>
       <input id="${id}" type="file" accept="image/*,application/pdf" capture="environment" ${attrs} aria-describedby="${hintId}" />
     </label>
   `;
@@ -1486,35 +1602,28 @@ function SubidaForm(c, perros) {
   const hintId = `coord-subida-hint-${id}`;
   return `
     <div class="coord-upload" id="coord-subida-${id}" role="group" aria-labelledby="coord-subida-title-${id}">
-      <p class="coord-upload-title" id="coord-subida-title-${id}">Subir carnet o documento de ${esc(c.nombre || "este cliente")}</p>
-      ${sinSenal() ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>Sin señal: los archivos no quedan en espera. Elegilo igual y tocá «Subir» cuando vuelva la señal.</span></p>` : ""}
-      <div class="coord-grid">
+      <p class="coord-upload-title" id="coord-subida-title-${id}">Subir documento</p>
+      ${sinSenal() ? `<p class="coord-inline-alert">${ic("alertTriangle")}<span>Sin señal: los archivos necesitan señal.</span></p>` : ""}
+      <div class="cd-chiprow" role="group" aria-label="Qué es">
+        ${TIPOS_SUBIDA.map(([v, t]) => `<button type="button" class="cd-pill" id="coord-subida-tipo-${id}-${v === TIPO_CARNET ? "carnet" : "doc"}" data-coord-subida-set="tipo" data-value="${v}" aria-pressed="${v === s.tipo}">${t === "Carnet de vacunas" ? "Carnet" : "Otro"}</button>`).join("")}
+      </div>
+      ${perros.length ? `
         <div class="coord-field">
-          <label for="coord-subida-tipo-${id}">Qué es</label>
-          <select id="coord-subida-tipo-${id}" data-coord-subida-campo="tipo">
-            ${TIPOS_SUBIDA.map(([v, t]) => `<option value="${v}" ${v === s.tipo ? "selected" : ""}>${t}</option>`).join("")}
-          </select>
-        </div>
-        <div class="coord-field">
-          <label for="coord-subida-perro-${id}">De qué perro${s.tipo === TIPO_CARNET && perros.length > 1 ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
+          <label for="coord-subida-perro-${id}">Perro${s.tipo === TIPO_CARNET && perros.length > 1 ? ' <span class="coord-required">*</span>' : ""}</label>
           <select id="coord-subida-perro-${id}" data-coord-subida-campo="perroId">
-            <option value="">${perros.length ? (s.tipo === TIPO_CARNET ? "Elegí el perro" : "De ninguno en especial") : "El cliente no tiene perros cargados"}</option>
+            <option value="">${s.tipo === TIPO_CARNET ? "Elegí" : "Ninguno"}</option>
             ${perros.map((d) => `<option value="${d.id}" ${d.id === s.perroId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}
           </select>
-        </div>
-        <div class="coord-field is-wide">
-          <span class="coord-label">Foto o PDF <span class="coord-required">(obligatorio)</span></span>
-          ${filePicker(`coord-subida-archivo-${id}`, s.file ? "Cambiar el archivo" : "Sacar foto o elegir archivo", "data-coord-subida-archivo", hintId)}
-          <small id="${hintId}">${s.file ? `Elegiste <b>${esc(s.file.name)}</b> (${fmtTamano(s.file.size)}).` : "Foto clara o PDF, hasta 3,5 MB. Las fotos se achican solas."}</small>
-        </div>
-        <div class="coord-field is-wide">
-          <label for="coord-subida-nota-${id}">Nota (opcional)</label>
-          <input id="coord-subida-nota-${id}" type="text" value="${esc(s.nota)}" data-coord-subida-campo="nota" autocomplete="off" placeholder="Ej.: antirrábica hasta 03/2027" />
-        </div>
+        </div>` : ""}
+      ${filePicker(`coord-subida-archivo-${id}`, s.file ? "Cambiar" : "Foto o PDF", "data-coord-subida-archivo", hintId)}
+      <small id="${hintId}" class="cd-muted">${s.file ? `${esc(s.file.name)} (${fmtTamano(s.file.size)})` : "Hasta 3,5 MB."}</small>
+      <div class="coord-field">
+        <label for="coord-subida-nota-${id}">Nota</label>
+        <input id="coord-subida-nota-${id}" type="text" value="${esc(s.nota)}" data-coord-subida-campo="nota" autocomplete="off" placeholder="Opcional" />
       </div>
-      <p class="coord-upload-status" role="status">${subiendo ? `${icon("clock", "coord-icon")}<span>Subiendo… No cierres la página.</span>` : ""}</p>
-      ${s.error ? `<p class="coord-flash is-error is-small">${icon("alertCircle", "coord-icon")}<span>${esc(s.error)}</span></p>` : ""}
-      <div class="coord-actions">
+      <p class="coord-upload-status" role="status">${subiendo ? `${ic("clock")}<span>Subiendo…</span>` : ""}</p>
+      ${s.error ? `<p class="coord-inline-alert">${ic("alertCircle")}<span>${esc(s.error)}</span></p>` : ""}
+      <div class="cd-actions">
         ${button(subiendo ? "Subiendo…" : "Subir", `id="coord-subida-ok-${id}" data-coord-subida-ok="${id}" ${subiendo ? 'aria-disabled="true"' : ""}`, "primary", "uploadCloud")}
         ${button("Cancelar", `id="coord-subida-cancel-${id}" data-coord-subida-cancel="${id}"`, "ghost")}
       </div>
@@ -1529,22 +1638,20 @@ function DocumentosCliente(c) {
   const scope = `cliente-${c.id}`;
   return `
     <div class="coord-docs" role="group" aria-labelledby="coord-docs-${id}">
-      <h4 id="coord-docs-${id}">${icon("fileText", "coord-icon")}<span>Documentos</span> <span class="coord-count">${docs.length}</span></h4>
-      ${perros.length ? `<ul class="coord-carnets" aria-label="Carnet de vacunas por perro">${perros.map((d) => `<li><b>${esc(d.name)}</b> ${carnetChip(d)}</li>`).join("")}</ul>` : ""}
+      <h4 id="coord-docs-${id}">${ic("fileText")}<span>Documentos</span> <span class="cd-count">${docs.length}</span></h4>
       ${docs.length
         ? `<ul class="coord-files">${docs.map((a) => ArchivoItem(a, scope)).join("")}</ul>`
-        : `<p class="coord-empty is-small">${loaded.has("archivos") ? "Todavía no hay documentos. Subí el carnet de vacunas de cada perro." : "Cargando documentos…"}</p>`}
+        : `<p class="cd-muted">${loaded.has("archivos") ? "Sin documentos." : "Cargando…"}</p>`}
       ${fileFeedback(scope)}
       ${subida?.clienteId === c.id
         ? SubidaForm(c, perros)
-        : button("Subir carnet o documento", `id="coord-subir-${id}" data-coord-subir="${id}"`, "secondary", "fileUp")}
+        : button("Subir", `id="coord-subir-${id}" data-coord-subir="${id}"`, "secondary", "fileUp")}
     </div>
   `;
 }
 
 const TEAM_DATALIST = `
-  <datalist id="coord-team-users">${TEAM.map((t) => `<option value="${esc(t.id)}">${esc(t.name)} · ${esc(t.label)}</option>`).join("")}</datalist>
-  <datalist id="coord-team-names">${TEAM.map((t) => `<option value="${esc(t.name.split(" ")[0])}">${esc(t.name)}</option>`).join("")}</datalist>
+  <datalist id="coord-team-users">${TEAM.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")}</datalist>
 `;
 
 /* ------------------------------------------------------------------ */
@@ -1564,284 +1671,240 @@ export function coordinatorShell(content) {
 function CoordinatorHeader() {
   return `
     <header class="coord-header">
-      <a class="coord-brand" href="/coordinador" data-link aria-label="Paseos Juan, panel de coordinación">
+      <a class="coord-brand" href="/coordinador" data-link aria-label="Paseos Juan, coordinación">
         <span class="coord-logo">
           <img class="coord-logo-light" src="/paseos-juan-logo-green.svg" alt="" />
           <img class="coord-logo-dark" src="/paseos-juan-logo-white.svg" alt="" />
         </span>
-        <span class="coord-brand-text">
-          <strong>Coordinación</strong>
-          <small>Paseos Juan</small>
-        </span>
+        <span class="coord-brand-text"><strong>Coordinación</strong></span>
       </a>
       <div class="coord-header-actions">
         <button class="coord-btn is-ghost is-compact" type="button" data-a11y-toggle aria-controls="a11y-panel">
-          ${icon("eye", "coord-icon")}<span>Accesibilidad</span>
+          ${ic("eye")}<span class="cd-hide-xs">Accesibilidad</span><span class="coord-sr-only cd-show-xs">Accesibilidad</span>
         </button>
-        <a class="coord-btn is-ghost is-compact" href="/salir" data-link>
-          ${icon("logOut", "coord-icon")}<span>Salir</span>
-        </a>
+        <a class="coord-btn is-ghost is-compact" href="/salir" data-link>${ic("logOut")}<span>Salir</span></a>
       </div>
     </header>
   `;
 }
 
 export function coordinatorDashboard() {
+  // Las regiones aria-live tienen que existir antes del primer aviso para que el lector las lea.
+  liveRegion("coord-live", "status", "polite");
+  liveRegion("coord-alerta", "alert", "assertive");
   wireData();
   ensureSync();
   carnetIdx = buildCarnetIndex();
-  const content = `
-    <main class="coord-main" id="coord-main" tabindex="-1">
+  const v = getView();
+  let main;
+  let full = false;
+  if (editor) {
+    main = editor.picker ? DogPicker() : RouteEditor();
+    full = true;
+  } else if (v.tab === "clientes" && clienteFormOpen) {
+    main = ClienteForm();
+    full = true;
+  } else if (v.tab === "mas" && v.sub === "fichas" && altaFormOpen) {
+    main = AltaForm();
+    full = true;
+  } else {
+    main = { inicio: InicioView, rutas: RutasView, clientes: ClientesView, mas: MasView }[v.tab]();
+  }
+  clearedForms.clear();
+  return `
+    <main class="coord-main ${full ? "has-savebar" : "has-tabbar"}" id="coord-main" tabindex="-1">
       ${SyncStrip()}
-      ${TodayPanel()}
-      ${AvisosStrip()}
-      ${RoutesBlock()}
-      ${SolicitudesSection()}
-      ${ClientesSection()}
-      ${AvisosSection()}
-      ${RequestsSection()}
-      ${ReviewSection()}
-      ${IntakeSection()}
-      ${ActivitySection()}
-      <p class="coord-footnote">
-        Rutas de partida: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Datos de perros: ${esc(BUSINESS_INFO.officialSources.dogs)}.
-        Rutas, clientes, avisos y pedidos se guardan en los datos compartidos del equipo. Los carnets y documentos quedan privados: se abren solo con tu usuario. Los pagos los ve solo Juan.
-      </p>
+      ${main}
       ${TEAM_DATALIST}
     </main>
+    ${full ? "" : TabBar()}
+    ${Toast()}
   `;
-  flash = null;
-  clearedForms.clear();
-  return content;
 }
 
-/* ---------- Estado de la conexión ---------- */
+function TabBar() {
+  const v = getView();
+  const sols = solicitudesPendientes().length;
+  const web = webNuevos(getPedidos()).length;
+  const items = [
+    ["inicio", "home", "Inicio", sols + web],
+    ["rutas", "route", "Rutas", 0],
+    ["clientes", "users", "Clientes", 0],
+    ["mas", "menu", "Más", 0],
+  ];
+  return `
+    <nav class="cd-tabbar" aria-label="Secciones">
+      ${items.map(([tab, iconName, label, n]) => `
+        <button type="button" class="cd-tab ${v.tab === tab ? "is-on" : ""}" data-coord-go="${tab}" ${v.tab === tab ? 'aria-current="page"' : ""}>
+          ${ic(iconName)}<span>${label}</span>${n ? `<b class="cd-tab-n" aria-label="${n} para resolver">${n}</b>` : ""}
+        </button>`).join("")}
+    </nav>
+  `;
+}
+
+function Toast() {
+  if (!toast) return "";
+  return `
+    <div class="cd-toast is-${toast.tone}">
+      ${ic(toast.tone === "error" ? "alertCircle" : "checkCircle")}
+      <span>${esc(toast.text)}</span>
+      ${toast.undo ? `<button type="button" class="cd-toast-undo" id="coord-toast-undo" data-coord-toast-undo>Deshacer</button>` : ""}
+      <button type="button" class="cd-toast-x" data-coord-toast-x aria-label="Cerrar aviso">${ic("x")}</button>
+    </div>
+  `;
+}
+
+/* ---------- Estado de la conexión (una línea) ---------- */
 
 function SyncStrip() {
   const pending = registros.pendingCount();
   const offline = navigator.onLine === false;
   const errors = [...new Set(loadErrors.values())];
   const items = [];
-  if (pending) {
-    items.push(`<p class="coord-sync is-warn">${icon("clock", "coord-icon")}<span><b>${pending} ${pending === 1 ? "cambio pendiente" : "cambios pendientes"} sin señal.</b> Se ${pending === 1 ? "envía solo" : "envían solos"} cuando vuelva.${offline ? " Los archivos (carnet y documentos) no quedan en espera: para subirlos hace falta señal." : ""}</span></p>`);
-  } else if (offline) {
-    items.push(`<p class="coord-sync is-warn">${icon("clock", "coord-icon")}<span><b>Sin señal.</b> Lo que cargues queda guardado y se envía cuando vuelva. Los archivos (carnet y documentos) no: para subirlos o abrirlos hace falta señal.</span></p>`);
+  if (offline || pending) {
+    items.push(`<p class="cd-sync is-warn">${ic("clock")}<span>${offline ? "Sin señal: seguí marcando, se envía solo." : ""}${pending ? ` ${pending} ${pending === 1 ? "cambio espera" : "cambios esperan"} señal.` : ""}${offline ? " Fotos y archivos: con señal." : ""}</span></p>`);
   }
   if (errors.length) {
-    items.push(`<div class="coord-sync is-error">${icon("alertCircle", "coord-icon")}<span>${errors.map(esc).join(" ")}</span>${button("Reintentar", "data-coord-retry", "secondary")}</div>`);
+    items.push(`<div class="cd-sync is-error">${ic("alertCircle")}<span>${errors.map(esc).join(" ")}</span>${button("Reintentar", "data-coord-retry", "secondary")}</div>`);
   }
-  if (migrationNote) items.push(`<p class="coord-sync is-ok">${icon("uploadCloud", "coord-icon")}<span>${esc(migrationNote)}</span></p>`);
-  return items.length ? `<div class="coord-sync-list">${items.join("")}</div>` : "";
+  if (migrationNote) items.push(`<p class="cd-sync is-ok">${ic("uploadCloud")}<span>${esc(migrationNote)}</span></p>`);
+  return items.join("");
 }
 
-/* ---------- 1. Lo urgente de hoy ---------- */
+/* ------------------------------------------------------------------ */
+/* Inicio                                                              */
+/* ------------------------------------------------------------------ */
 
-function SolicitudItem(s, { compact = false } = {}) {
-  const id = esc(s.id);
-  const estado = s.estado || "pendiente";
-  const nombre = s.perroNombre || solicitudPerro(s)?.name || "";
-  const quien = s.creadoPorNombre ? `${s.creadoPorNombre}${s.creadoEn ? `, ${fmtStamp(s.creadoEn)}` : ""}` : PENDIENTE;
-  const que = s.titulo || [s.tipo, nombre].filter(Boolean).join(": ");
-  const rechazo = rechazoAbierto === s.id;
+function Tile({ go, iconName, n, label, sub, tone }) {
   return `
-    <li class="coord-sol ${s.urgente ? "is-urgent" : ""} is-${esc(estado)}" id="coord-sol-${id}" tabindex="-1">
-      <div class="coord-sol-head">
-        <strong>${esc(que || "Pedido de cambio")}</strong>
-        <span class="coord-badges">${s.urgente ? badge("Urgente", "alert") : ""}${estado === "aplicado" ? badge("Aplicado", "ok") : estado === "rechazado" ? badge("Rechazado", "warn") : badge("Pendiente", "warn")}</span>
-      </div>
-      <p class="coord-sol-where">${icon("route", "coord-icon")}<span>${esc([s.fecha ? dayLabel(s.fecha) : "", s.turno, s.ruta].filter(Boolean).join(" · ") || PENDIENTE)}</span></p>
-      ${dataList([
-        ["Qué cambiar", s.detalle],
-        ["Por qué", s.motivo],
-        ["Pidió", quien],
-        ["Respuesta", s.respuesta],
-      ], compact ? "is-compact" : "")}
-      ${s.pendiente ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Sin señal: se enviará cuando vuelva.</span></p>` : ""}
-      ${estado === "pendiente" ? `
-        ${rechazo ? `
-          <div class="coord-reject">
-            <label for="coord-rechazo-${id}">Respuesta para el supervisor <span class="coord-required">(obligatorio)</span></label>
-            <textarea id="coord-rechazo-${id}" rows="2" data-coord-rechazo="${id}" placeholder="Ej.: Ese día no hay lugar en la ruta; lo pasamos al lunes.">${esc(rechazos[s.id] || "")}</textarea>
-            <div class="coord-actions">
-              ${button("Enviar rechazo", `id="coord-rechazar-ok-${id}" data-coord-sol-rechazar-ok="${id}"`, "primary")}
-              ${button("Cancelar", `data-coord-sol-rechazar-cancel="${id}"`, "ghost")}
-            </div>
-          </div>` : `
-          <div class="coord-actions">
-            ${button("Aplicar", `id="coord-aplicar-${id}" data-coord-sol-aplicar="${id}"`, "primary", "checkCircle")}
-            ${button("Rechazar", `id="coord-rechazar-${id}" data-coord-sol-rechazar="${id}"`, "ghost", "x")}
-          </div>`}` : ""}
-    </li>
+    <button type="button" class="cd-tile is-${tone}" data-coord-go="${go}" id="coord-tile-${go.replace(":", "-")}">
+      <span class="cd-tile-top">${ic(iconName)}<b class="cd-tile-n">${n}</b></span>
+      <span class="cd-tile-label">${label}</span>
+      <small>${sub}</small>
+    </button>
   `;
 }
 
-function TodayPanel() {
+function InicioView() {
   const hoy = hoyAR();
   const user = currentUser();
-  const pedidos = getPedidos();
-  const web = webNuevos(pedidos);
-  const solicitudes = solicitudesPendientes();
-  const urgentes = solicitudes.filter((s) => s.urgente);
-  const plantillasCargadas = getPlantillas().length > 0;
-  const hoyRoutes = effectiveRoutes(hoy);
-  const hoyWarnings = hoyRoutes.reduce((sum, r) => sum + warningsForDay(r, hoy).list.length, 0);
-  const hoyDogs = hoyRoutes.reduce((sum, r) => sum + (r.paradas || []).length, 0);
-  const vigentes = avisosVigentes();
-  const barrios = groupByBarrio(vigentes).map(([b]) => b);
-  const review = pendingReview();
-
-  let next;
-  if (urgentes.length) {
-    next = { text: `Resolvé el pedido urgente de <b>${esc(urgentes[0].creadoPorNombre || "supervisión")}</b>: ${esc(urgentes[0].titulo || urgentes[0].tipo || "cambio de ruta")}.`, action: button("Aplicar", `data-coord-sol-aplicar="${esc(urgentes[0].id)}"`, "primary", "arrowRight") };
-  } else if (web.length) {
-    const oldest = web[web.length - 1];
-    const d = oldest.datos || {};
-    next = { text: `Escribile a <b>${esc(d.responsable || "quien hizo el pedido")}</b> por la evaluación de <b>${esc(d.perro || "su perro")}</b>.`, action: button("Ver pedido", `data-coord-goto-pedido="${esc(oldest.id)}"`, "primary", "arrowRight") };
-  } else if (!plantillasCargadas && loaded.has("plantillas")) {
-    next = { text: "Cargá las rutas de la planilla RPJ para tener la semana armada.", action: button("Ir a rutas", `data-coord-goto="coord-rutas"`, "primary", "arrowRight") };
-  } else if (solicitudes.length) {
-    next = { text: `Respondé el pedido de cambio de <b>${esc(solicitudes[0].creadoPorNombre || "supervisión")}</b>.`, action: button("Aplicar", `data-coord-sol-aplicar="${esc(solicitudes[0].id)}"`, "primary", "arrowRight") };
-  } else if (hoyWarnings) {
-    next = { text: `Revisá ${hoyWarnings === 1 ? "el aviso" : `los ${hoyWarnings} avisos`} de las rutas de hoy.`, action: button("Ver rutas de hoy", `data-coord-ver-dia="${hoy}"`, "primary", "arrowRight") };
-  } else if (review.length) {
-    next = { text: `Confirmá el dato de <b>${esc(review[0].name)}</b>: ${esc(review[0].review || `estado "${review[0].status}"`)}`, action: button("Ver datos", `data-coord-open="datos"`, "primary", "arrowRight") };
-  } else {
-    next = { text: "Todo en orden. Mirá las rutas del día siguiente.", action: button("Ver el día siguiente", `data-coord-ver-dia="${addDaysISO(hoy, 1)}"`, "primary", "arrowRight") };
-  }
-
-  const shownSol = solicitudes.slice(0, 3);
+  const sols = solicitudesPendientes();
+  const urg = sols.filter((s) => s.urgente).length;
+  const web = webNuevos(getPedidos());
+  const vig = avisosVigentes();
+  const barrios = groupByBarrio(vig).map(([b]) => b);
+  const cargando = (col) => !loaded.has(col);
   return `
-    <section class="coord-today" aria-labelledby="coord-today-title">
-      <div class="coord-today-head">
-        <p class="coord-kicker">${dayLabel(hoy)}</p>
-        <p class="coord-greeting">Hola, ${esc(user.nombre)}</p>
-        <h1 id="coord-today-title">Lo urgente de hoy</h1>
+    <header class="cd-hello">
+      <p class="cd-date">${esc(dayLabel(hoy))}</p>
+      <h1 id="coord-view-title" tabindex="-1">Hola, ${esc(firstName(user.nombre) || user.nombre)}</h1>
+    </header>
+    <div class="cd-tiles">
+      ${Tile({ go: "mas:cambios", iconName: "bell", n: sols.length, label: "Pedidos de cambio", tone: urg ? "alert" : sols.length ? "warn" : "ok", sub: cargando("solicitudes") && !sols.length ? "…" : urg ? `${urg} ${urg === 1 ? "urgente" : "urgentes"}` : sols.length ? "Pendientes" : "Al día" })}
+      ${Tile({ go: "mas:pedidos", iconName: "clipboardCheck", n: web.length, label: "Pedidos nuevos", tone: web.length ? "warn" : "ok", sub: cargando("pedidos") && !web.length ? "…" : web.length ? "De la web" : "Al día" })}
+      ${Tile({ go: "mas:avisos", iconName: "mapPin", n: vig.length, label: "Avisos", tone: vig.length ? "warn" : "ok", sub: vig.length ? esc(shortList(barrios, 1)) : "Sin avisos" })}
+    </div>
+    ${sols.length ? `
+      <section class="cd-sec" aria-labelledby="coord-inicio-sol">
+        <h2 class="cd-h2" id="coord-inicio-sol">Para resolver</h2>
+        <ul class="cd-list">${sols.slice(0, 2).map((s) => SolicitudCard(s)).join("")}</ul>
+        ${sols.length > 2 ? button(`Ver todos (${sols.length})`, `data-coord-go="mas:cambios"`, "ghost", "arrowRight") : ""}
+      </section>` : ""}
+    <section class="cd-sec" aria-labelledby="coord-inicio-rutas">
+      <div class="cd-h2-row">
+        <h2 class="cd-h2" id="coord-inicio-rutas">Rutas de hoy</h2>
+        ${button("Semana", `data-coord-go-rutas="semana"`, "ghost", "calendarCheck")}
       </div>
-
-      ${solicitudes.length ? `
-        <div class="coord-sol-alert" id="coord-sol-urgente" tabindex="-1">
-          <h2>${icon("bell", "coord-icon")}<span>${solicitudes.length === 1 ? "1 pedido de cambio del supervisor" : `${solicitudes.length} pedidos de cambio del supervisor`}</span></h2>
-          ${feedback("solicitudes")}
-          <ul class="coord-sol-list">${shownSol.map((s) => SolicitudItem(s, { compact: true })).join("")}</ul>
-          ${solicitudes.length > shownSol.length ? `<p>Y ${solicitudes.length - shownSol.length} más. ${button("Ver todos", `data-coord-open="solicitudes"`, "ghost")}</p>` : ""}
-        </div>` : feedback("solicitudes")}
-
-      <ol class="coord-priorities">
-        <li class="coord-priority ${web.length ? "is-alert" : "is-ok"}">
-          <span class="coord-priority-num" aria-hidden="true">1</span>
-          <div>
-            <h2>Pedidos nuevos de la web</h2>
-            <p class="coord-big"><b>${web.length}</b> <span>sin responder</span></p>
-            <p>${web.length ? esc(listJoin(web.slice(0, 3).map((p) => p.datos?.perro || PENDIENTE))) : loaded.has("pedidos") ? "No hay pedidos nuevos." : "Cargando pedidos…"}</p>
-          </div>
-          ${button("Ver pedidos", `data-coord-open="pedidos"`, "secondary")}
-        </li>
-        <li class="coord-priority ${!plantillasCargadas ? "is-warn" : hoyWarnings ? "is-alert" : "is-ok"}">
-          <span class="coord-priority-num" aria-hidden="true">2</span>
-          <div>
-            <h2>Rutas de hoy</h2>
-            ${!plantillasCargadas && !hoyRoutes.length
-              ? `<p class="coord-big"><b>0</b> <span>rutas</span></p><p>${loaded.has("plantillas") ? "Todavía no hay rutas cargadas." : "Cargando rutas…"}</p>`
-              : `<p class="coord-big"><b>${hoyRoutes.length}</b> <span>${hoyRoutes.length === 1 ? "ruta" : "rutas"}</span> <b>${hoyDogs}</b> <span>paseos</span></p>
-                 ${hoyWarnings ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>${hoyWarnings} ${hoyWarnings === 1 ? "aviso" : "avisos"} para revisar</span></p>` : `<p>Sin avisos.</p>`}`}
-          </div>
-          ${button(plantillasCargadas ? "Ver rutas de hoy" : "Cargar rutas", plantillasCargadas ? `data-coord-ver-dia="${hoy}"` : `data-coord-goto="coord-rutas"`, "secondary")}
-        </li>
-        <li class="coord-priority ${vigentes.length ? "is-warn" : "is-ok"}">
-          <span class="coord-priority-num" aria-hidden="true">3</span>
-          <div>
-            <h2>Avisos de barrio vigentes</h2>
-            <p class="coord-big"><b>${vigentes.length}</b> <span>${!vigentes.length ? "avisos" : barrios.length === 1 ? "en 1 barrio" : `en ${barrios.length} barrios`}</span></p>
-            <p>${vigentes.length ? esc(listJoin(barrios.slice(0, 3))) : "Sin avisos vigentes."}</p>
-          </div>
-          ${button(vigentes.length ? "Ver avisos" : "Cargar un aviso", vigentes.length ? `data-coord-goto="coord-avisos-vigentes"` : `data-coord-open="avisos"`, "secondary")}
-        </li>
-      </ol>
-
-      <div class="coord-next">
-        <p><span class="coord-next-label">Próximo paso</span> ${next.text}</p>
-        ${next.action}
-      </div>
+      ${RoutesList(hoy)}
     </section>
   `;
 }
 
-/* ---------- Avisos vigentes por barrio (arriba) ---------- */
+/* ------------------------------------------------------------------ */
+/* Rutas                                                               */
+/* ------------------------------------------------------------------ */
 
-function AvisoCard(aviso, { history = false } = {}) {
-  const id = esc(aviso.id);
+function sortedStops(route) {
+  return (route.paradas || []).slice().sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
+}
+
+function Thumbs(stops, max = 7) {
+  if (!stops.length) return `<p class="cd-muted">Sin perros</p>`;
+  const more = stops.length - max;
   return `
-    <li class="coord-aviso ${history ? "is-old" : ""}">
-      <div class="coord-aviso-head">
-        ${history ? `<strong>${esc(aviso.barrio || "Sin barrio")}</strong>` : ""}
-        ${badge(esc(aviso.tipo || "otro"), aviso.tipo === "seguridad" || aviso.tipo === "perro suelto" ? "alert" : "warn")}
-        <small>${history ? "Venció" : "Hasta"} el ${esc(fmtDate(isISODate(aviso.vigenteHasta) ? aviso.vigenteHasta : aviso.fecha))}</small>
+    <div class="cd-thumbs" aria-hidden="true">
+      ${stops.slice(0, more > 0 ? max - 1 : max).map((s) => Ava(dogOf(s), s.perroNombre, "sm")).join("")}
+      ${more > 0 ? `<span class="cd-ava is-sm is-more">+${more + 1}</span>` : ""}
+    </div>
+  `;
+}
+
+function MiniStop(s, alert) {
+  const dog = dogOf(s);
+  return `
+    <li class="cd-mini ${alert ? "is-alert" : ""}">
+      <b class="cd-mini-hora">${esc(padHora(s.hora) || "--:--")}</b>
+      ${Ava(dog, s.perroNombre, "sm")}
+      <span class="cd-mini-name">${esc(s.perroNombre || dog?.name || PENDIENTE)}</span>
+      <span class="cd-chips">${safetyChips(dog)}${dog ? carnetChip(dog) : chip("Sin ficha", "warn")}</span>
+    </li>
+  `;
+}
+
+function RouteCard(r, fecha, { detalle = false, filtro = false } = {}) {
+  const w = warningsForDay(r, fecha);
+  const todas = sortedStops(r);
+  const stops = filtro ? todas.filter((s) => !tieneCarnet(dogOf(s))) : todas;
+  const n = todas.length;
+  const memKey = `ruta-${fecha}-${r.ruta}`;
+  const indexOf = (s) => (r.paradas || []).indexOf(s);
+  return `
+    <li class="cd-card cd-route ${w.list.length ? "is-alert" : ""}">
+      <div class="cd-route-top">
+        <strong class="cd-route-code">${esc(r.ruta)}</strong>
+        ${chip(esc(r.turno), "info")}
+        ${r.origen === "dia" ? chip("Cambio del día", "warn") : ""}
+        ${w.list.length ? chip(`${w.list.length} ${w.list.length === 1 ? "alerta" : "alertas"}`, "alert", "alertTriangle") : ""}
       </div>
-      <p>${esc(aviso.mensaje || aviso.titulo || "")}</p>
-      ${whoLine(aviso)}
-      <div class="coord-actions">
-        ${button("Copiar para WhatsApp", `data-coord-aviso-copy="${id}"`, "ghost", "copy")}
-        ${!history ? button("Ya no está vigente", `data-coord-aviso-fin="${id}"`, "ghost") : ""}
+      <p class="cd-route-time">${esc(routeSpan(r))}</p>
+      <p class="cd-route-meta">${ic("users")}<span>${esc(firstName(r.paseador) || "Sin paseador")}${r.ayudante ? ` + ${esc(firstName(r.ayudante))}` : ""} · ${n} ${n === 1 ? "perro" : "perros"}</span></p>
+      ${Thumbs(todas)}
+      ${detalle ? cardMore(memKey, filtro ? `Sin carnet (${stops.length})` : "Paradas", `
+        ${warnList(w.list)}
+        ${stops.length ? `<ol class="cd-minis">${stops.map((s) => MiniStop(s, w.byStop.has(indexOf(s)))).join("")}</ol>` : `<p class="cd-muted">${filtro ? "Todos tienen carnet." : "Sin perros."}</p>`}
+      `, filtro) : ""}
+      <div class="cd-actions">
+        ${button("Editar", `id="coord-ed-dia-${esc(r.ruta)}" data-coord-edit-dia="${esc(r.ruta)}" data-fecha="${fecha}" aria-label="Editar ${esc(r.ruta)} ${esc(r.turno.toLowerCase())}"`, "primary", "sliders")}
+        ${button("Copiar", `data-coord-copy-ruta="${esc(r.ruta)}" data-fecha="${fecha}" aria-label="Copiar ${esc(r.ruta)} para WhatsApp"`, "ghost", "copy")}
       </div>
     </li>
   `;
 }
 
-function AvisosStrip() {
-  const vigentes = avisosVigentes();
-  if (!vigentes.length) return "";
-  return `
-    <section class="coord-block coord-avisos-strip" id="coord-avisos-vigentes" tabindex="-1" aria-labelledby="coord-avisos-vig-title">
-      <div class="coord-block-head">
-        <div>
-          <h2 id="coord-avisos-vig-title">Avisos vigentes por barrio</h2>
-          <p>Lo que el equipo tiene que saber hoy en cada barrio.</p>
-        </div>
-        ${button("Cargar un aviso", `data-coord-open="avisos"`, "secondary", "plus")}
-      </div>
-      ${feedback("avisosTop")}
-      <div class="coord-barrios">
-        ${groupByBarrio(vigentes).map(([barrio, avisos]) => `
-          <section class="coord-barrio" aria-label="Avisos en ${esc(barrio)}">
-            <h3>${icon("mapPin", "coord-icon")}<span>${esc(barrio)}</span> <small>${avisos.length}</small></h3>
-            <ul class="coord-aviso-list">${avisos.map((a) => AvisoCard(a)).join("")}</ul>
-          </section>
-        `).join("")}
-      </div>
-    </section>
-  `;
+function RoutesList(fecha, { detalle = false, filtro = false } = {}) {
+  const plantillas = getPlantillas();
+  if (!loaded.has("plantillas") && !plantillas.length) return emptyState("Cargando rutas…", "clock");
+  if (!plantillas.length && !getRutasDia().length) {
+    return `${emptyState("Todavía no hay rutas.", "route")}${button("Cargar rutas", `data-coord-go-rutas="dia"`, "primary", "uploadCloud")}`;
+  }
+  const routes = effectiveRoutes(fecha);
+  if (!routes.length) return emptyState("No hay rutas este día.", "route");
+  return `<ul class="cd-list">${routes.map((r) => RouteCard(r, fecha, { detalle, filtro })).join("")}</ul>`;
 }
 
-/* ---------- 2. Rutas y horarios ---------- */
-
-function RoutesBlock() {
+function RutasView() {
   const plantillas = getPlantillas();
-  const loading = !loaded.has("plantillas") && !plantillas.length;
-  let body;
-  if (editor) body = RouteEditor();
-  else if (loading) body = `<p class="coord-empty">${icon("clock", "coord-icon")}Cargando rutas…</p>`;
-  else if (!plantillas.length || cargaProgreso) body = CargaPlanilla();
-  else {
-    const vista = rutasVista();
-    body = `
-      <div class="coord-seg" role="group" aria-label="Qué querés ver">
-        <button type="button" class="coord-seg-btn" id="coord-vista-semana" data-coord-vista="semana" aria-pressed="${vista === "semana"}">${icon("calendarCheck", "coord-icon")}<span>Semana (se repite)</span></button>
-        <button type="button" class="coord-seg-btn" id="coord-vista-dia" data-coord-vista="dia" aria-pressed="${vista === "dia"}">${icon("route", "coord-icon")}<span>Un día puntual</span></button>
-      </div>
-      ${vista === "semana" ? WeekView() : DayView()}
-    `;
-  }
+  const head = `<div class="cd-viewhead"><h1 id="coord-view-title" tabindex="-1">Rutas</h1></div>`;
+  if (!loaded.has("plantillas") && !plantillas.length) return `${head}${emptyState("Cargando rutas…", "clock")}`;
+  if (!plantillas.length || cargaProgreso) return `${head}${CargaPlanilla()}`;
+  const vista = rutasVista();
   return `
-    <section class="coord-block coord-routes" id="coord-rutas" tabindex="-1" aria-labelledby="coord-rutas-title">
-      <div class="coord-block-head">
-        <div>
-          <h2 id="coord-rutas-title">Rutas y horarios</h2>
-          <p>La <b>semana</b> se repite todas las semanas. Si un día puntual cambia algo, guardalo <b>solo para ese día</b>: la semana no se toca.</p>
-        </div>
-      </div>
-      ${feedback("rutas")}
-      ${body}
-    </section>
+    ${head}
+    <div class="cd-seg" role="group" aria-label="Qué ver">
+      <button type="button" class="cd-seg-btn" id="coord-vista-dia" data-coord-vista="dia" aria-pressed="${vista === "dia"}">${ic("route")}<span>Día</span></button>
+      <button type="button" class="cd-seg-btn" id="coord-vista-semana" data-coord-vista="semana" aria-pressed="${vista === "semana"}">${ic("calendarCheck")}<span>Semana</span></button>
+    </div>
+    ${vista === "semana" ? WeekView() : DayView()}
   `;
 }
 
@@ -1849,59 +1912,25 @@ function CargaPlanilla() {
   const base = plantillasDesdePlanilla();
   const paseos = base.reduce((sum, p) => sum + p.paradas.length, 0);
   return `
-    <div class="coord-carga">
-      <p>Todavía no hay rutas armadas en la app. Podés arrancar con las rutas reales de la planilla RPJ (hoja BASE RUTAS, leída el 12/11/2026): <b>${base.length} rutas</b> y <b>${paseos} paseos</b> con su hora de retiro. Después las cambiás acá.</p>
-      ${cargaProgreso ? `<p class="coord-note" role="status">${icon("clock", "coord-icon")}<span>${esc(cargaProgreso)}</span></p>` : ""}
+    <div class="cd-card cd-carga">
+      <p class="cd-big">${ic("uploadCloud")}<span><b>${base.length} rutas</b> · ${paseos} paseos</span></p>
+      <p class="cd-muted">De la planilla RPJ (BASE RUTAS, 12/11/2026). Sin «Llak»: no coincide con ningún perro.</p>
+      ${cargaProgreso ? `<p class="cd-note" role="status">${ic("clock")}<span>${esc(cargaProgreso)}</span></p>` : ""}
       ${cargaConfirm ? `
-        <div class="coord-confirm" role="group" aria-labelledby="coord-carga-q">
-          <p id="coord-carga-q"><b>¿Confirmás?</b> Se guardan ${base.length} rutas como semana base. Las ve todo el equipo.</p>
-          <div class="coord-actions">
-            ${button("Sí, cargar las rutas", `id="coord-carga-ok" data-coord-carga-ok`, "primary", "checkCircle")}
+        <div class="cd-confirm" role="group" aria-labelledby="coord-carga-q">
+          <p id="coord-carga-q"><b>¿Cargar las ${base.length} rutas?</b> Las ve todo el equipo.</p>
+          <div class="cd-actions">
+            ${button("Sí, cargar", `id="coord-carga-ok" data-coord-carga-ok`, "primary", "checkCircle")}
             ${button("Cancelar", `id="coord-carga-cancel" data-coord-carga-cancel`, "ghost")}
           </div>
         </div>`
-        : `<button class="coord-btn is-primary coord-btn-big" type="button" id="coord-carga" data-coord-carga>${icon("uploadCloud", "coord-icon")}<span>Cargar las rutas de la planilla RPJ</span></button>`}
-      <p class="coord-meta">No incluye a «Llak» (jueves tarde): el nombre no coincide con ningún perro. Paseador y ayudante quedan para completar.</p>
+        : button("Cargar rutas", `id="coord-carga" data-coord-carga`, "primary", "uploadCloud")}
     </div>
   `;
 }
 
-function RouteButton(route, { warnings, attrs }) {
-  const n = (route.paradas || []).length;
-  return `
-    <button type="button" class="coord-wroute ${warnings ? "is-alert" : ""}" ${attrs}>
-      <span class="coord-wroute-top"><strong>${esc(route.ruta)}</strong>${warnings ? `<span class="coord-wroute-warn">${icon("alertTriangle", "coord-icon")}${warnings}<span class="coord-sr-only"> ${warnings === 1 ? "aviso" : "avisos"}</span></span>` : ""}</span>
-      <span>${n} ${n === 1 ? "perro" : "perros"} · ${esc(routeSpan(route))}</span>
-      <small>${route.paseador ? esc(personName(route.paseador)) : "Sin paseador"}</small>
-    </button>
-  `;
-}
-
-function WeekView() {
-  const plantillas = getPlantillas();
-  const today = dayNameISO(hoyAR());
-  const days = plantillas.some((p) => p.dia === "Domingo") ? WEEK_DAYS : SERVICE_DAYS;
-  const total = plantillas.reduce((sum, p) => sum + p.paradas.length, 0);
-  return `
-    <p class="coord-meta">${plantillas.length} rutas · ${total} paseos por semana. Tocá una ruta para editar sus horarios.</p>
-    <div class="coord-week">
-      ${days.map((dia) => `
-        <section class="coord-wday ${dia === today ? "is-today" : ""}" aria-labelledby="coord-wday-${slugDia(dia)}">
-          <h3 id="coord-wday-${slugDia(dia)}">${dia}${dia === today ? ' <span class="coord-tag">Hoy</span>' : ""}</h3>
-          ${SHIFT_LABELS.map((turno) => {
-            const routes = plantillasDe(dia).filter((p) => p.turno === turno);
-            return `
-              <div class="coord-wturno">
-                <p class="coord-wturno-label">${turno}</p>
-                ${routes.map((p) => RouteButton(p, { warnings: warningsForPlantilla(p).list.length, attrs: `id="coord-wr-${esc(p.id)}" data-coord-edit-plantilla="${esc(p.id)}" aria-label="Editar ${esc(p.ruta)} del ${dia.toLowerCase()} a la ${turno.toLowerCase()}"` })).join("")}
-                <button type="button" class="coord-wadd" id="coord-wadd-${slugDia(dia)}-${slugDia(turno)}" data-coord-new-route data-dia="${dia}" data-turno="${turno}">${icon("plus", "coord-icon")}<span>Ruta</span><span class="coord-sr-only"> nueva el ${dia.toLowerCase()} a la ${turno.toLowerCase()}</span></button>
-              </div>
-            `;
-          }).join("")}
-        </section>
-      `).join("")}
-    </div>
-  `;
+function shortDay(iso) {
+  return `${DAY_SHORT[dayNameISO(iso)] || ""} ${fmtDate(iso).slice(0, 5)}`;
 }
 
 function DayView() {
@@ -1909,137 +1938,159 @@ function DayView() {
   const fecha = currentRutasFecha();
   const routes = effectiveRoutes(fecha);
   const total = routes.reduce((sum, r) => sum + (r.paradas || []).length, 0);
-  // Perros del día sin carnet de vacunas (cada perro una vez, aunque salga mañana y tarde).
   const sinCarnet = new Set();
   routes.forEach((r) => (r.paradas || []).forEach((s) => {
     const dog = dogOf(s);
     if (!tieneCarnet(dog)) sinCarnet.add(dog?.id || normalize(s.perroNombre));
   }));
   const filtro = soloSinCarnet && routes.length > 0;
+  const quick = [0, 1, 2].map((n) => addDaysISO(hoy, n));
   return `
-    <div class="coord-dayview">
-      <div class="coord-day-pick">
-        <div class="coord-field">
-          <label for="coord-rutas-fecha">Día</label>
-          <input id="coord-rutas-fecha" type="date" value="${fecha}" min="${hoy}" max="${addDaysISO(hoy, 90)}" data-coord-rutas-fecha />
-        </div>
-        <div class="coord-day-quick">
-          ${button("Hoy", `id="coord-dia-hoy" data-coord-ver-dia="${hoy}"`, fecha === hoy ? "secondary" : "ghost")}
-          ${button("Día siguiente", `id="coord-dia-manana" data-coord-ver-dia="${addDaysISO(hoy, 1)}"`, fecha === addDaysISO(hoy, 1) ? "secondary" : "ghost")}
-        </div>
-      </div>
-      <h3 class="coord-day-title">${esc(dayLabel(fecha))} · ${routes.length} ${routes.length === 1 ? "ruta" : "rutas"} · ${total} paseos</h3>
-      ${routes.length ? `
-        <div class="coord-actions">
-          ${button(`Perros sin carnet <span class="coord-count">${sinCarnet.size}</span>`, `id="coord-filtro-carnet" data-coord-filtro-carnet aria-pressed="${filtro}"`, filtro ? "secondary" : "ghost", "fileText")}
-          ${button("Copiar todas las rutas del día", `id="coord-copy-dia" data-coord-copy-dia="${fecha}"`, "ghost", "copy")}
-        </div>
-        ${filtro ? `<p class="coord-note" role="status">${icon("fileText", "coord-icon")}<span>${sinCarnet.size ? `Mostrando solo los perros sin carnet de vacunas cargado: ${sinCarnet.size} de este día. El carnet se sube desde la ficha del cliente.` : "Todos los perros de este día tienen el carnet cargado."}</span></p>` : ""}`
-        : `<p class="coord-empty is-small">No hay rutas para este día. Si es un día de servicio, armá la semana en «Semana (se repite)» o sumá una ruta extra acá abajo.</p>`}
-      <ul class="coord-dayroutes">
-        ${routes.map((r) => {
-          const w = warningsForDay(r, fecha);
-          const todas = (r.paradas || []).slice().sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
-          const stops = filtro ? todas.filter((s) => !tieneCarnet(dogOf(s))) : todas;
-          const memKey = `ruta-${fecha}-${r.ruta}`;
-          return `
-            <li class="coord-dayroute ${w.list.length ? "is-alert" : ""}">
-              <div class="coord-card-head">
-                <strong>${esc(r.ruta)} · ${esc(r.turno)}</strong>
-                ${r.origen === "dia" ? badge("Cambio solo para este día", "warn") : badge("Igual que la semana", "neutral")}
-              </div>
-              <p>${stops.length} ${stops.length === 1 ? "perro" : "perros"} · ${esc(routeSpan(r))} · Paseador: ${esc(personName(r.paseador) || PENDIENTE)}${r.ayudante ? ` · Ayudante: ${esc(personName(r.ayudante))}` : ""}</p>
-              ${w.list.length ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>${esc(w.list.slice(0, 2).join(" "))}${w.list.length > 2 ? ` Y ${w.list.length - 2} más.` : ""}</span></p>` : ""}
-              <details class="coord-card-more" ${filtro || openCards.has(memKey) ? "open" : ""}>
-                <summary data-coord-mem-toggle="${esc(memKey)}">${filtro ? `Sin carnet (${stops.length})` : "Ver paradas"} ${icon("chevronDown", "coord-icon")}</summary>
-                ${stops.length
-                  ? `<ol class="coord-stops-mini">${stops.map((s) => `<li value="${todas.indexOf(s) + 1}" class="${w.byStop.has((r.paradas || []).indexOf(s)) ? "is-alert" : ""}"><span class="coord-stop-line"><b>${esc(padHora(s.hora) || "--:--")}</b> ${esc(s.perroNombre)} <small>${Number(s.minutos) || 45} min${s.nota ? ` · ${esc(s.nota)}` : ""}</small></span>${carnetChip(dogOf(s))}<span class="coord-sr-only"> (parada ${todas.indexOf(s) + 1})</span></li>`).join("")}</ol>`
-                  : `<p class="coord-meta">${filtro ? "Todos los perros de esta ruta tienen el carnet cargado." : "Esta ruta no tiene perros."}</p>`}
-              </details>
-              <div class="coord-actions">
-                ${button("Cambiar solo este día", `id="coord-ed-dia-${esc(r.ruta)}" data-coord-edit-dia="${esc(r.ruta)}" data-fecha="${fecha}"`, "primary", "sliders")}
-                ${button("Copiar para WhatsApp", `data-coord-copy-ruta="${esc(r.ruta)}" data-fecha="${fecha}"`, "ghost", "copy")}
-              </div>
-            </li>
-          `;
-        }).join("")}
-      </ul>
-      <div class="coord-actions">
-        ${SHIFT_LABELS.map((turno) => button(`Ruta extra solo este día (${turno.toLowerCase()})`, `id="coord-extra-${slugDia(turno)}" data-coord-new-dia data-turno="${turno}" data-fecha="${fecha}"`, "ghost", "plus")).join("")}
-      </div>
+    <div class="cd-chiprow cd-daypick" role="group" aria-label="Día">
+      ${quick.map((iso, n) => `<button type="button" class="cd-pill" id="coord-dia-${n}" data-coord-ver-dia="${iso}" aria-pressed="${iso === fecha}">${n === 0 ? "Hoy" : esc(shortDay(iso))}</button>`).join("")}
+      <label class="cd-pill is-date"><span class="coord-sr-only">Otro día</span>${ic("calendarCheck")}<input id="coord-rutas-fecha" type="date" value="${fecha}" min="${hoy}" max="${addDaysISO(hoy, 90)}" data-coord-rutas-fecha /></label>
+    </div>
+    <p class="cd-dayline"><b>${esc(dayLabel(fecha))}</b> · ${routes.length} ${routes.length === 1 ? "ruta" : "rutas"} · ${total} perros</p>
+    ${routes.length ? `
+      <div class="cd-chiprow">
+        <button type="button" class="cd-pill" id="coord-filtro-carnet" data-coord-filtro-carnet aria-pressed="${filtro}">${ic("fileText", "coord-icon is-xs")}Sin carnet (${sinCarnet.size})</button>
+        <button type="button" class="cd-pill" id="coord-copy-dia" data-coord-copy-dia="${fecha}">${ic("copy", "coord-icon is-xs")}Copiar todo</button>
+      </div>` : ""}
+    ${RoutesList(fecha, { detalle: true, filtro })}
+    <div class="cd-actions is-split">
+      ${SHIFT_LABELS.map((turno) => button(`Ruta ${turno.toLowerCase()}<span class="coord-sr-only"> extra, solo el ${esc(dayLabel(fecha).toLowerCase())}</span>`, `id="coord-extra-${slugDia(turno)}" data-coord-new-dia data-turno="${turno}" data-fecha="${fecha}"`, "ghost", "plus")).join("")}
     </div>
   `;
 }
 
-function StopRow(stop, index, warnings) {
-  const dog = dogOf(stop);
-  const msgs = warnings.byStop.get(index) || [];
-  const end = validHora(stop.hora) ? sumarMinutos(padHora(stop.hora), stop.minutos || 45) : "";
-  const last = editor.paradas.length - 1;
-  const name = stop.perroNombre || dog?.name || PENDIENTE;
+function WeekRouteButton(p, dia, turno) {
+  const warns = warningsForPlantilla(p).list.length;
+  const n = (p.paradas || []).length;
   return `
-    <li class="coord-stop ${msgs.length ? "is-alert" : ""}">
-      <div class="coord-stop-head">
-        <span class="coord-stop-num" aria-hidden="true">${index + 1}</span>
-        <div class="coord-stop-name">
-          <strong>${esc(name)}</strong>
-          <small>${dog ? `${esc(dog.size)}${dog.status !== "Activo" ? ` · ${esc(dog.status)}` : ""}` : "Sin ficha en el registro"}</small>
-        </div>
-        <div class="coord-stop-tools">
-          <button type="button" class="coord-icon-btn" id="coord-ed-up-${index}" data-coord-stop-up="${index}" ${index === 0 ? "disabled" : ""} aria-label="Subir a ${esc(name)}">${icon("chevronDown", "coord-icon is-up")}</button>
-          <button type="button" class="coord-icon-btn" id="coord-ed-down-${index}" data-coord-stop-down="${index}" ${index === last ? "disabled" : ""} aria-label="Bajar a ${esc(name)}">${icon("chevronDown", "coord-icon")}</button>
-          <button type="button" class="coord-icon-btn is-danger" id="coord-ed-del-${index}" data-coord-stop-del="${index}" aria-label="Quitar a ${esc(name)} de la ruta">${icon("x", "coord-icon")}</button>
-        </div>
-      </div>
-      <div class="coord-stop-fields">
-        <div class="coord-field">
-          <label for="coord-ed-hora-${index}">Retiro</label>
-          <input id="coord-ed-hora-${index}" type="time" step="300" value="${esc(padHora(stop.hora))}" data-coord-stop="${index}" data-k="hora" ${!validHora(stop.hora) ? 'aria-invalid="true"' : ""} />
-        </div>
-        <div class="coord-field">
-          <label for="coord-ed-min-${index}">Minutos</label>
-          <input id="coord-ed-min-${index}" type="number" min="5" max="240" step="5" inputmode="numeric" value="${esc(stop.minutos)}" data-coord-stop="${index}" data-k="minutos" />
-        </div>
-        <p class="coord-stop-end">${end ? `Vuelve ~${end}` : ""}</p>
-        <div class="coord-field is-wide">
-          <label for="coord-ed-nota-${index}">Nota</label>
-          <input id="coord-ed-nota-${index}" type="text" value="${esc(stop.nota)}" data-coord-stop="${index}" data-k="nota" placeholder="Ej.: bozal, sale con…" autocomplete="off" />
-        </div>
-      </div>
-      ${msgs.length ? `<ul class="coord-stop-warn">${msgs.map((m) => `<li>${icon("alertTriangle", "coord-icon")}<span>${esc(m)}</span></li>`).join("")}</ul>` : ""}
+    <li>
+      <button type="button" class="cd-wroute ${warns ? "is-alert" : ""}" id="coord-wr-${esc(p.id)}" data-coord-edit-plantilla="${esc(p.id)}" aria-label="Editar ${esc(p.ruta)}, ${dia.toLowerCase()} ${turno.toLowerCase()}, ${n} perros">
+        <span class="cd-wroute-top"><strong>${esc(p.ruta)}</strong>${warns ? chip(String(warns), "alert", "alertTriangle") : ""}<span class="cd-wroute-n">${n} ${n === 1 ? "perro" : "perros"}</span></span>
+        <span class="cd-wroute-meta">${esc(routeSpan(p))} · ${esc(firstName(p.paseador) || "Sin paseador")}</span>
+        ${Thumbs(sortedStops(p), 6)}
+      </button>
     </li>
   `;
 }
 
-function dogResults() {
-  if (!editor) return "";
-  const q = normalize(editorQuery);
-  if (!q) return `<p class="coord-meta">Escribí el nombre del perro. Se agrega a la hora de arriba.</p>`;
-  const inRoute = new Set(editor.paradas.map((s) => dogOf(s)?.id).filter(Boolean));
-  const matches = REAL_DOGS.filter((dog) => normalize(dog.name).includes(q)).slice(0, 6);
-  const exact = REAL_DOGS.some((dog) => normalize(dog.name) === q);
-  const hora = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(editor);
+function WeekView() {
+  const plantillas = getPlantillas();
+  const today = dayNameISO(hoyAR());
+  const days = plantillas.some((p) => p.dia === "Domingo") ? WEEK_DAYS : SERVICE_DAYS;
   return `
-    <ul class="coord-results">
-      ${matches.map((dog) => `
-        <li>
-          <button type="button" class="coord-result" id="coord-add-${dog.id}" data-coord-add-dog="${dog.id}">
-            ${icon("plus", "coord-icon")}
-            <span><b>${esc(dog.name)}</b> <small>${esc(dog.size)} · ${esc(scheduleLabel(dog))}</small></span>
-            ${dog.status !== "Activo" ? badge(esc(dog.status), "alert") : ""}
-            ${inRoute.has(dog.id) ? badge("Ya está en la ruta", "warn") : ""}
-            <span class="coord-result-hora">${hora}</span>
-          </button>
-        </li>`).join("")}
-      ${!exact && editorQuery.trim().length >= 2 ? `
-        <li>
-          <button type="button" class="coord-result is-free" id="coord-add-libre" data-coord-add-libre>
-            ${icon("plus", "coord-icon")}<span>Agregar «${esc(editorQuery.trim())}» (perro sin ficha)</span><span class="coord-result-hora">${hora}</span>
-          </button>
-        </li>` : ""}
-    </ul>
-    ${!matches.length ? `<p class="coord-meta">No hay perros con ese nombre en el registro.</p>` : ""}
+    <p class="cd-muted">Se repite cada semana.</p>
+    <div class="cd-week">
+      ${days.map((dia) => {
+        const del = plantillasDe(dia);
+        const perros = del.reduce((sum, p) => sum + p.paradas.length, 0);
+        const warns = del.reduce((sum, p) => sum + warningsForPlantilla(p).list.length, 0);
+        return `
+          <details class="cd-fold cd-wday ${dia === today ? "is-today" : ""}" ${isOpen(`wd-${slugDia(dia)}`, dia === today) ? "open" : ""}>
+            <summary data-coord-toggle="wd-${slugDia(dia)}">
+              <span class="cd-wday-title"><b>${dia}</b>${dia === today ? chip("Hoy", "info") : ""}${warns ? chip(String(warns), "alert", "alertTriangle") : ""}</span>
+              <span class="cd-muted">${del.length} ${del.length === 1 ? "ruta" : "rutas"} · ${perros}</span>
+              ${ic("chevronDown", "coord-icon cd-chev")}
+            </summary>
+            <div class="cd-fold-body">
+              ${SHIFT_LABELS.map((turno) => {
+                const routes = del.filter((p) => p.turno === turno);
+                return `
+                  <div class="cd-wturno">
+                    <p class="cd-wturno-label">${turno}</p>
+                    ${routes.length ? `<ul class="cd-wroutes">${routes.map((p) => WeekRouteButton(p, dia, turno)).join("")}</ul>` : ""}
+                    <button type="button" class="cd-add-mini" id="coord-wadd-${slugDia(dia)}-${slugDia(turno)}" data-coord-new-route data-dia="${dia}" data-turno="${turno}">${ic("plus")}<span>Ruta</span><span class="coord-sr-only"> nueva el ${dia.toLowerCase()} a la ${turno.toLowerCase()}</span></button>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </details>
+        `;
+      }).join("")}
+    </div>
   `;
+}
+
+/* ---------- Editor de ruta ---------- */
+
+// Alerta de una parada en 1 o 2 palabras (el texto completo queda en «Alertas» y en «Más» de la parada).
+function shortWarn(msg) {
+  if (/^No juntar/.test(msg)) return "No juntar";
+  if (/^Tamaños/.test(msg)) return "Tamaños";
+  if (/falta la hora/.test(msg)) return "Sin hora";
+  if (/dos veces/.test(msg)) return "Repetido";
+  if (/también está en/.test(msg)) return "En 2 rutas";
+  if (/sin ficha/.test(msg)) return "";
+  if (/estado/.test(msg)) return "";
+  return "Revisar";
+}
+
+function StopCard(stop, index, warnings) {
+  const dog = dogOf(stop);
+  const msgs = warnings.byStop.get(index) || [];
+  const last = editor.paradas.length - 1;
+  const name = stop.perroNombre || dog?.name || PENDIENTE;
+  const memKey = `stop-${editor.id}-${index}`;
+  const end = validHora(stop.hora) ? sumarMinutos(padHora(stop.hora), stop.minutos || 45) : "";
+  // «No juntar» una sola vez: si choca en esta ruta, el chip de seguridad pasa a rojo.
+  const cortos = [...new Set(msgs.map(shortWarn).filter(Boolean))];
+  const choca = cortos.includes("No juntar") && dog?.incompatibleWith?.length;
+  const chipsHtml = `${cortos.filter((w) => !(choca && w === "No juntar")).map((w) => chip(w, "alert", "alertTriangle")).join("")}${safetyChips(dog, { choca })}${!dog ? chip("Sin ficha", "warn") : dog.status !== "Activo" ? chip(esc(dog.status), "alert") : ""}`;
+  return `
+    <li class="cd-stop ${msgs.length ? "is-alert" : ""}" id="coord-stop-${index}">
+      <div class="cd-stop-row">
+        <span class="cd-stop-ava">${Ava(dog, name, "md")}<b class="cd-stop-num" aria-hidden="true">${index + 1}</b></span>
+        <div class="cd-stop-main">
+          <strong>${esc(name)}</strong>
+        </div>
+        <label class="cd-hora-wrap" for="coord-ed-hora-${index}">
+          <span class="coord-sr-only">Hora de retiro de ${esc(name)}</span>
+          <input class="cd-hora" id="coord-ed-hora-${index}" type="time" step="300" value="${esc(padHora(stop.hora))}" data-coord-stop="${index}" data-k="hora" ${!validHora(stop.hora) ? 'aria-invalid="true"' : ""} />
+        </label>
+      </div>
+      ${chipsHtml ? `<p class="cd-chips cd-stop-chips">${chipsHtml}</p>` : ""}
+      ${msgs.length ? `<p class="coord-sr-only">${esc(msgs.join(" "))}</p>` : ""}
+      <div class="cd-stop-tools">
+        <button type="button" class="cd-icon-btn" id="coord-ed-up-${index}" data-coord-stop-up="${index}" ${index === 0 ? "disabled" : ""} aria-label="Subir a ${esc(name)}">${ic("arrowUp")}</button>
+        <button type="button" class="cd-icon-btn" id="coord-ed-down-${index}" data-coord-stop-down="${index}" ${index === last ? "disabled" : ""} aria-label="Bajar a ${esc(name)}">${ic("arrowDown")}</button>
+        <button type="button" class="cd-icon-btn is-danger" id="coord-ed-del-${index}" data-coord-stop-del="${index}" aria-label="Quitar a ${esc(name)}">${ic("x")}</button>
+        ${cardMore(memKey, `${Number(stop.minutos) || 45} min${stop.nota ? " · nota" : ""}`, `
+          ${warnList(msgs)}
+          <div class="cd-chiprow" role="group" aria-label="Minutos de ${esc(name)}">
+            ${[20, 30, 45, 60].map((m) => `<button type="button" class="cd-pill" id="coord-ed-min-${index}-${m}" data-coord-stop-min="${index}" data-value="${m}" aria-pressed="${(Number(stop.minutos) || 45) === m}">${m} min</button>`).join("")}
+          </div>
+          ${end ? `<p class="cd-muted">Vuelve ~${end}</p>` : ""}
+          <div class="coord-field">
+            <label for="coord-ed-nota-${index}">Nota</label>
+            <input id="coord-ed-nota-${index}" type="text" value="${esc(stop.nota)}" data-coord-stop="${index}" data-k="nota" placeholder="Ej.: bozal" autocomplete="off" />
+          </div>
+        `)}
+      </div>
+    </li>
+  `;
+}
+
+function TeamChips(fieldName, label, current, { conNinguno = false, porNombre = false } = {}) {
+  const opts = TEAM.map((t) => [porNombre ? t.name.split(" ")[0] : t.id, t.name.split(" ")[0]]);
+  if (conNinguno) opts.unshift(["", "Ninguno"]);
+  const known = opts.some(([value]) => normalize(value) === normalize(current));
+  return `
+    <div class="cd-team-row">
+      <span class="coord-label" id="coord-ed-${fieldName}-label">${label}</span>
+      <div class="cd-chiprow" role="group" aria-labelledby="coord-ed-${fieldName}-label">
+        ${opts.map(([value, text]) => `<button type="button" class="cd-pill" id="coord-ed-set-${fieldName}-${slugDia(value) || "ninguno"}" data-coord-ed-set="${fieldName}" data-value="${esc(value)}" aria-pressed="${normalize(value) === normalize(current)}">${esc(text)}</button>`).join("")}
+      </div>
+      <input id="coord-ed-${fieldName}" class="cd-team-other" type="text" ${porNombre ? "" : 'list="coord-team-users"'} value="${known ? "" : esc(current)}" data-coord-ed-field="${fieldName}" autocomplete="off" placeholder="Otro${porNombre ? "" : " usuario"}" aria-label="${label}: otro" />
+    </div>
+  `;
+}
+
+function destinoLabel(e) {
+  if (e.modo === "dia") return e.fecha === hoyAR() ? "Solo hoy" : `Solo ${shortDay(e.fecha)}`;
+  return "Solo un día";
 }
 
 function RouteEditor() {
@@ -2048,153 +2099,229 @@ function RouteEditor() {
   const solicitud = e.solicitudId ? getSolicitudes().find((s) => s.id === e.solicitudId) : null;
   const isPlantilla = e.modo === "plantilla";
   const fechas = isPlantilla ? nextDatesFor(e.dia) : [];
-  const suggested = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(e);
+  const semana = e.destino === "semana";
+  const equipo = [firstName(e.paseador) || "Sin paseador", e.ayudante ? `+ ${firstName(e.ayudante)}` : "", e.supervisor ? `· sup. ${firstName(e.supervisor)}` : ""].filter(Boolean).join(" ");
   return `
-    <div class="coord-editor ${isPlantilla ? "is-plantilla" : "is-dia"}" id="coord-editor" tabindex="-1" aria-labelledby="coord-editor-title">
-      <div class="coord-editor-mode" role="note">
-        ${icon(isPlantilla ? "calendarCheck" : "alertTriangle", "coord-icon")}
+    <section class="cd-editor" id="coord-editor" aria-labelledby="coord-view-title">
+      <div class="cd-subhead">
+        <button type="button" class="cd-back" id="coord-ed-close" data-coord-ed-close>${ic("arrowLeft")}<span>Volver</span></button>
         <div>
-          <p class="coord-editor-kicker">${isPlantilla ? "Estás editando la SEMANA" : "Estás editando SOLO UN DÍA"}</p>
-          <h3 id="coord-editor-title">${esc(e.ruta)} · ${isPlantilla ? `${esc(e.dia)} · ${esc(e.turno)}` : `${esc(dayLabel(e.fecha))} · ${esc(e.turno)}`}</h3>
-          <p>${isPlantilla ? `Se repite todos los ${esc(e.dia.toLowerCase())}. Si es algo de un solo día, usá «Guardar solo para un día».` : "La semana no cambia. Este cambio manda sobre la semana solo ese día."}${e.nuevo ? " Ruta nueva." : ""}</p>
+          <h1 id="coord-view-title" tabindex="-1">${esc(e.ruta)} · ${esc(e.turno)}</h1>
+          <p class="cd-muted">${isPlantilla ? `Todos los ${esc(e.dia.toLowerCase())}` : esc(dayLabel(e.fecha))}${e.nuevo ? " · nueva" : ""}</p>
         </div>
-      </div>
-
-      ${solicitud ? `
-        <div class="coord-editor-sol" role="note">
-          <p><b>Pedido de ${esc(solicitud.creadoPorNombre || "supervisión")}:</b> ${esc(solicitud.titulo || solicitud.tipo || "")}${solicitud.detalle ? ` · ${esc(solicitud.detalle)}` : ""}${solicitud.motivo ? ` · Motivo: ${esc(solicitud.motivo)}` : ""}</p>
-          ${e.precarga ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>${esc(e.precarga)}</span></p>` : ""}
-          <div class="coord-field is-wide">
-            <label for="coord-ed-respuesta">Respuesta para el supervisor (opcional)</label>
-            <input id="coord-ed-respuesta" type="text" value="${esc(e.respuesta)}" data-coord-ed-field="respuesta" placeholder="Ej.: Listo, ya lo saqué de la ruta." autocomplete="off" />
-          </div>
-        </div>` : ""}
-
-      ${feedback("editor")}
-
-      <div class="coord-grid coord-editor-team">
-        ${e.nuevo ? `
-          <div class="coord-field">
-            <label for="coord-ed-ruta">Código de la ruta</label>
-            <input id="coord-ed-ruta" type="text" value="${esc(e.ruta)}" data-coord-ed-field="ruta" autocomplete="off" aria-describedby="coord-ed-ruta-hint" />
-            <small id="coord-ed-ruta-hint">Ej.: PJ_2M (mañana) o PJ_3T (tarde).</small>
-          </div>` : ""}
-        <div class="coord-field">
-          <label for="coord-ed-paseador">Paseador</label>
-          <input id="coord-ed-paseador" type="text" list="coord-team-users" value="${esc(e.paseador)}" data-coord-ed-field="paseador" autocomplete="off" aria-describedby="coord-ed-paseador-hint" />
-          <small id="coord-ed-paseador-hint">Usuario de la app (ej.: sebastian).</small>
-        </div>
-        <div class="coord-field">
-          <label for="coord-ed-ayudante">Ayudante</label>
-          <input id="coord-ed-ayudante" type="text" list="coord-team-users" value="${esc(e.ayudante)}" data-coord-ed-field="ayudante" autocomplete="off" placeholder="Sin ayudante" />
-        </div>
-        <div class="coord-field">
-          <label for="coord-ed-supervisor">Supervisa</label>
-          <input id="coord-ed-supervisor" type="text" list="coord-team-names" value="${esc(e.supervisor)}" data-coord-ed-field="supervisor" autocomplete="off" />
-        </div>
-      </div>
-
-      <div class="coord-add" role="group" aria-labelledby="coord-add-title">
-        <h4 id="coord-add-title">${icon("plus", "coord-icon")}<span>Agregar un perro</span></h4>
-        <div class="coord-add-row">
-          <div class="coord-field coord-add-search">
-            <label for="coord-ed-buscar">Buscar perro</label>
-            <input id="coord-ed-buscar" type="search" value="${esc(editorQuery)}" data-coord-ed-search autocomplete="off" placeholder="Nombre del perro" aria-controls="coord-ed-results" />
-          </div>
-          <div class="coord-field coord-add-hora">
-            <label for="coord-ed-nueva-hora">Hora de retiro</label>
-            <input id="coord-ed-nueva-hora" type="time" step="300" value="${esc(suggested)}" data-coord-ed-hora aria-describedby="coord-ed-nueva-hora-hint" />
-            <small id="coord-ed-nueva-hora-hint">Sugerida: la última + 15 min.</small>
-          </div>
-        </div>
-        <div id="coord-ed-results" aria-live="polite">${dogResults()}</div>
-      </div>
-
-      <div class="coord-stops-head">
-        <h4>Paradas en orden <span>${e.paradas.length}</span></h4>
-        ${e.paradas.length > 1 ? button("Ordenar por hora", `id="coord-ed-sort" data-coord-ed-sort`, "ghost", "clock") : ""}
-      </div>
-      ${e.paradas.length ? `<ol class="coord-stops">${e.paradas.map((s, i) => StopRow(s, i, warnings)).join("")}</ol>` : `<p class="coord-empty is-small">La ruta no tiene perros todavía. Buscalos arriba.</p>`}
-
-      ${warnList(warnings.list, "coord-ed-warnings")}
-
-      <div class="coord-field is-wide">
-        <label for="coord-ed-notas">Notas de la ruta</label>
-        <textarea id="coord-ed-notas" rows="2" data-coord-ed-field="notas" placeholder="Ej.: arrancar por Mapuche">${esc(e.notas)}</textarea>
-      </div>
-
-      <div class="coord-editor-save">
-        ${isPlantilla ? `
-          <div class="coord-save-box is-main">
-            <p><b>Guardar en la semana:</b> cambia todos los ${esc(e.dia.toLowerCase())}.</p>
-            ${button("Guardar en la semana", `id="coord-ed-save" data-coord-ed-save="plantilla"`, "primary", "checkCircle")}
-          </div>
-          <div class="coord-save-box">
-            <div class="coord-field">
-              <label for="coord-ed-solodia">¿Es solo por un día? Elegí cuál</label>
-              <select id="coord-ed-solodia" data-coord-ed-field="soloDia">
-                ${fechas.map((f) => `<option value="${f}" ${f === e.soloDia ? "selected" : ""}>${esc(dayLabel(f))}${f === hoyAR() ? " (hoy)" : ""}${getRutasDia().some((r) => r.id === rutaDiaId(f, e.ruta)) ? " · ya tiene un cambio: se reemplaza" : ""}</option>`).join("")}
-              </select>
-            </div>
-            ${button("Guardar solo para ese día", `id="coord-ed-save-dia" data-coord-ed-save="dia"`, "secondary")}
-          </div>` : `
-          <div class="coord-save-box is-main">
-            <p><b>Guardar solo para el ${esc(dayLabel(e.fecha).toLowerCase())}.</b>${solicitud ? " El pedido del supervisor queda como aplicado." : ""}</p>
-            ${button(`Guardar solo para el ${esc(fmtDate(e.fecha))}`, `id="coord-ed-save" data-coord-ed-save="dia"`, "primary", "checkCircle")}
-          </div>
-          ${e.existeDia && canDelete(e.existeDia) ? `
-            <div class="coord-save-box">
-              <p>¿Ese día tiene que quedar igual que la semana?</p>
-              ${button("Volver a la ruta de la semana", `id="coord-ed-revert" data-coord-ed-revert`, "ghost")}
-            </div>` : ""}`}
       </div>
 
       ${editorConfirm === "salir" ? `
-        <div class="coord-confirm" role="group" aria-labelledby="coord-salir-q">
-          <p id="coord-salir-q"><b>Tenés cambios sin guardar.</b> ¿Salir igual y descartarlos?</p>
-          <div class="coord-actions">
-            ${button("Sí, descartar", `id="coord-ed-close-ok" data-coord-ed-close-ok`, "primary")}
-            ${button("Seguir editando", `id="coord-ed-close-cancel" data-coord-ed-close-cancel`, "ghost")}
+        <div class="cd-confirm" role="group" aria-labelledby="coord-salir-q">
+          <p id="coord-salir-q"><b>¿Salir sin guardar?</b> Se pierden los cambios.</p>
+          <div class="cd-actions">
+            ${button("Salir", `id="coord-ed-close-ok" data-coord-ed-close-ok`, "danger", "x")}
+            ${button("Seguir", `id="coord-ed-close-cancel" data-coord-ed-close-cancel`, "secondary")}
           </div>
         </div>` : ""}
 
-      <div class="coord-actions coord-editor-foot">
-        ${button("Copiar para WhatsApp", `id="coord-ed-copy" data-coord-ed-copy`, "ghost", "copy")}
-        ${button(e.sucio ? "Cerrar sin guardar" : "Volver", `id="coord-ed-close" data-coord-ed-close`, "ghost", "x")}
+      ${solicitud ? `
+        <div class="cd-sol-box" role="note">
+          <p>${ic("bell")}<span><b>${esc(firstName(solicitud.creadoPorNombre) || "Supervisor")}:</b> ${esc(solicitud.titulo || solicitud.tipo || "")}${solicitud.detalle ? ` · ${esc(solicitud.detalle)}` : ""}</span></p>
+          ${e.precarga ? `<p class="cd-done">${ic("checkCircle")}<span>${esc(e.precarga)}</span></p>` : ""}
+          <div class="coord-field">
+            <label for="coord-ed-respuesta">Respuesta</label>
+            <input id="coord-ed-respuesta" type="text" value="${esc(e.respuesta)}" data-coord-ed-field="respuesta" placeholder="Opcional" autocomplete="off" />
+          </div>
+        </div>` : ""}
+
+      ${e.nuevo ? `
+        <div class="coord-field">
+          <label for="coord-ed-ruta">Código</label>
+          <input id="coord-ed-ruta" type="text" value="${esc(e.ruta)}" data-coord-ed-field="ruta" autocomplete="off" placeholder="PJ_2M" />
+        </div>` : ""}
+
+      ${fold(`ed-equipo`, `${ic("users")}<b>Equipo</b> <span class="cd-muted">${esc(equipo)}</span>`, `
+        ${TeamChips("paseador", "Paseador", e.paseador)}
+        ${TeamChips("ayudante", "Ayudante", e.ayudante, { conNinguno: true })}
+        ${TeamChips("supervisor", "Supervisa", e.supervisor, { porNombre: true })}
+      `, { open: e.nuevo || !e.paseador })}
+
+      ${warnings.list.length ? cardMore(`ed-warn-${e.id}`, `${ic("alertTriangle")}<b>${warnings.list.length} ${warnings.list.length === 1 ? "alerta" : "alertas"}</b> <span class="cd-muted">No frena el guardado</span>`, warnList(warnings.list)) : ""}
+
+      <div class="cd-h2-row">
+        <h2 class="cd-h2">Perros <span class="cd-count">${e.paradas.length}</span></h2>
+        ${e.paradas.length > 1 ? button("Por hora", `id="coord-ed-sort" data-coord-ed-sort`, "ghost", "clock") : ""}
       </div>
-    </div>
+      ${e.paradas.length ? `<ol class="cd-stops">${e.paradas.map((s, i) => StopCard(s, i, warnings)).join("")}</ol>` : emptyState("Sin perros todavía.", "pawPrint")}
+
+      <button type="button" class="coord-btn is-secondary is-block" id="coord-ed-picker" data-coord-ed-picker>${ic("plus")}<span>Agregar perro</span></button>
+
+      ${fold("ed-mas", `${ic("menu")}<b>Más</b>`, `
+        <div class="coord-field">
+          <label for="coord-ed-notas">Notas de la ruta</label>
+          <textarea id="coord-ed-notas" rows="2" data-coord-ed-field="notas" placeholder="Ej.: arrancar por Mapuche">${esc(e.notas)}</textarea>
+        </div>
+        <div class="cd-actions">
+          ${button("Copiar", `id="coord-ed-copy" data-coord-ed-copy`, "ghost", "copy")}
+          ${e.existeDia && canDelete(e.existeDia) ? button("Igual que la semana", `id="coord-ed-revert" data-coord-ed-revert`, "ghost", "calendarCheck") : ""}
+        </div>
+      `)}
+
+      <div class="cd-savebar">
+        <div class="cd-switch" role="radiogroup" aria-label="Guardar para">
+          <button type="button" role="radio" class="cd-switch-btn" id="coord-ed-destino-dia" data-coord-ed-destino="dia" aria-checked="${!semana}">${esc(destinoLabel(e))}</button>
+          <button type="button" role="radio" class="cd-switch-btn" id="coord-ed-destino-semana" data-coord-ed-destino="semana" aria-checked="${semana}">Toda la semana</button>
+        </div>
+        ${isPlantilla && !semana ? `
+          <label class="coord-sr-only" for="coord-ed-solodia">Qué día</label>
+          <select id="coord-ed-solodia" class="cd-savebar-select" data-coord-ed-field="soloDia">
+            ${fechas.map((f) => `<option value="${f}" ${f === e.soloDia ? "selected" : ""}>${esc(dayLabel(f))}${f === hoyAR() ? " (hoy)" : ""}${getRutasDia().some((r) => r.id === rutaDiaId(f, e.ruta)) ? " · se reemplaza" : ""}</option>`).join("")}
+          </select>` : `<p class="cd-savebar-hint">${semana ? `Cambia todos los ${esc(e.dia.toLowerCase())}.` : "La semana no cambia."}</p>`}
+        <button type="button" class="coord-btn is-primary is-block is-big" id="coord-ed-save" data-coord-ed-save>${ic("checkCircle")}<span>Guardar</span></button>
+      </div>
+    </section>
   `;
 }
 
-/* ---------- 3. Pedidos de cambio del supervisor (todos) ---------- */
+/* ---------- Grilla de fotos para agregar perros ---------- */
 
-function SolicitudesSection() {
-  const all = getSolicitudes();
+function pickerGrid() {
+  if (!editor) return "";
+  const q = normalize(editorQuery);
+  const inRoute = new Set(editor.paradas.map((s) => dogOf(s)?.id).filter(Boolean));
+  const salen = (dog) => goesOn(dog, editor.dia, editor.turno);
+  const list = REAL_DOGS
+    .filter((dog) => !q || normalize(dog.name).includes(q))
+    .sort((a, b) => Number(salen(b)) - Number(salen(a)) || a.name.localeCompare(b.name, "es"));
+  const exact = REAL_DOGS.some((dog) => normalize(dog.name) === q);
+  const hora = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(editor);
+  return `
+    ${list.length ? `
+      <ul class="cd-dog-grid">
+        ${list.map((dog) => {
+          const ya = inRoute.has(dog.id);
+          return `
+            <li class="cd-dog-tile ${ya ? "is-in" : ""}">
+              <button type="button" class="cd-dog-add" id="coord-add-${dog.id}" data-coord-add-dog="${dog.id}" aria-label="${ya ? `${esc(dog.name)} ya está. Agregar otra vez a las ${hora}` : `Agregar a ${esc(dog.name)} a las ${hora}`}">
+                ${Ava(dog, dog.name, "lg")}
+                ${ya ? `<span class="cd-dog-in">${ic("check")}</span>` : ""}
+                <b>${esc(dog.name)}</b>
+                <span class="cd-chips">${hasMuzzle(dog) ? chip("Bozal", "alert") : ""}${dog.incompatibleWith?.length ? chip("No juntar", "warn") : ""}${dog.status !== "Activo" ? chip(esc(dog.status), "alert") : salen(dog) ? chip("Suele salir", "info") : ""}</span>
+              </button>
+              ${FotoBtn(dog, { compact: true })}
+            </li>`;
+        }).join("")}
+      </ul>` : emptyState("Ningún perro con ese nombre.", "search")}
+    ${!exact && editorQuery.trim().length >= 2 ? `
+      <button type="button" class="coord-btn is-ghost is-block" id="coord-add-libre" data-coord-add-libre>${ic("plus")}<span>«${esc(editorQuery.trim())}» sin ficha · ${hora}</span></button>` : ""}
+  `;
+}
+
+function DogPicker() {
+  const e = editor;
+  const suggested = validHora(editorHora) ? padHora(editorHora) : nextFreeHora(e);
+  return `
+    <section class="cd-picker" aria-labelledby="coord-view-title">
+      <div class="cd-subhead">
+        <button type="button" class="cd-back" id="coord-picker-back" data-coord-ed-picker-close>${ic("arrowLeft")}<span>Ruta</span></button>
+        <div>
+          <h1 id="coord-view-title" tabindex="-1">Agregar perro</h1>
+          <p class="cd-muted">${esc(e.ruta)} · ${esc(e.turno)} · ${e.paradas.length} perros</p>
+        </div>
+      </div>
+      <div class="cd-picker-tools">
+        <label class="cd-search" for="coord-ed-buscar">
+          ${ic("search")}<span class="coord-sr-only">Buscar perro</span>
+          <input id="coord-ed-buscar" type="search" value="${esc(editorQuery)}" data-coord-ed-search autocomplete="off" placeholder="Buscar" aria-controls="coord-picker-grid" />
+        </label>
+        <label class="cd-hora-wrap is-small" for="coord-ed-nueva-hora">
+          <span class="cd-muted">Hora</span>
+          <input class="cd-hora" id="coord-ed-nueva-hora" type="time" step="300" value="${esc(suggested)}" data-coord-ed-hora />
+        </label>
+      </div>
+      <div id="coord-picker-grid">${pickerGrid()}</div>
+      <div class="cd-savebar">
+        ${e.agregados ? `
+          <p class="cd-savebar-hint">${e.destino === "semana" ? `Todos los ${esc(e.dia.toLowerCase())}` : esc(destinoLabel(e))}</p>
+          <div class="cd-savebar-row">
+            <button type="button" class="coord-btn is-ghost" id="coord-picker-done" data-coord-ed-picker-close>${ic("arrowLeft")}<span>Ruta</span></button>
+            <button type="button" class="coord-btn is-primary is-big" id="coord-picker-save" data-coord-ed-save>${ic("checkCircle")}<span>Guardar (${e.agregados})</span></button>
+          </div>` : `
+          <button type="button" class="coord-btn is-primary is-block is-big" id="coord-picker-done" data-coord-ed-picker-close>${ic("check")}<span>Listo</span></button>`}
+      </div>
+    </section>
+  `;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pedidos de cambio del supervisor                                    */
+/* ------------------------------------------------------------------ */
+
+const RECHAZOS_RAPIDOS = [
+  ["Sin lugar", "No hay lugar en la ruta ese día."],
+  ["Ya estaba", "Ya estaba así en la ruta."],
+  ["Falta info", "Falta info: decime qué perro, qué día y a qué hora."],
+  ["Lo hablo", "Lo hablo con Juan y te aviso."],
+];
+
+function SolicitudCard(s) {
+  const id = esc(s.id);
+  const estado = s.estado || "pendiente";
+  const dog = solicitudPerro(s);
+  const nombre = s.perroNombre || dog?.name || "";
+  const que = s.titulo || [s.tipo, nombre].filter(Boolean).join(": ") || "Pedido de cambio";
+  const rechazo = rechazoAbierto === s.id;
+  const estadoChip = estado === "aplicado" ? chip("Aplicado", "ok") : estado === "rechazado" ? chip("Rechazado", "neutral") : "";
+  return `
+    <li class="cd-card cd-sol ${s.urgente && estado === "pendiente" ? "is-urgent" : ""}" id="coord-sol-${id}" tabindex="-1">
+      <div class="cd-row">
+        ${Ava(dog, nombre || s.tipo, "md")}
+        <div class="cd-row-main">
+          <strong>${esc(que)}</strong>
+          <small>${esc([s.fecha ? (s.fecha === hoyAR() ? "Hoy" : shortDay(s.fecha)) : "", s.turno, s.ruta].filter(Boolean).join(" · ") || PENDIENTE)}</small>
+        </div>
+      </div>
+      <p class="cd-chips">${s.urgente ? chip("Urgente", "alert", "alertTriangle") : ""}${estadoChip}${safetyChips(dog)}</p>
+      ${s.detalle ? `<p class="cd-line">${esc(s.detalle)}</p>` : ""}
+      ${cardMore(`sol-${s.id}`, "Más", dataList([
+        ["Por qué", s.motivo],
+        ["Pidió", s.creadoPorNombre ? `${s.creadoPorNombre}${s.creadoEn ? `, ${fmtStamp(s.creadoEn)}` : ""}` : ""],
+        ["Respuesta", s.respuesta],
+      ]) || `<p class="cd-muted">Sin más datos.</p>`)}
+      ${s.pendiente ? `<p class="coord-meta is-pending">${ic("clock")}<span>Se envía con señal.</span></p>` : ""}
+      ${estado === "pendiente" ? rechazo ? `
+        <div class="cd-reject" role="group" aria-labelledby="coord-rechazo-t-${id}">
+          <p class="cd-reject-title" id="coord-rechazo-t-${id}">Respuesta rápida</p>
+          <div class="cd-chiprow">
+            ${RECHAZOS_RAPIDOS.map(([label, texto], i) => `<button type="button" class="cd-pill" id="coord-rapido-${id}-${i}" data-coord-sol-rapido="${id}" data-texto="${esc(texto)}">${esc(label)}</button>`).join("")}
+          </div>
+          <div class="coord-field">
+            <label for="coord-rechazo-${id}">O escribí</label>
+            <textarea id="coord-rechazo-${id}" rows="2" data-coord-rechazo="${id}" placeholder="Ej.: lo pasamos al lunes">${esc(rechazos[s.id] || "")}</textarea>
+          </div>
+          <div class="cd-actions">
+            ${button("Enviar", `id="coord-rechazar-ok-${id}" data-coord-sol-rechazar-ok="${id}"`, "primary", "send")}
+            ${button("Cancelar", `data-coord-sol-rechazar-cancel="${id}"`, "ghost")}
+          </div>
+        </div>` : `
+        <div class="cd-actions is-split">
+          ${button("Aplicar", `id="coord-aplicar-${id}" data-coord-sol-aplicar="${id}"`, "primary", "checkCircle")}
+          ${button("Rechazar", `id="coord-rechazar-${id}" data-coord-sol-rechazar="${id}"`, "ghost", "x")}
+        </div>` : ""}
+    </li>
+  `;
+}
+
+function CambiosView() {
   const pend = solicitudesPendientes();
-  const done = all.filter((s) => (s.estado || "pendiente") !== "pendiente");
-  const body = `
-    <p class="coord-note">${icon("users", "coord-icon")}<span>El supervisor mira las rutas y, si habló con alguien o pasó algo, te pide el cambio. Vos lo aplicás o lo rechazás con una respuesta: la ve el supervisor.</span></p>
-    ${feedback("solicitudesTodas")}
-    <h3 class="coord-subtitle">Pendientes <span>${pend.length}</span></h3>
-    ${pend.length ? `<ul class="coord-sol-list">${pend.map((s) => SolicitudItem(s)).join("")}</ul>` : `<p class="coord-empty is-small">${loaded.has("solicitudes") ? "No hay pedidos pendientes." : "Cargando…"}</p>`}
-    ${done.length ? `
-      <details class="coord-more" ${isOpen("solHist") ? "open" : ""}>
-        <summary data-coord-toggle="solHist">Respondidos en las últimas 2 semanas (${done.length}) ${icon("chevronDown", "coord-icon")}</summary>
-        <ul class="coord-sol-list">${done.map((s) => SolicitudItem(s, { compact: true })).join("")}</ul>
-      </details>` : ""}
+  const done = getSolicitudes().filter((s) => (s.estado || "pendiente") !== "pendiente");
+  return `
+    ${SubHead("Pedidos de cambio", pend.length)}
+    <p class="cd-muted">Del supervisor.</p>
+    ${pend.length ? `<ul class="cd-list">${pend.map((s) => SolicitudCard(s)).join("")}</ul>` : emptyState(loaded.has("solicitudes") ? "No hay pedidos pendientes." : "Cargando…", loaded.has("solicitudes") ? "checkCircle" : "clock")}
+    ${done.length ? fold("solHist", `Respondidos (${done.length})`, `<ul class="cd-list">${done.map((s) => SolicitudCard(s)).join("")}</ul>`) : ""}
   `;
-  return section({
-    key: "solicitudes",
-    id: "coord-solicitudes",
-    iconName: "bell",
-    title: "Pedidos de cambio del supervisor",
-    intro: "Aplicalos en la ruta del día o respondé por qué no.",
-    badges: pend.length ? badge(`${pend.length} ${pend.length === 1 ? "pendiente" : "pendientes"}`, "alert") : badge("Al día", "neutral"),
-    body,
-  });
 }
 
-/* ---------- 4. Clientes ---------- */
+/* ------------------------------------------------------------------ */
+/* Clientes                                                            */
+/* ------------------------------------------------------------------ */
 
 function dogNames(ids) {
   return (Array.isArray(ids) ? ids : []).map((id) => DOG_BY_ID.get(id)?.name || id);
@@ -2203,28 +2330,44 @@ function dogNames(ids) {
 function ClienteCard(c) {
   const id = esc(c.id);
   const estado = CLIENTE_ESTADOS.find(([v]) => v === c.estado) || CLIENTE_ESTADOS[0];
-  const perros = dogNames(c.perros);
+  const perros = (Array.isArray(c.perros) ? c.perros : []).map((dogId) => DOG_BY_ID.get(dogId) || { id: "", name: dogId });
+  const docs = archivosDeCliente(c).length;
+  const abierto = subida?.clienteId === c.id || (fileFlash?.key === `cliente-${c.id}` && Date.now() < fileFlash.until);
   return `
-    <li class="coord-card coord-cliente is-${esc(estado[0])}">
-      <div class="coord-card-head">
-        <strong>${esc(c.nombre || PENDIENTE)}</strong>
-        ${badge(estado[1], estado[0] === "activo" ? "ok" : estado[0] === "pausa" ? "warn" : "neutral")}
+    <li class="cd-card cd-cli is-${esc(estado[0])}" id="coord-cli-${id}">
+      <div class="cd-row">
+        ${Ava(perros[0]?.id ? perros[0] : null, perros[0]?.name || c.nombre, "md")}
+        <div class="cd-row-main">
+          <strong>${esc(c.nombre || PENDIENTE)}</strong>
+          <small>${esc(c.barrio || "Sin barrio")}</small>
+        </div>
+        ${chip(estado[1], estado[0] === "activo" ? "ok" : estado[0] === "pausa" ? "warn" : "neutral")}
       </div>
-      ${dataList([
-        ["Perros", perros.length ? listJoin(perros) : PENDIENTE],
-        ["Barrio", c.barrio],
-        ["Plan", c.plan && c.plan !== PENDIENTE ? c.plan : ""],
-        ["Días", Array.isArray(c.dias) && c.dias.length ? daysLabel(c.dias) : ""],
-        ["Turno", c.turno && c.turno !== PENDIENTE ? c.turno : ""],
-        ["Teléfono", c.telefono],
-        ["Notas", c.notas],
-      ], "is-compact")}
-      ${c.pendiente ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Sin señal: se enviará cuando vuelva.</span></p>` : ""}
-      <div class="coord-actions">
-        ${whatsappLinkTo(c.telefono, `Hola ${c.nombre || ""}, te escribo de Paseos Juan.`.replace(" ,", ","), "secondary", "WhatsApp")}
+      ${perros.length ? `
+        <ul class="cd-cli-dogs">
+          ${perros.map((d) => `
+            <li>
+              ${Ava(d.id ? d : null, d.name, "sm")}
+              <span class="cd-cli-dog">${esc(d.name)}</span>
+              <span class="cd-chips">${d.id ? `${safetyChips(d)}${carnetChip(d)}` : chip("Sin ficha", "warn")}</span>
+              ${FotoBtn(d.id ? d : null, { compact: true })}
+            </li>`).join("")}
+        </ul>` : `<p class="cd-muted">Sin perros cargados.</p>`}
+      ${c.pendiente ? `<p class="coord-meta is-pending">${ic("clock")}<span>Se envía con señal.</span></p>` : ""}
+      <div class="cd-actions is-split">
+        ${c.telefono ? whatsappLinkTo(c.telefono, `Hola ${c.nombre || ""}, te escribo de Paseos Juan.`.replace(" ,", ","), "whatsapp", "WhatsApp") : ""}
         ${button("Editar", `id="coord-cli-edit-${id}" data-coord-cliente-edit="${id}"`, "ghost", "sliders")}
       </div>
-      ${DocumentosCliente(c)}
+      ${cardMore(`cli-${c.id}`, `Más datos · Docs (${docs})`, `
+        ${dataList([
+          ["Teléfono", c.telefono],
+          ["Plan", c.plan && c.plan !== PENDIENTE ? c.plan : ""],
+          ["Días", Array.isArray(c.dias) && c.dias.length ? daysLabel(c.dias) : ""],
+          ["Turno", c.turno && c.turno !== PENDIENTE ? c.turno : ""],
+          ["Notas", c.notas],
+        ], "is-compact")}
+        ${DocumentosCliente(c)}
+      `, abierto)}
     </li>
   `;
 }
@@ -2239,114 +2382,214 @@ function clientesFiltrados() {
 function clientesListHTML() {
   const list = clientesFiltrados();
   if (!list.length) {
-    return `<p class="coord-empty is-small">${!loaded.has("clientes") ? "Cargando clientes…" : clienteQuery ? "Ningún cliente coincide con la búsqueda." : "Todavía no hay clientes cargados."}</p>`;
+    return emptyState(!loaded.has("clientes") ? "Cargando clientes…" : clienteQuery ? "Ningún cliente coincide." : "Todavía no hay clientes.", !loaded.has("clientes") ? "clock" : "users");
   }
-  return `<ul class="coord-card-list is-grid">${list.map(ClienteCard).join("")}</ul>`;
+  return `<ul class="cd-list is-grid">${list.map(ClienteCard).join("")}</ul>`;
 }
 
-function ClientesSection() {
+function ClientesView() {
   const clientes = getClientes();
+  const activos = clientes.filter((c) => (c.estado || "activo") === "activo").length;
+  return `
+    <div class="cd-viewhead">
+      <h1 id="coord-view-title" tabindex="-1">Clientes</h1>
+      ${clientes.length ? chip(`${activos} ${activos === 1 ? "activo" : "activos"}`, "ok") : ""}
+    </div>
+    <div class="cd-toolbar">
+      <label class="cd-search" for="coord-clientes-buscar">
+        ${ic("search")}<span class="coord-sr-only">Buscar cliente</span>
+        <input id="coord-clientes-buscar" type="search" value="${esc(clienteQuery)}" data-coord-clientes-buscar placeholder="Tutor, perro o barrio" autocomplete="off" aria-controls="coord-clientes-lista" />
+      </label>
+      ${button("Nuevo", `id="coord-cliente-new" data-coord-cliente-new`, "primary", "plus")}
+    </div>
+    <div id="coord-clientes-lista" aria-live="polite">${clientesListHTML()}</div>
+  `;
+}
+
+function ClienteForm() {
   const draft = getDraft("cliente");
   const editing = Boolean(draft.id);
   const perros = Array.isArray(draft.perros) ? draft.perros : [];
   const dias = Array.isArray(draft.dias) ? draft.dias : [];
   const adjuntos = (Array.isArray(draft.archivos) ? draft.archivos : []).map((archivoId) => archivoPorId(archivoId) || { id: archivoId, tipo: TIPO_CARNET });
-  const activos = clientes.filter((c) => (c.estado || "activo") === "activo").length;
-  const dogOptions = REAL_DOGS.slice().sort((a, b) => a.name.localeCompare(b.name, "es"));
-
-  const body = `
-    ${feedback("clientes")}
-    <div class="coord-field coord-search">
-      <label for="coord-clientes-buscar">Buscar cliente</label>
-      <input id="coord-clientes-buscar" type="search" value="${esc(clienteQuery)}" data-coord-clientes-buscar placeholder="Tutor, perro o barrio" autocomplete="off" aria-controls="coord-clientes-lista" />
-    </div>
-    <div id="coord-clientes-lista" aria-live="polite">${clientesListHTML()}</div>
-
-    <form class="coord-form" id="coord-cliente-form" data-coord-form="cliente" novalidate tabindex="-1">
-      <h3>${editing ? `Editando a ${esc(draft.nombre || "un cliente")}` : "Cargar un cliente"}</h3>
-      ${draft.pedidoId ? `<p class="coord-note">${icon("clipboardCheck", "coord-icon")}<span>Completado con los datos de un pedido. Revisalo antes de guardar.</span></p>` : ""}
-      ${!editing && adjuntos.length ? `<p class="coord-done">${icon("fileCheck", "coord-icon")}<span>${adjuntos.some(esCarnet) ? "El carnet de vacunas del pedido queda vinculado a este cliente." : "Los archivos del pedido quedan vinculados a este cliente."}</span></p>` : ""}
+  const dogOptions = REAL_DOGS.slice().sort((a, b) => Number(perros.includes(b.id)) - Number(perros.includes(a.id)) || a.name.localeCompare(b.name, "es"));
+  const barrios = barriosConocidos();
+  return `
+    <form class="cd-form" id="coord-cliente-form" data-coord-form="cliente" novalidate>
+      <div class="cd-subhead">
+        <button type="button" class="cd-back" data-coord-cliente-cancel>${ic("arrowLeft")}<span>Clientes</span></button>
+        <h1 id="coord-view-title" tabindex="-1">${editing ? esc(draft.nombre || "Editar") : "Cliente nuevo"}</h1>
+      </div>
+      ${draft.pedidoId ? `<p class="cd-note">${ic("clipboardCheck")}<span>Con datos del pedido. Revisalo.</span></p>` : ""}
+      ${!editing && adjuntos.length ? `<p class="cd-done">${ic("fileCheck")}<span>${adjuntos.some(esCarnet) ? "El carnet del pedido queda vinculado." : "Los archivos del pedido quedan vinculados."}</span></p>` : ""}
       <input type="hidden" name="id" value="${esc(draft.id || "")}" />
       <input type="hidden" name="pedidoId" value="${esc(draft.pedidoId || "")}" />
-      <div class="coord-grid">
-        ${field("cliente", "nombre", "Nombre del tutor", { value: draft.nombre, required: true, attrs: 'autocomplete="off"' })}
-        ${field("cliente", "telefono", "Teléfono", { value: draft.telefono, type: "tel", attrs: 'autocomplete="off" inputmode="tel"', hint: "Celular con código de área (ej.: 11\u00a01234\u20115678)." })}
-        ${field("cliente", "barrio", "Barrio", { value: draft.barrio, attrs: 'list="coord-barrios" autocomplete="off"', hint: "Elegí uno o escribí otro." })}
+      ${field("cliente", "nombre", "Tutor", { value: draft.nombre, required: true, attrs: 'autocomplete="off"' })}
+      ${field("cliente", "telefono", "Celular", { value: draft.telefono, type: "tel", attrs: 'autocomplete="off" inputmode="tel" placeholder="11 1234-5678"' })}
+      <div class="coord-field">
+        <label for="coord-cliente-barrio">Barrio</label>
+        <input id="coord-cliente-barrio" name="barrio" type="text" value="${esc(draft.barrio || "")}" list="coord-barrios" autocomplete="off" />
+        ${quickFill("coord-cliente-barrio", barrios.slice(0, 6).map((b) => [b, b]), draft.barrio)}
+      </div>
+      <div class="coord-field">
+        <span class="coord-label" id="coord-cliente-perros-label">Perros${perros.length ? ` (${perros.length})` : ""}</span>
+        <label class="cd-search is-small" for="coord-cliente-perros-buscar">
+          ${ic("search")}<span class="coord-sr-only">Filtrar perros</span>
+          <input id="coord-cliente-perros-buscar" type="search" data-coord-filter-perros placeholder="Buscar perro" autocomplete="off" />
+        </label>
+        <div class="cd-pick-grid" role="group" aria-labelledby="coord-cliente-perros-label">
+          ${dogOptions.map((dog) => `
+            <label class="cd-pick-dog" data-name="${esc(normalize(dog.name))}">
+              <input type="checkbox" id="coord-cliente-perro-${dog.id}" name="perros" value="${dog.id}" ${perros.includes(dog.id) ? "checked" : ""} />
+              ${Ava(dog, dog.name, "md")}
+              <span>${esc(dog.name)}</span>
+              <span class="cd-pick-check" aria-hidden="true">${ic("check")}</span>
+            </label>`).join("")}
+        </div>
+      </div>
+      ${fold("cli-mas", `${ic("menu")}<b>Más datos</b>`, `
         ${selectField("cliente", "plan", "Plan", CLIENTE_PLANES, { value: draft.plan || PENDIENTE })}
         ${selectField("cliente", "turno", "Turno", CLIENTE_TURNOS, { value: draft.turno || PENDIENTE })}
         ${selectField("cliente", "estado", "Estado", CLIENTE_ESTADOS, { value: draft.estado || "activo" })}
-        <div class="coord-field is-wide">
-          <span class="coord-label" id="coord-cliente-perros-label">Perros${perros.length ? ` (${perros.length})` : ""}</span>
-          <input id="coord-cliente-perros-buscar" type="search" data-coord-filter-perros placeholder="Filtrar perros" autocomplete="off" aria-label="Filtrar la lista de perros" />
-          <div class="coord-checks" role="group" aria-labelledby="coord-cliente-perros-label">
-            ${dogOptions.map((dog) => `<label class="coord-check" data-name="${esc(normalize(dog.name))}"><input type="checkbox" id="coord-cliente-perro-${dog.id}" name="perros" value="${dog.id}" ${perros.includes(dog.id) ? "checked" : ""} /><span>${esc(dog.name)} <small>${esc(dog.size)}</small></span></label>`).join("")}
-          </div>
-          <small>Si el perro todavía no está en el registro, anotalo en notas y cargá su ficha en «Alta de perro nuevo».</small>
-        </div>
         ${daysField("cliente", dias)}
-        ${textArea("cliente", "notas", "Notas", { value: draft.notas, hint: "Lo operativo: llaves, portería, horarios. Sin datos de salud ni de pago." })}
-      </div>
-      <datalist id="coord-barrios">${barriosConocidos().map((b) => `<option value="${esc(b)}"></option>`).join("")}</datalist>
-      <div class="coord-actions">
-        ${button(editing ? "Guardar cambios" : "Guardar cliente", `id="coord-cliente-save" data-coord-cliente-save`, "primary", "plus")}
-        ${editing || draft.pedidoId ? button("Cancelar", `data-coord-cliente-cancel`, "ghost") : ""}
+        ${textArea("cliente", "notas", "Notas", { value: draft.notas, placeholder: "Llaves, portería, horarios", hint: "Sin salud ni pagos." })}
+      `)}
+      <datalist id="coord-barrios">${barrios.map((b) => `<option value="${esc(b)}"></option>`).join("")}</datalist>
+      <div class="cd-savebar is-row">
+        ${button("Cancelar", `data-coord-cliente-cancel`, "ghost")}
+        <button type="button" class="coord-btn is-primary is-big" id="coord-cliente-save" data-coord-cliente-save>${ic("checkCircle")}<span>Guardar</span></button>
       </div>
     </form>
   `;
-  return section({
-    key: "clientes",
-    id: "coord-clientes",
-    iconName: "users",
-    title: "Clientes",
-    intro: "Tutores, sus perros, plan, días y turno. Solo lo ven Juan y coordinación.",
-    badges: clientes.length ? badge(`${activos} ${activos === 1 ? "activo" : "activos"}`, "neutral") : "",
-    body,
-  });
 }
 
-/* ---------- 5. Avisos por barrio ---------- */
+/* ------------------------------------------------------------------ */
+/* Más                                                                 */
+/* ------------------------------------------------------------------ */
 
-function AvisosSection() {
+function SubHead(title, count) {
+  return `
+    <div class="cd-subhead">
+      <button type="button" class="cd-back" data-coord-go="mas">${ic("arrowLeft")}<span>Más</span></button>
+      <h1 id="coord-view-title" tabindex="-1">${title}${count ? ` <span class="cd-count">${count}</span>` : ""}</h1>
+    </div>
+  `;
+}
+
+function MasView() {
+  const sub = getView().sub;
+  if (sub) {
+    return {
+      cambios: CambiosView,
+      pedidos: PedidosView,
+      avisos: AvisosView,
+      fichas: FichasView,
+      datos: DatosView,
+      docs: DocsView,
+      incidentes: IncidentesView,
+    }[sub]();
+  }
+  const pedidos = getPedidos();
+  const abiertos = pedidos.filter((p) => estadoDe(p) !== "resuelto").length;
+  const activos = REAL_DOGS.filter((dog) => dog.status === "Activo");
+  const sinCarnet = activos.filter((dog) => !tieneCarnet(dog)).length;
+  const desde = haceDias(6);
+  const incidentes = cached("incidentes").filter((r) => !r.fecha || r.fecha >= desde).length;
+  const items = [
+    ["cambios", "bell", "Cambios", solicitudesPendientes().length, "alert"],
+    ["pedidos", "clipboardCheck", "Pedidos", abiertos, "warn"],
+    ["avisos", "mapPin", "Avisos", avisosVigentes().length, "warn"],
+    ["fichas", "userPlus", "Fichas", 0, "neutral"],
+    ["datos", "help", "Datos a confirmar", pendingReview().length, "warn"],
+    ["docs", "fileText", "Documentos", sinCarnet, "warn"],
+    ["incidentes", "activity", "Incidentes", incidentes, "alert"],
+  ];
+  return `
+    <div class="cd-viewhead"><h1 id="coord-view-title" tabindex="-1">Más</h1></div>
+    <div class="cd-menu">
+      ${items.map(([sub, iconName, label, n, tone]) => `
+        <button type="button" class="cd-menu-btn" id="coord-mas-${sub}" data-coord-go="mas:${sub}">
+          ${ic(iconName)}<span>${label}</span>${n ? `<b class="cd-menu-n is-${tone}">${n}</b>` : ""}
+        </button>`).join("")}
+    </div>
+    ${fold("mas-fuentes", `${ic("help")}<b>Fuentes</b>`, `<p class="cd-foot">Rutas: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Carnets y documentos: privados.</p>`)}
+  `;
+}
+
+/* ---------- Avisos por barrio ---------- */
+
+function avisoTone(tipo) {
+  return tipo === "seguridad" || tipo === "perro suelto" ? "alert" : tipo === "clima" || tipo === "cambio de horario" ? "info" : "warn";
+}
+
+function AvisoCard(aviso, { history = false } = {}) {
+  const id = esc(aviso.id);
+  return `
+    <li class="cd-card cd-aviso ${history ? "is-old" : ""}">
+      <p class="cd-chips">${chip(esc(aviso.tipo || "otro"), avisoTone(aviso.tipo), "alertTriangle")}${chip(esc(aviso.barrio || "Sin barrio"), "neutral", "mapPin")}${chip(`${history ? "Venció" : "Hasta"} ${esc(fmtDate(isISODate(aviso.vigenteHasta) ? aviso.vigenteHasta : aviso.fecha).slice(0, 5))}`, history ? "neutral" : "info")}</p>
+      <p class="cd-aviso-msg">${esc(aviso.mensaje || aviso.titulo || "")}</p>
+      ${whoLine(aviso)}
+      <div class="cd-actions">
+        ${button("Copiar", `data-coord-aviso-copy="${id}" aria-label="Copiar aviso de ${esc(aviso.barrio || "barrio")} para WhatsApp"`, "ghost", "copy")}
+        ${!history ? button("Terminó", `id="coord-aviso-fin-${id}" data-coord-aviso-fin="${id}"`, "ghost", "checkCircle") : ""}
+      </div>
+    </li>
+  `;
+}
+
+function AvisoForm() {
   const draft = getDraft("aviso");
+  const hoy = hoyAR();
+  const tipo = AVISO_TIPOS.includes(draft.tipo) ? draft.tipo : AVISO_TIPOS[0];
+  const hasta = draft.vigenteHasta || hoy;
+  return `
+    <form class="cd-card cd-form is-inline" id="coord-aviso-form" data-coord-form="aviso" novalidate>
+      <div class="coord-field">
+        <span class="coord-label" id="coord-aviso-tipo-label">Tipo</span>
+        <div class="cd-chiprow" role="radiogroup" aria-labelledby="coord-aviso-tipo-label">
+          ${AVISO_TIPOS.map((t) => `<label class="cd-pill is-check"><input type="radio" name="tipo" value="${esc(t)}" ${t === tipo ? "checked" : ""} /><span>${esc(t[0].toUpperCase() + t.slice(1))}</span></label>`).join("")}
+        </div>
+      </div>
+      <div class="coord-field">
+        <label for="coord-aviso-barrio">Barrio <span class="coord-required">*<span class="coord-sr-only"> obligatorio</span></span></label>
+        <input id="coord-aviso-barrio" name="barrio" type="text" value="${esc(draft.barrio || "")}" list="coord-barrios-aviso" autocomplete="off" />
+        ${quickFill("coord-aviso-barrio", barriosConocidos().slice(0, 6).map((b) => [b, b]), draft.barrio)}
+      </div>
+      ${textArea("aviso", "mensaje", "Qué pasa", { value: draft.mensaje, required: true, placeholder: "Ej.: corte en la entrada, usar la puerta 2" })}
+      <div class="coord-field">
+        <label for="coord-aviso-vigenteHasta">Hasta</label>
+        <input id="coord-aviso-vigenteHasta" name="vigenteHasta" type="date" value="${esc(hasta)}" min="${hoy}" />
+        ${quickFill("coord-aviso-vigenteHasta", [[hoy, "Hoy"], [addDaysISO(hoy, 1), "Mañana"], [addDaysISO(hoy, 7), "7 días"]], hasta)}
+      </div>
+      <datalist id="coord-barrios-aviso">${barriosConocidos().map((b) => `<option value="${esc(b)}"></option>`).join("")}</datalist>
+      <div class="cd-actions is-split">
+        <button type="button" class="coord-btn is-primary" id="coord-aviso-save" data-coord-aviso-save>${ic("send")}<span>Avisar</span></button>
+        ${button("Cancelar", `data-coord-aviso-cancel`, "ghost")}
+      </div>
+    </form>
+  `;
+}
+
+function AvisosView() {
   const hoy = hoyAR();
   const all = getAvisos();
   const vigentes = all.filter((a) => avisoVigente(a, hoy));
   const viejos = all.filter((a) => !avisoVigente(a, hoy)).slice(0, 20);
-  const body = `
-    ${feedback("avisos")}
-    <form class="coord-form" data-coord-form="aviso" novalidate>
-      <h3>Cargar un aviso</h3>
-      <div class="coord-grid">
-        ${field("aviso", "barrio", "Barrio", { value: draft.barrio, required: true, attrs: 'list="coord-barrios-aviso" autocomplete="off"' })}
-        ${selectField("aviso", "tipo", "Tipo", AVISO_TIPOS, { value: draft.tipo || AVISO_TIPOS[0] })}
-        ${field("aviso", "vigenteHasta", "Vigente hasta", { value: draft.vigenteHasta || hoy, type: "date", attrs: `min="${hoy}"` })}
-        ${textArea("aviso", "mensaje", "Qué pasa", { value: draft.mensaje, required: true, placeholder: "Ej.: Corte de calle en la entrada principal. Entrar por la puerta 2." })}
-      </div>
-      <datalist id="coord-barrios-aviso">${barriosConocidos().map((b) => `<option value="${esc(b)}"></option>`).join("")}</datalist>
-      <div class="coord-actions">${button("Guardar aviso", `id="coord-aviso-save" data-coord-aviso-save`, "primary", "plus")}</div>
-    </form>
-    <div class="coord-subblock">
-      <h3>Vigentes <span>${vigentes.length}</span></h3>
-      ${vigentes.length ? `<p class="coord-meta">Están arriba, agrupados por barrio.</p>` : `<p class="coord-empty is-small">${loaded.has("avisos") ? "No hay avisos vigentes." : "Cargando…"}</p>`}
-    </div>
-    ${viejos.length ? `
-      <details class="coord-more" ${isOpen("avisosViejos") ? "open" : ""}>
-        <summary data-coord-toggle="avisosViejos">Avisos vencidos (${viejos.length}) ${icon("chevronDown", "coord-icon")}</summary>
-        <ul class="coord-aviso-list">${viejos.map((a) => AvisoCard(a, { history: true })).join("")}</ul>
-      </details>` : ""}
+  return `
+    ${SubHead("Avisos", vigentes.length)}
+    ${avisoFormOpen ? AvisoForm() : button("Nuevo aviso", `id="coord-aviso-new" data-coord-aviso-new`, "primary", "plus")}
+    ${vigentes.length
+      ? groupByBarrio(vigentes).map(([barrio, avisos]) => `
+        <section class="cd-sec" aria-label="Avisos en ${esc(barrio)}">
+          <h2 class="cd-h2">${ic("mapPin")}<span>${esc(barrio)}</span> <span class="cd-count">${avisos.length}</span></h2>
+          <ul class="cd-list">${avisos.map((a) => AvisoCard(a)).join("")}</ul>
+        </section>`).join("")
+      : emptyState(loaded.has("avisos") ? "Sin avisos vigentes." : "Cargando…", loaded.has("avisos") ? "checkCircle" : "clock")}
+    ${viejos.length ? fold("avisosViejos", `Vencidos (${viejos.length})`, `<ul class="cd-list">${viejos.map((a) => AvisoCard(a, { history: true })).join("")}</ul>`) : ""}
   `;
-  return section({
-    key: "avisos",
-    id: "coord-avisos",
-    iconName: "mapPin",
-    title: "Avisos por barrio",
-    intro: "Obras, cortes, perros sueltos, clima o seguridad. Los ve todo el equipo.",
-    badges: vigentes.length ? badge(`${vigentes.length} ${vigentes.length === 1 ? "vigente" : "vigentes"}`, "warn") : "",
-    body,
-  });
 }
 
-/* ---------- 6. Pedidos de clientes y evaluaciones ---------- */
+/* ---------- Pedidos de clientes y evaluaciones ---------- */
 
 function webData(pedido) {
   const d = pedido.datos || {};
@@ -2374,90 +2617,100 @@ function PedidoCard(pedido, fichaPorPedido, clientePorPedido) {
   const id = esc(pedido.id);
   const ficha = fichaPorPedido.get(pedido.id);
   const cliente = clientePorPedido.get(pedido.id);
-  const moves = {
-    nuevo: button("Empezar", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary") + button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "ghost"),
-    "en-curso": button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "secondary") + button("Volver a nuevo", `data-coord-pedido-move="${id}" data-estado="nuevo"`, "ghost"),
-    resuelto: button("Reabrir", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary"),
+  const perroNombre = isWeb ? d.perro : pedidoPerro(pedido);
+  const dog = DOG_BY_NAME.get(normalize(perroNombre)) || null;
+  const bite = d.mordida && d.mordida !== "No";
+  const tieneCarnetPedido = archivosDePedido(pedido).some(esCarnet);
+  const next = {
+    nuevo: button("Empezar", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "secondary", "play"),
+    "en-curso": button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "secondary", "checkCircle"),
+    resuelto: button("Reabrir", `data-coord-pedido-move="${id}" data-estado="en-curso"`, "ghost"),
   }[estado];
-  const memKey = `pedido-${pedido.id}`;
-  const showDataOpen = estado !== "resuelto" || openCards.has(memKey);
   const canFicha = (isWeb || /evaluaci/i.test(pedido.tipo || "")) && !ficha && estado !== "resuelto";
-  const details = isWeb
-    ? estado === "resuelto"
-      ? `<details class="coord-card-more" ${showDataOpen ? "open" : ""}><summary data-coord-mem-toggle="${esc(memKey)}">Ver datos del formulario ${icon("chevronDown", "coord-icon")}</summary>${webData(pedido)}</details>`
-      : webData(pedido)
-    : `<p class="coord-card-dog">${icon("pawPrint", "coord-icon")}${esc(pedidoPerro(pedido) || PENDIENTE)}</p>${pedido.detalle ? `<p>${esc(pedido.detalle)}</p>` : ""}`;
   const saludo = d.responsable ? `Hola ${d.responsable}` : "Hola";
-  const pedirCarnet = archivosDePedido(pedido).some(esCarnet) ? "" : " Cuando puedas, mandanos una foto del carnet de vacunas.";
+  const pedirCarnet = tieneCarnetPedido ? "" : " Cuando puedas, mandanos una foto del carnet de vacunas.";
   return `
-    <li class="coord-card ${isWeb ? "is-web" : ""}" id="coord-pedido-${id}" tabindex="-1">
-      <div class="coord-card-head">
-        <strong>${esc(isWeb ? d.perro || PENDIENTE : pedido.tipo || "Pedido")}</strong>
-        <small>${isWeb ? esc(pedido.tipo || "Formulario web") : `${esc(fmtDate(pedido.fecha))}${d.canal ? ` · ${esc(d.canal)}` : ""}`}</small>
+    <li class="cd-card cd-pedido ${isWeb ? "is-web" : ""}" id="coord-pedido-${id}" tabindex="-1">
+      <div class="cd-row">
+        ${Ava(dog, perroNombre || pedido.tipo, "md")}
+        <div class="cd-row-main">
+          <strong>${esc(perroNombre || pedido.tipo || "Pedido")}</strong>
+          <small>${esc([pedido.tipo || (isWeb ? "Formulario web" : ""), fmtDate(pedido.fecha).slice(0, 5), d.canal].filter(Boolean).join(" · "))}</small>
+        </div>
+        ${isWeb ? chip("Web", "info") : ""}
       </div>
-      ${isWeb ? `<p class="coord-badges">${badge("Formulario web", "warn")}</p>` : ""}
-      ${details}
-      ${AdjuntosPedido(pedido)}
-      ${whoLine(pedido, { web: isWeb })}
-      ${ficha ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Ficha creada para ${esc(ficha.perroNombre)}</span></p>` : ""}
-      ${cliente ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Cliente cargado: ${esc(cliente.nombre)}</span></p>` : ""}
-      <div class="coord-actions">
-        ${estado !== "resuelto" && isWeb ? whatsappLinkTo(d.telefono, `${saludo}, te escribo de Paseos Juan por el pedido de evaluación de ${d.perro || "tu perro"}.${pedirCarnet}`, "primary") : ""}
-        ${moves}
-        ${!cliente && (isWeb || d.responsable) ? button("Convertir en cliente", `data-coord-pedido-cliente="${id}"`, "ghost", "userPlus") : ""}
-        ${canFicha ? button("Armar ficha con estos datos", `data-coord-pedido-ficha="${id}"`, "ghost", "fileText") : ""}
-        ${estado === "resuelto" && canDelete(pedido) ? button("Borrar", `data-coord-pedido-delete="${id}"`, "ghost") : ""}
+      <p class="cd-chips">
+        ${chip(ESTADO_LABEL[estado], estado === "nuevo" ? "neutral" : estado === "en-curso" ? "info" : "ok")}
+        ${bite ? chip("Mordió", "alert", "alertTriangle") : ""}
+        ${d.perros === "No" ? chip("No con perros", "warn") : ""}
+        ${isWeb && estado !== "resuelto" ? tieneCarnetPedido ? chip("Carnet", "ok", "check") : chip("Sin carnet", "warn") : ""}
+        ${ficha ? chip("Ficha", "ok", "check") : ""}
+        ${cliente ? chip("Cliente", "ok", "check") : ""}
+      </p>
+      ${isWeb ? `<p class="cd-line">${esc([d.responsable, [d.zona, d.referencia].filter(Boolean).join(" · ")].filter(Boolean).join(" · ") || PENDIENTE)}</p>` : pedido.detalle ? `<p class="cd-line">${esc(pedido.detalle)}</p>` : ""}
+      <div class="cd-actions is-split">
+        ${estado !== "resuelto" && isWeb ? whatsappLinkTo(d.telefono, `${saludo}, te escribo de Paseos Juan por el pedido de evaluación de ${d.perro || "tu perro"}.${pedirCarnet}`, "whatsapp", "WhatsApp") : ""}
+        ${next}
       </div>
+      ${cardMore(`pedido-${pedido.id}`, "Más", `
+        ${isWeb ? webData(pedido) : ""}
+        ${AdjuntosPedido(pedido)}
+        ${whoLine(pedido, { web: isWeb })}
+        <div class="cd-actions">
+          ${!cliente && (isWeb || d.responsable) ? button("Hacer cliente", `data-coord-pedido-cliente="${id}"`, "ghost", "userPlus") : ""}
+          ${canFicha ? button("Hacer ficha", `data-coord-pedido-ficha="${id}"`, "ghost", "fileText") : ""}
+          ${estado === "en-curso" ? button("A nuevo", `data-coord-pedido-move="${id}" data-estado="nuevo"`, "ghost") : ""}
+          ${estado === "nuevo" ? button("Resolver", `data-coord-pedido-move="${id}" data-estado="resuelto"`, "ghost", "checkCircle") : ""}
+          ${estado === "resuelto" && canDelete(pedido) ? button("Borrar", `data-coord-pedido-delete="${id}"`, "danger", "trash") : ""}
+        </div>
+      `)}
     </li>
   `;
 }
 
-function RequestsSection() {
-  const pedidos = getPedidos();
+function PedidoForm() {
   const draft = getDraft("pedido");
-  const open = pedidos.filter((p) => estadoDe(p) !== "resuelto").length;
-  const web = webNuevos(pedidos).length;
-  const fichaPorPedido = new Map(getFichas().filter((f) => f.datos?.pedidoId).map((f) => [f.datos.pedidoId, f]));
-  const clientePorPedido = new Map(getClientes().filter((c) => c.pedidoId).map((c) => [c.pedidoId, c]));
-  const isLoading = !loaded.has("pedidos") && !pedidos.length;
-  const body = `
-    ${feedback("pedidos")}
-    <div class="coord-board">
-      ${PEDIDO_COLUMNAS.map(([estado, label]) => {
-        const items = pedidos.filter((p) => estadoDe(p) === estado);
-        if (estado === "nuevo") items.sort((a, b) => Number(b.origen === "web") - Number(a.origen === "web"));
-        return `
-          <section class="coord-column" aria-labelledby="coord-col-${estado}">
-            <h3 id="coord-col-${estado}">${label} <span>${items.length}</span></h3>
-            ${items.length
-              ? `<ul class="coord-card-list">${items.map((p) => PedidoCard(p, fichaPorPedido, clientePorPedido)).join("")}</ul>`
-              : `<p class="coord-empty is-small">${isLoading ? "Cargando…" : estado === "nuevo" ? "Sin pedidos nuevos." : estado === "en-curso" ? "Nada en curso." : "Todavía no hay resueltos."}</p>`}
-          </section>
-        `;
-      }).join("")}
-    </div>
-    <form class="coord-form" data-coord-form="pedido" novalidate>
-      <h3>Cargar un pedido que llegó por otro lado</h3>
-      <div class="coord-grid">
-        ${selectField("pedido", "tipo", "Tipo de pedido", PEDIDO_TIPOS, { value: draft.tipo })}
-        ${field("pedido", "perro", "Perro", { value: draft.perro, placeholder: "Nombre o «perro nuevo»", attrs: 'list="coord-dog-names" autocomplete="off"' })}
-        ${selectField("pedido", "canal", "Llegó por", PEDIDO_CANALES, { value: draft.canal })}
-        ${textArea("pedido", "detalle", "Qué hay que resolver", { value: draft.detalle, hint: "Sin teléfonos ni domicilios: solo lo necesario para resolverlo." })}
+  return `
+    <form class="cd-card cd-form is-inline" data-coord-form="pedido" novalidate>
+      ${selectField("pedido", "tipo", "Tipo", PEDIDO_TIPOS, { value: draft.tipo })}
+      ${field("pedido", "perro", "Perro", { value: draft.perro, placeholder: "Nombre o «perro nuevo»", attrs: 'list="coord-dog-names" autocomplete="off"' })}
+      <div class="coord-field">
+        <span class="coord-label" id="coord-pedido-canal-label">Llegó por</span>
+        <div class="cd-chiprow" role="radiogroup" aria-labelledby="coord-pedido-canal-label">
+          ${PEDIDO_CANALES.map((c) => `<label class="cd-pill is-check"><input type="radio" name="canal" value="${esc(c)}" ${c === (draft.canal || PEDIDO_CANALES[0]) ? "checked" : ""} /><span>${esc(c)}</span></label>`).join("")}
+        </div>
       </div>
+      ${textArea("pedido", "detalle", "Qué resolver", { value: draft.detalle, hint: "Sin teléfonos ni domicilios." })}
       <datalist id="coord-dog-names">${REAL_DOGS.map((dog) => `<option value="${esc(dog.name)}"></option>`).join("")}</datalist>
-      <div class="coord-actions">${button("Guardar pedido", "data-coord-pedido-save", "primary", "plus")}</div>
+      <div class="cd-actions is-split">
+        ${button("Guardar", `data-coord-pedido-save`, "primary", "checkCircle")}
+        ${button("Cancelar", `data-coord-pedido-cancel`, "ghost")}
+      </div>
     </form>
   `;
-  return section({
-    key: "pedidos",
-    id: "coord-pedidos",
-    iconName: "clipboardCheck",
-    title: "Pedidos y evaluaciones",
-    intro: "Los del formulario de la web y los que cargás vos.",
-    badges: `${web ? badge(`${web} ${web === 1 ? "nuevo" : "nuevos"} de la web`, "alert") : ""}${open ? badge(`${open} ${open === 1 ? "abierto" : "abiertos"}`, "warn") : badge("Sin pedidos abiertos", "neutral")}`,
-    body,
-    open: web > 0,
-  });
+}
+
+function PedidosView() {
+  const pedidos = getPedidos();
+  const fichaPorPedido = new Map(getFichas().filter((f) => f.datos?.pedidoId).map((f) => [f.datos.pedidoId, f]));
+  const clientePorPedido = new Map(getClientes().filter((c) => c.pedidoId).map((c) => [c.pedidoId, c]));
+  const filtro = PEDIDO_COLUMNAS.some(([e]) => e === pedidosFiltro) ? pedidosFiltro : "nuevo";
+  const items = pedidos.filter((p) => estadoDe(p) === filtro);
+  if (filtro === "nuevo") items.sort((a, b) => Number(b.origen === "web") - Number(a.origen === "web"));
+  const isLoading = !loaded.has("pedidos") && !pedidos.length;
+  return `
+    ${SubHead("Pedidos", pedidos.filter((p) => estadoDe(p) !== "resuelto").length)}
+    <div class="cd-seg is-3" role="group" aria-label="Estado">
+      ${PEDIDO_COLUMNAS.map(([estado, label]) => {
+        const n = pedidos.filter((p) => estadoDe(p) === estado).length;
+        return `<button type="button" class="cd-seg-btn" id="coord-pedidos-${estado}" data-coord-pedidos-filtro="${estado}" aria-pressed="${estado === filtro}"><span>${label}</span><b>${n}</b></button>`;
+      }).join("")}
+    </div>
+    ${items.length
+      ? `<ul class="cd-list is-grid">${items.map((p) => PedidoCard(p, fichaPorPedido, clientePorPedido)).join("")}</ul>`
+      : emptyState(isLoading ? "Cargando…" : filtro === "nuevo" ? "Sin pedidos nuevos." : filtro === "en-curso" ? "Nada en curso." : "Sin resueltos.", isLoading ? "clock" : "checkCircle")}
+    ${pedidoFormOpen ? PedidoForm() : button("Cargar pedido", `id="coord-pedido-new" data-coord-pedido-new`, "ghost", "plus")}
+  `;
 }
 
 function draftClienteFromPedido(pedido) {
@@ -2478,76 +2731,81 @@ function draftClienteFromPedido(pedido) {
   };
 }
 
-/* ---------- 7. Datos a confirmar ---------- */
+/* ---------- Datos a confirmar ---------- */
 
 function ReviewCard(dog, record) {
   const who = record ? record.actualizadoPorNombre || record.creadoPorNombre : "";
   return `
-    <li class="coord-review ${record ? "is-resolved" : ""}" id="coord-dato-${dog.id}" tabindex="-1">
-      <div class="coord-review-head">
-        <h3>${esc(dog.name)} <small>${dog.id}</small></h3>
-        ${dog.status !== "Activo" ? badge(esc(dog.status), "alert") : badge("Activo", "neutral")}
+    <li class="cd-card cd-review ${record ? "is-resolved" : ""}" id="coord-dato-${dog.id}" tabindex="-1">
+      <div class="cd-row">
+        ${Ava(dog, dog.name, "md")}
+        <div class="cd-row-main">
+          <strong>${esc(dog.name)}</strong>
+          <small>${esc(dog.plan)} · ${esc(dog.size)}</small>
+        </div>
+        ${dog.status !== "Activo" ? chip(esc(dog.status), "alert") : ""}
       </div>
-      <p class="coord-review-meta">${esc(dog.plan)} · ${esc(dog.size)} · ${esc(scheduleLabel(dog))}</p>
-      <p class="coord-badges">${carnetChip(dog)}</p>
-      <p class="coord-review-what"><span>Qué confirmar</span>${esc(dog.review || `Estado "${dog.status}".`)}</p>
-      ${safetyChips(dog)}
-      ${record?.nota ? `<p class="coord-meta">${esc(record.nota)}</p>` : ""}
-      <div class="coord-actions">
+      <p class="cd-line">${ic("help")}<span>${esc(dog.review || `Estado "${dog.status}".`)}</span></p>
+      <p class="cd-chips">${safetyChips(dog)}${carnetChip(dog)}</p>
+      ${record?.nota ? `<p class="cd-muted">${esc(record.nota)}</p>` : ""}
+      <div class="cd-actions">
         ${record
-          ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Resuelto${who ? ` por ${esc(who)}` : ""}${record.actualizadoEn ? ` el ${fmtStamp(record.actualizadoEn)}` : ""}${record.pendiente ? " (sin señal: se enviará cuando vuelva)" : ""}</span></p>${button("Deshacer", `data-coord-unresolve="${dog.id}"`, "ghost")}`
-          : button("Marcar como resuelto", `data-coord-resolve="${dog.id}"`, "primary", "checkCircle")}
+          ? `<p class="cd-done">${ic("checkCircle")}<span>Resuelto${who ? ` · ${esc(firstName(who))}` : ""}${record.pendiente ? " · se envía con señal" : ""}</span></p>${button("Deshacer", `data-coord-unresolve="${dog.id}"`, "ghost")}`
+          : button("Resuelto", `id="coord-resolve-${dog.id}" data-coord-resolve="${dog.id}"`, "primary", "checkCircle")}
+        ${FotoBtn(dog)}
       </div>
     </li>
   `;
 }
 
-function ReviewSection() {
+function DatosView() {
   const resolved = getResolved();
   const pending = REVIEW_DOGS.filter((dog) => !resolved[dog.id]);
   const done = REVIEW_DOGS.filter((dog) => resolved[dog.id]);
-  const body = `
-    <p>Perros con datos que no coinciden entre planillas o con estado distinto de Activo. Cuando lo confirmes en la planilla, marcalo como resuelto.</p>
-    ${feedback("datos")}
-    ${pending.length ? `<ul class="coord-review-list">${pending.map((dog) => ReviewCard(dog)).join("")}</ul>` : `<p class="coord-empty">${icon("checkCircle", "coord-icon")}No quedan datos por confirmar.</p>`}
-    ${done.length ? `
-      <details class="coord-more" ${isOpen("datosResueltos") ? "open" : ""}>
-        <summary data-coord-toggle="datosResueltos">Resueltos (${done.length}) ${icon("chevronDown", "coord-icon")}</summary>
-        <ul class="coord-review-list">${done.map((dog) => ReviewCard(dog, resolved[dog.id])).join("")}</ul>
-      </details>` : ""}
-    <p class="coord-note">${icon("fileText", "coord-icon")}<span>El cambio todavía debe incorporarse al ${esc(BUSINESS_INFO.officialSources.dogs.toLowerCase())}.</span></p>
-    ${SinCarnetBlock()}
+  return `
+    ${SubHead("Datos a confirmar", pending.length)}
+    <p class="cd-muted">Confirmalo en la planilla.</p>
+    ${pending.length ? `<ul class="cd-list is-grid">${pending.map((dog) => ReviewCard(dog)).join("")}</ul>` : emptyState("No quedan datos por confirmar.")}
+    ${done.length ? fold("datosResueltos", `Resueltos (${done.length})`, `<ul class="cd-list is-grid">${done.map((dog) => ReviewCard(dog, resolved[dog.id])).join("")}</ul>`) : ""}
   `;
-  return section({
-    key: "datos",
-    id: "coord-datos",
-    iconName: "help",
-    title: "Datos a confirmar",
-    intro: `${done.length} de ${REVIEW_DOGS.length} resueltos.`,
-    badges: pending.length ? badge(`${pending.length} ${pending.length === 1 ? "pendiente" : "pendientes"}`, "warn") : badge("Todo confirmado", "ok"),
-    body,
-  });
 }
 
-// Perros activos sin carnet de vacunas cargado en la app.
-function SinCarnetBlock() {
+/* ---------- Documentos: carnets y archivos ---------- */
+
+function clienteDePerro(dogId) {
+  return getClientes().find((c) => Array.isArray(c.perros) && c.perros.includes(dogId)) || null;
+}
+
+function DocsView() {
   const activos = REAL_DOGS.filter((dog) => dog.status === "Activo");
   const faltan = activos.filter((dog) => !tieneCarnet(dog)).sort((a, b) => a.name.localeCompare(b.name, "es"));
   const listo = loaded.has("archivos") && loaded.has("clientes");
+  const archivos = getArchivos().slice(0, 20);
   return `
-    <div class="coord-subblock" id="coord-sin-carnet">
-      <h3>Carnet de vacunas <span>${activos.length - faltan.length} de ${activos.length}</span></h3>
-      <p class="coord-meta">${!listo ? "Cargando carnets…" : faltan.length ? `${faltan.length} ${faltan.length === 1 ? "perro activo no tiene" : "perros activos no tienen"} el carnet cargado. Se sube desde la ficha del cliente (sección Clientes).` : "Todos los perros activos tienen el carnet cargado."}</p>
-      ${faltan.length && listo ? `
-        <details class="coord-more" ${isOpen("sinCarnet") ? "open" : ""}>
-          <summary data-coord-toggle="sinCarnet">Perros sin carnet (${faltan.length}) ${icon("chevronDown", "coord-icon")}</summary>
-          <ul class="coord-nocarnet">${faltan.map((dog) => `<li><b>${esc(dog.name)}</b> <small>${esc(scheduleLabel(dog))}</small></li>`).join("")}</ul>
-        </details>` : ""}
+    ${SubHead("Documentos")}
+    <div class="cd-card cd-stat">
+      <p class="cd-big">${ic("fileCheck")}<span><b>${activos.length - faltan.length} de ${activos.length}</b> con carnet</span></p>
+      <p class="cd-muted">Se sube en Clientes.</p>
     </div>
+    ${!listo ? emptyState("Cargando…", "clock") : faltan.length ? `
+      <h2 class="cd-h2">Sin carnet <span class="cd-count">${faltan.length}</span></h2>
+      <ul class="cd-list cd-nocarnet">
+        ${faltan.map((dog) => {
+          const cli = clienteDePerro(dog.id);
+          return `
+            <li class="cd-card cd-row">
+              ${Ava(dog, dog.name, "md")}
+              <div class="cd-row-main"><strong>${esc(dog.name)}</strong><small>${esc(scheduleLabel(dog))}</small></div>
+              ${FotoBtn(dog, { compact: true })}
+              ${cli ? button("Cliente", `data-coord-ver-cliente="${esc(cli.id)}" aria-label="Ver cliente de ${esc(dog.name)}"`, "ghost", "users") : ""}
+            </li>`;
+        }).join("")}
+      </ul>` : emptyState("Todos los activos tienen carnet.")}
+    ${archivos.length ? fold("docsRecientes", `Últimos archivos (${archivos.length})`, `<ul class="coord-files">${archivos.map((a) => ArchivoItem(a, "docs")).join("")}</ul>${fileFeedback("docs")}`) : ""}
   `;
 }
 
-/* ---------- 8. Alta de perro nuevo ---------- */
+/* ---------- Fichas: alta de perro nuevo ---------- */
 
 const SI_NO = [PENDIENTE, "Sí", "No"];
 
@@ -2562,153 +2820,141 @@ function CarnetAltaField(draft) {
   const pedido = draft.pedidoId ? findIn(getPedidos(), draft.pedidoId) : null;
   const delPedido = pedido ? archivosDePedido(pedido).filter(esCarnet) : [];
   const hintId = "coord-alta-carnet-hint";
-  let hint = "Opcional. Se sube al guardar la ficha (hace falta señal). Foto clara o PDF, hasta 3,5 MB.";
-  if (altaCarnetSubido) hint = `Carnet ya subido (${esc(altaCarnetSubido.nombreArchivo || "archivo")}): queda vinculado al guardar la ficha.`;
-  else if (altaCarnet) hint = `Elegiste <b>${esc(altaCarnet.name)}</b> (${fmtTamano(altaCarnet.size)}). Se sube al guardar la ficha.`;
+  let hint = "Opcional. Se sube al guardar (con señal).";
+  if (altaCarnetSubido) hint = `Ya subido (${esc(altaCarnetSubido.nombreArchivo || "archivo")}).`;
+  else if (altaCarnet) hint = `${esc(altaCarnet.name)} (${fmtTamano(altaCarnet.size)}). Se sube al guardar.`;
   return `
-    <div class="coord-field is-wide">
+    <div class="coord-field">
       <span class="coord-label">Carnet de vacunas</span>
       ${delPedido.map((a) => `
         <p class="coord-attach-row">
-          ${icon("fileCheck", "coord-icon")}
-          <span><b>El pedido web ya trae el carnet</b><small>Queda vinculado a esta ficha.</small></span>
-          ${button('Ver carnet<span class="coord-sr-only"> (se abre en otra pestaña)</span>', `data-coord-archivo-abrir="${esc(a.id)}" data-scope="alta"`, "secondary", "eye")}
+          ${ic("fileCheck")}
+          <span><b>Carnet del pedido</b><small>Queda vinculado.</small></span>
+          ${button('Ver<span class="coord-sr-only"> carnet (se abre en otra pestaña)</span>', `data-coord-archivo-abrir="${esc(a.id)}" data-scope="alta"`, "secondary", "eye")}
         </p>`).join("")}
-      ${altaCarnetSubido ? "" : filePicker("coord-alta-carnet", altaCarnet ? "Cambiar el archivo" : delPedido.length ? "Adjuntar otro carnet" : "Adjuntar foto o PDF del carnet", "data-coord-alta-carnet", hintId)}
-      <small id="${hintId}">${hint}</small>
-      ${altaCarnet && sinSenal() ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>Sin señal: el carnet no se puede subir ahora. Esperá a tener señal o quitalo para guardar la ficha sin él.</span></p>` : ""}
-      ${altaCarnet || altaCarnetSubido ? `<div class="coord-actions">${button("Quitar el carnet", `id="coord-alta-carnet-quitar" data-coord-alta-carnet-quitar`, "ghost", "x")}</div>` : ""}
+      ${altaCarnetSubido ? "" : filePicker("coord-alta-carnet", altaCarnet ? "Cambiar" : delPedido.length ? "Otro carnet" : "Foto o PDF", "data-coord-alta-carnet", hintId)}
+      <small id="${hintId}" class="cd-muted">${hint}</small>
+      ${altaCarnet && sinSenal() ? `<p class="coord-inline-alert">${ic("alertTriangle")}<span>Sin señal: el carnet necesita señal.</span></p>` : ""}
+      ${altaCarnet || altaCarnetSubido ? button("Quitar carnet", `id="coord-alta-carnet-quitar" data-coord-alta-carnet-quitar`, "ghost", "x") : ""}
       ${fileFeedback("alta")}
     </div>
   `;
 }
 
-function IntakeSection() {
+function AltaForm() {
   const draft = getDraft("alta");
-  const fichas = getFichas();
   const days = Array.isArray(draft.dias) ? draft.dias : [];
   const planOptions = [PENDIENTE, ...REAL_PLANS.map((plan) => `${plan.name} (${plan.walks} paseos por semana)`), "Paseo suelto"];
-  const body = `
-    <div class="coord-rule" role="note">
-      ${icon("shieldCheck", "coord-icon")}
-      <p><b>Regla:</b> todo perro nuevo arranca <b>SIN EVALUAR</b> y su <b>primer paseo es individual</b>. Recién después se decide si puede sumarse a un grupo.</p>
-    </div>
-    ${feedback("alta")}
-    <form class="coord-form" data-coord-form="alta" novalidate>
-      ${draft.pedidoId ? `<p class="coord-note">${icon("clipboardCheck", "coord-icon")}<span>Formulario completado con los datos del pedido web. Revisalos antes de guardar.</span></p>` : ""}
-      <fieldset>
-        <legend>Identificación</legend>
-        <div class="coord-grid">
-          ${field("alta", "nombre", "Nombre del perro", { value: draft.nombre, required: true })}
-          ${selectField("alta", "tamano", "Tamaño", [PENDIENTE, "Pequeño", "Mediano", "Grande"], { value: draft.tamano })}
-          ${field("alta", "raza", "Raza o cruza", { value: draft.raza })}
-          ${field("alta", "edad", "Edad aproximada", { value: draft.edad })}
-          ${selectField("alta", "sexo", "Sexo", [PENDIENTE, "Macho", "Hembra"], { value: draft.sexo })}
-          ${selectField("alta", "castrado", "Castrado o castrada", SI_NO, { value: draft.castrado })}
+  return `
+    <form class="cd-form" id="coord-alta-form" data-coord-form="alta" novalidate>
+      <div class="cd-subhead">
+        <button type="button" class="cd-back" data-coord-alta-close>${ic("arrowLeft")}<span>Fichas</span></button>
+        <h1 id="coord-view-title" tabindex="-1">Perro nuevo</h1>
+      </div>
+      <p class="cd-chips">${chip("SIN EVALUAR", "neutral")}${chip("1.er paseo individual", "warn", "shieldCheck")}</p>
+      ${draft.pedidoId ? `<p class="cd-note">${ic("clipboardCheck")}<span>Con datos del pedido web. Revisalos.</span></p>` : ""}
+      ${field("alta", "nombre", "Nombre del perro", { value: draft.nombre, required: true })}
+      <div class="coord-field">
+        <span class="coord-label" id="coord-alta-tamano-label">Tamaño</span>
+        <div class="cd-chiprow" role="radiogroup" aria-labelledby="coord-alta-tamano-label">
+          ${["Pequeño", "Mediano", "Grande"].map((t) => `<label class="cd-pill is-check"><input type="radio" name="tamano" value="${t}" ${draft.tamano === t ? "checked" : ""} /><span>${t}</span></label>`).join("")}
         </div>
-      </fieldset>
-      <fieldset>
-        <legend>Tutor y contacto de emergencia</legend>
-        <p class="coord-fieldset-note">Lo ven solo Juan, coordinación y supervisión.</p>
-        <div class="coord-grid">
-          ${field("alta", "tutor", "Nombre del tutor", { value: draft.tutor, attrs: 'autocomplete="off"' })}
-          ${field("alta", "contacto", "Contacto del tutor", { value: draft.contacto, type: "tel", attrs: 'autocomplete="off"' })}
-          ${field("alta", "emergencia", "Contacto de emergencia", { value: draft.emergencia, attrs: 'autocomplete="off"' })}
+      </div>
+      ${field("alta", "tutor", "Tutor", { value: draft.tutor, attrs: 'autocomplete="off"' })}
+      ${field("alta", "contacto", "Celular del tutor", { value: draft.contacto, type: "tel", attrs: 'autocomplete="off" inputmode="tel"' })}
+      ${CarnetAltaField(draft)}
+      ${fold("alta-mas", `${ic("menu")}<b>Más datos</b>`, `
+        <fieldset>
+          <legend>Perro</legend>
+          ${field("alta", "raza", "Raza o cruza", { value: draft.raza })}
+          ${field("alta", "edad", "Edad", { value: draft.edad })}
+          ${selectField("alta", "sexo", "Sexo", [PENDIENTE, "Macho", "Hembra"], { value: draft.sexo })}
+          ${selectField("alta", "castrado", "Castrado/a", SI_NO, { value: draft.castrado })}
+        </fieldset>
+        <fieldset>
+          <legend>Contacto</legend>
+          ${field("alta", "emergencia", "Emergencia", { value: draft.emergencia, attrs: 'autocomplete="off"' })}
           ${selectField("alta", "zona", "Zona", [PENDIENTE, "Pilar", "La Lonja", "Otra zona"], { value: draft.zona })}
           ${field("alta", "referencia", "Barrio o referencia", { value: draft.referencia, attrs: 'autocomplete="off"' })}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Salud</legend>
-        <div class="coord-grid">
+        </fieldset>
+        <fieldset>
+          <legend>Salud</legend>
           ${selectField("alta", "vacunas", "Vacunas al día", SI_NO, { value: draft.vacunas })}
-          ${field("alta", "veterinario", "Veterinaria de referencia", { value: draft.veterinario })}
-          ${CarnetAltaField(draft)}
-          ${textArea("alta", "salud", "Condiciones, alergias o medicación", { value: draft.salud, hint: "Lo que dice el tutor. Sin diagnósticos propios." })}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Equipo</legend>
-        <div class="coord-grid">
+          ${field("alta", "veterinario", "Veterinaria", { value: draft.veterinario })}
+          ${textArea("alta", "salud", "Alergias o medicación", { value: draft.salud, hint: "Lo que dice el tutor." })}
+        </fieldset>
+        <fieldset>
+          <legend>Equipo</legend>
           ${selectField("alta", "sujecion", "Collar o pechera", [PENDIENTE, "Collar", "Pechera", "Collar y pechera"], { value: draft.sujecion })}
-          ${selectField("alta", "bozal", "Usa bozal", SI_NO, { value: draft.bozal })}
-          ${selectField("alta", "correa", "Tiene correa propia", SI_NO, { value: draft.correa })}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Comportamiento observado</legend>
-        <p class="coord-fieldset-note">Describí lo que se ve: qué pasó antes, qué hizo y qué pasó después. Sin etiquetas.</p>
-        <div class="coord-grid">
-          ${draft.relatoTutor ? textArea("alta", "relatoTutor", "Lo que contó el tutor en el formulario (no observado)", { value: draft.relatoTutor, attrs: "readonly" }) : ""}
-          ${textArea("alta", "conPerros", "Con otros perros", { value: draft.conPerros, span: false })}
-          ${textArea("alta", "conPersonas", "Con personas", { value: draft.conPersonas, span: false })}
-          ${textArea("alta", "estimulos", "Situaciones que lo alteran", { value: draft.estimulos, placeholder: "Ej.: motos, bicicletas, ruidos fuertes", span: false })}
+          ${selectField("alta", "bozal", "Bozal", SI_NO, { value: draft.bozal })}
+          ${selectField("alta", "correa", "Correa propia", SI_NO, { value: draft.correa })}
+        </fieldset>
+        <fieldset>
+          <legend>Conducta observada</legend>
+          ${draft.relatoTutor ? textArea("alta", "relatoTutor", "Lo que contó el tutor (no observado)", { value: draft.relatoTutor, attrs: "readonly" }) : ""}
+          ${textArea("alta", "conPerros", "Con otros perros", { value: draft.conPerros })}
+          ${textArea("alta", "conPersonas", "Con personas", { value: draft.conPersonas })}
+          ${textArea("alta", "estimulos", "Lo altera", { value: draft.estimulos, placeholder: "Ej.: motos, ruidos" })}
           ${field("alta", "noJuntar", "No juntar con", { value: draft.noJuntar, attrs: 'list="coord-dog-names" autocomplete="off"' })}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Servicio</legend>
-        <div class="coord-grid">
-          ${selectField("alta", "plan", "Plan pedido", planOptions, { value: draft.plan })}
+        </fieldset>
+        <fieldset>
+          <legend>Servicio</legend>
+          ${selectField("alta", "plan", "Plan", planOptions, { value: draft.plan })}
           ${selectField("alta", "turno", "Turno", [PENDIENTE, "Mañana", "Tarde"], { value: draft.turno })}
           ${daysField("alta", days)}
-        </div>
-      </fieldset>
-      ${altaSubiendo ? `<p class="coord-upload-status" role="status">${icon("clock", "coord-icon")}<span>Subiendo el carnet… No cierres la página.</span></p>` : ""}
+        </fieldset>
+      `, { open: Boolean(draft.pedidoId) })}
+      <datalist id="coord-dog-names">${REAL_DOGS.map((dog) => `<option value="${esc(dog.name)}"></option>`).join("")}</datalist>
+      ${altaSubiendo ? `<p class="coord-upload-status" role="status">${ic("clock")}<span>Subiendo el carnet…</span></p>` : ""}
       ${altaVaciarConfirm ? `
-        <div class="coord-confirm" role="group" aria-labelledby="coord-alta-vaciar-q">
-          <p id="coord-alta-vaciar-q"><b>¿Vaciar el formulario?</b> Se borra todo lo que escribiste en esta ficha.</p>
-          <div class="coord-actions">
-            ${button("Sí, vaciar", `id="coord-alta-vaciar-ok" data-coord-alta-clear-ok`, "primary")}
-            ${button("No, seguir", `id="coord-alta-vaciar-cancel" data-coord-alta-clear-cancel`, "ghost")}
+        <div class="cd-confirm" role="group" aria-labelledby="coord-alta-vaciar-q">
+          <p id="coord-alta-vaciar-q"><b>¿Vaciar la ficha?</b> Se borra lo escrito.</p>
+          <div class="cd-actions is-split">
+            ${button("Vaciar", `id="coord-alta-vaciar-ok" data-coord-alta-clear-ok`, "danger", "trash")}
+            ${button("No", `id="coord-alta-vaciar-cancel" data-coord-alta-clear-cancel`, "secondary")}
           </div>
-        </div>` : `
-        <div class="coord-actions">
-          ${button(altaSubiendo ? "Guardando…" : "Guardar ficha", `id="coord-alta-save" data-coord-alta-save ${altaSubiendo ? 'aria-disabled="true"' : ""}`, "primary", "plus")}
-          ${button("Vaciar formulario", `id="coord-alta-clear" data-coord-alta-clear`, "ghost")}
-        </div>`}
+        </div>` : ""}
+      <div class="cd-savebar is-row">
+        ${button("Vaciar", `id="coord-alta-clear" data-coord-alta-clear`, "ghost", "trash")}
+        <button type="button" class="coord-btn is-primary is-big" id="coord-alta-save" data-coord-alta-save ${altaSubiendo ? 'aria-disabled="true"' : ""}>${ic("checkCircle")}<span>${altaSubiendo ? "Guardando…" : "Guardar"}</span></button>
+      </div>
     </form>
-    <div class="coord-subblock">
-      <h3>Fichas cargadas <span>${fichas.length}</span></h3>
-      ${fichas.length ? `
-        <ul class="coord-card-list is-grid">
-          ${fichas.map((ficha) => {
-            const a = ficha.datos || {};
-            const dias = Array.isArray(a.dias) ? a.dias : [];
-            const ids = [...new Set([ficha.carnet?.id, ...(Array.isArray(ficha.archivos) ? ficha.archivos : [])].filter(Boolean))];
-            const carnet = ids.map((archivoId) => archivoPorId(archivoId)).find(esCarnet) || (ficha.carnet?.id ? { id: ficha.carnet.id } : null);
-            const scope = `ficha-${ficha.id}`;
-            return `
-            <li class="coord-card">
-              <div class="coord-card-head">
-                <strong>${esc(ficha.perroNombre || a.nombre || PENDIENTE)}</strong>
-                <small>Alta ${esc(fmtDate(ficha.fecha))}</small>
+  `;
+}
+
+function FichasView() {
+  const fichas = getFichas();
+  return `
+    ${SubHead("Fichas", fichas.length)}
+    ${button("Perro nuevo", `id="coord-alta-new" data-coord-alta-new`, "primary", "plus")}
+    ${fichas.length ? `
+      <ul class="cd-list is-grid">
+        ${fichas.map((ficha) => {
+          const a = ficha.datos || {};
+          const dias = Array.isArray(a.dias) ? a.dias : [];
+          const ids = [...new Set([ficha.carnet?.id, ...(Array.isArray(ficha.archivos) ? ficha.archivos : [])].filter(Boolean))];
+          const carnet = ids.map((archivoId) => archivoPorId(archivoId)).find(esCarnet) || (ficha.carnet?.id ? { id: ficha.carnet.id } : null);
+          const scope = `ficha-${ficha.id}`;
+          const nombre = ficha.perroNombre || a.nombre || PENDIENTE;
+          return `
+            <li class="cd-card">
+              <div class="cd-row">
+                ${Ava(DOG_BY_NAME.get(normalize(nombre)), nombre, "md")}
+                <div class="cd-row-main"><strong>${esc(nombre)}</strong><small>Alta ${esc(fmtDate(ficha.fecha))}</small></div>
               </div>
-              <p class="coord-badges">${badge(esc(ficha.categoria || "SIN EVALUAR"), "neutral")} ${badge("Primer paseo individual", "warn")}</p>
-              <p>${esc(!a.tamano || a.tamano === PENDIENTE ? "Tamaño pendiente" : a.tamano)} · Días: ${dias.length ? esc(daysLabel(dias).toLowerCase()) : "pendientes"} · Turno: ${esc(!a.turno || a.turno === PENDIENTE ? "pendiente" : a.turno.toLowerCase())}</p>
-              ${carnet
-                ? `<p class="coord-attach-row">${icon("fileCheck", "coord-icon")}<span><b>Carnet de vacunas adjunto</b></span>${button('Ver carnet<span class="coord-sr-only"> (se abre en otra pestaña)</span>', `data-coord-archivo-abrir="${esc(carnet.id)}" data-scope="${esc(scope)}"`, "secondary", "eye")}</p>`
-                : `<p class="coord-badges"><span class="coord-carnet is-missing">${icon("alertCircle", "coord-icon")}<span>Carnet: falta</span></span></p>`}
+              <p class="cd-chips">${chip(esc(ficha.categoria || "SIN EVALUAR"), "neutral")}${chip("1.er paseo individual", "warn")}${carnet ? chip("Carnet", "ok", "check") : chip("Sin carnet", "warn")}</p>
+              <p class="cd-line">${esc(!a.tamano || a.tamano === PENDIENTE ? "Tamaño ?" : a.tamano)} · ${dias.length ? esc(daysLabel(dias)) : "Días ?"} · ${esc(!a.turno || a.turno === PENDIENTE ? "Turno ?" : a.turno)}</p>
               ${fileFeedback(scope)}
               ${whoLine(ficha)}
-              <div class="coord-actions">
-                ${button("Copiar ficha", `data-coord-alta-copy="${esc(ficha.id)}"`, "ghost", "copy")}
-                ${canDelete(ficha) ? button("Borrar", `data-coord-alta-delete="${esc(ficha.id)}"`, "ghost") : ""}
+              <div class="cd-actions">
+                ${carnet ? button('Carnet<span class="coord-sr-only"> (se abre en otra pestaña)</span>', `data-coord-archivo-abrir="${esc(carnet.id)}" data-scope="${esc(scope)}"`, "secondary", "eye") : ""}
+                ${button("Copiar", `data-coord-alta-copy="${esc(ficha.id)}"`, "ghost", "copy")}
+                ${canDelete(ficha) ? button("Borrar", `data-coord-alta-delete="${esc(ficha.id)}"`, "danger", "trash") : ""}
               </div>
             </li>`;
-          }).join("")}
-        </ul>` : `<p class="coord-empty is-small">${loaded.has("fichas") ? "Todavía no hay perros nuevos cargados." : "Cargando fichas…"}</p>`}
-    </div>
+        }).join("")}
+      </ul>` : emptyState(loaded.has("fichas") ? "Todavía no hay fichas." : "Cargando…", loaded.has("fichas") ? "userPlus" : "clock")}
   `;
-  return section({
-    key: "alta",
-    id: "coord-alta",
-    iconName: "userPlus",
-    title: "Alta de perro nuevo",
-    intro: "Ficha completa. Arranca SIN EVALUAR y con primer paseo individual.",
-    badges: fichas.length ? badge(`${fichas.length} ${fichas.length === 1 ? "cargada" : "cargadas"}`, "neutral") : "",
-    body,
-  });
 }
 
 function altaText(ficha) {
@@ -2740,7 +2986,7 @@ function draftFromPedido(pedido) {
   return {
     pedidoId: pedido.id,
     nombre: d.perro || "",
-    tamano: ["Pequeño", "Mediano", "Grande"].includes(d.tamano) ? d.tamano : PENDIENTE,
+    tamano: ["Pequeño", "Mediano", "Grande"].includes(d.tamano) ? d.tamano : "",
     raza: d.raza || "",
     edad: d.edad || "",
     tutor: d.responsable || "",
@@ -2753,7 +2999,7 @@ function draftFromPedido(pedido) {
   };
 }
 
-/* ---------- 9. Observaciones e incidentes (solo lectura) ---------- */
+/* ---------- Incidentes y observaciones (solo lectura) ---------- */
 
 function dogNameFor(record) {
   if (record.perroNombre) return record.perroNombre;
@@ -2767,62 +3013,43 @@ function byMoment(a, b) {
 }
 
 function ActivityItem(record, kind) {
-  const dog = dogNameFor(record);
+  const dogName = dogNameFor(record);
+  const firstId = record.perroId || (Array.isArray(record.perros) ? record.perros[0] : "");
+  const dog = (firstId && DOG_BY_ID.get(firstId)) || DOG_BY_NAME.get(normalize(dogName)) || null;
   const title = record.titulo || (kind === "incidente" ? "Incidente" : "Observación");
   const riesgo = record.riesgo ? String(record.riesgo) : "";
   const rows = kind === "incidente"
-    ? [["Perro", dog], ["Lugar", record.lugar], ["Barrio", record.barrio], ["Antes", record.antes], ["Conducta", record.conducta], ["Acción", record.accion], ["Después", record.despues], ["Lesiones", record.lesiones, record.lesiones && !/^no/i.test(record.lesiones) ? "alert" : ""], ["Protocolo", record.protocolo]]
-    : [["Perro", dog], ["Lugar", record.lugar], ["Estímulo", record.estimulo], ["Reacción", record.reaccion], ["Acción", record.accion], ["Resultado", record.resultado]];
+    ? [["Lugar", [record.lugar, record.barrio].filter(Boolean).join(" · ")], ["Antes", record.antes], ["Conducta", record.conducta], ["Acción", record.accion], ["Después", record.despues], ["Lesiones", record.lesiones, record.lesiones && !/^no/i.test(record.lesiones) ? "alert" : ""], ["Protocolo", record.protocolo]]
+    : [["Lugar", record.lugar], ["Estímulo", record.estimulo], ["Reacción", record.reaccion], ["Acción", record.accion], ["Resultado", record.resultado]];
+  const memKey = `act-${record.id || title}`;
   return `
-    <li class="coord-card coord-feed-item ${kind === "incidente" ? "is-incident" : ""}">
-      <div class="coord-card-head">
-        <strong>${esc(title)}</strong>
-        <small>${esc(fmtDate(record.fecha))}${record.hora ? ` · ${esc(record.hora)}` : ""}</small>
+    <li class="cd-card ${kind === "incidente" ? "is-incident" : ""}">
+      <div class="cd-row">
+        ${Ava(dog, dogName || title, "md")}
+        <div class="cd-row-main"><strong>${esc(dogName || title)}</strong><small>${esc(fmtDate(record.fecha).slice(0, 5))}${record.hora ? ` · ${esc(record.hora)}` : ""}</small></div>
       </div>
-      ${riesgo ? `<p class="coord-badges">${badge(`Riesgo: ${esc(riesgo)}`, /alto|grave/i.test(riesgo) ? "alert" : "warn")}</p>` : ""}
-      ${dataList(rows)}
-      ${whoLine(record)}
+      <p class="cd-chips">${chip(kind === "incidente" ? "Incidente" : "Observación", kind === "incidente" ? "alert" : "info")}${riesgo ? chip(`Riesgo ${esc(riesgo)}`, /alto|grave/i.test(riesgo) ? "alert" : "warn") : ""}</p>
+      ${dogName && record.titulo ? `<p class="cd-line">${esc(record.titulo)}</p>` : ""}
+      ${cardMore(memKey, "Detalle", `${dataList(rows)}${whoLine(record)}`)}
     </li>
   `;
 }
 
-function ActivitySection() {
+function IncidentesView() {
   const desde = haceDias(6);
   const incidentes = cached("incidentes").filter((r) => !r.fecha || r.fecha >= desde).sort(byMoment);
   const observaciones = cached("observaciones").filter((r) => !r.fecha || r.fecha >= desde).sort(byMoment);
-  const body = `
-    <p class="coord-note">${icon("eye", "coord-icon")}<span>Solo lectura. Las cargan los paseadores y supervisión. Últimos 7 días (desde el ${esc(fmtDate(desde))}).</span></p>
-    <div class="coord-feed">
-      <section class="coord-subblock" aria-labelledby="coord-feed-inc">
-        <h3 id="coord-feed-inc">Incidentes <span>${incidentes.length}</span></h3>
-        ${incidentes.length ? `<ul class="coord-card-list">${incidentes.map((r) => ActivityItem(r, "incidente")).join("")}</ul>` : `<p class="coord-empty is-small">${loaded.has("incidentes") ? "Sin incidentes en los últimos 7 días." : "Cargando…"}</p>`}
-      </section>
-      <section class="coord-subblock" aria-labelledby="coord-feed-obs">
-        <h3 id="coord-feed-obs">Observaciones <span>${observaciones.length}</span></h3>
-        ${observaciones.length ? `<ul class="coord-card-list">${observaciones.map((r) => ActivityItem(r, "observacion")).join("")}</ul>` : `<p class="coord-empty is-small">${loaded.has("observaciones") ? "Sin observaciones en los últimos 7 días." : "Cargando…"}</p>`}
-      </section>
-    </div>
+  return `
+    ${SubHead("Incidentes", incidentes.length)}
+    <p class="cd-muted">Últimos 7 días.</p>
+    ${incidentes.length ? `<ul class="cd-list is-grid">${incidentes.map((r) => ActivityItem(r, "incidente")).join("")}</ul>` : emptyState(loaded.has("incidentes") ? "Sin incidentes." : "Cargando…", loaded.has("incidentes") ? "checkCircle" : "clock")}
+    ${fold("observaciones", `Observaciones (${observaciones.length})`, observaciones.length ? `<ul class="cd-list is-grid">${observaciones.map((r) => ActivityItem(r, "observacion")).join("")}</ul>` : `<p class="cd-muted">${loaded.has("observaciones") ? "Sin observaciones." : "Cargando…"}</p>`)}
   `;
-  return section({
-    key: "actividad",
-    id: "coord-actividad",
-    iconName: "activity",
-    title: "Observaciones e incidentes",
-    intro: "Lo que registró el equipo en la calle en los últimos 7 días.",
-    badges: `${incidentes.length ? badge(`${incidentes.length} ${incidentes.length === 1 ? "incidente" : "incidentes"}`, "alert") : ""}${observaciones.length ? badge(`${observaciones.length} ${observaciones.length === 1 ? "observación" : "observaciones"}`, "neutral") : ""}`,
-    body,
-  });
 }
 
 /* ------------------------------------------------------------------ */
 /* Eventos                                                             */
 /* ------------------------------------------------------------------ */
-
-function openAndGo(key, id, focusSelector) {
-  setOpen(key, true);
-  render();
-  goTo(id, focusSelector);
-}
 
 async function copyText(text) {
   try {
@@ -2849,9 +3076,9 @@ async function copyText(text) {
   }
 }
 
-function copyAndTell(text, sectionKey, okText) {
+function copyAndTell(text, _sectionKey, okText) {
   copyText(text).then((ok) => {
-    setFlash(sectionKey, ok ? okText : "No se pudo copiar. Probá de nuevo o copialo a mano.", ok ? "ok" : "error");
+    showToast(ok ? okText : "No se pudo copiar. Probá de nuevo.", { tone: ok ? "ok" : "error" });
     scheduleRerender();
   });
 }
@@ -2860,17 +3087,16 @@ function findIn(list, id) {
   return list.find((item) => item.id === id);
 }
 
-function showRoutesDay(fecha) {
-  rutasFecha = fecha;
-  setRutasVista("dia");
+// Abre el editor (pantalla completa) y lleva arriba.
+function showEditor(focusId = "coord-view-title") {
   render();
-  goTo("coord-rutas");
+  toTop(focusId);
 }
 
-async function saveEditor(destino) {
+async function saveEditor() {
   const error = editorError();
   if (error) {
-    setFlash("editor", error[0], "error");
+    showToast(error[0], { tone: "error" });
     render();
     focusById(error[1]);
     return;
@@ -2878,30 +3104,35 @@ async function saveEditor(destino) {
   const record = routeRecordFromEditor();
   const e = editor;
   let saved;
-  if (destino === "plantilla") {
-    saved = await guardar("plantillas", { id: plantillaId(record.ruta, record.dia), ...record }, { section: "rutas", ok: `${record.ruta} del ${record.dia.toLowerCase()} guardada en la semana. Se repite todas las semanas.` });
+  let fecha = "";
+  if (e.destino === "semana") {
+    saved = await guardar("plantillas", { id: plantillaId(record.ruta, record.dia), ...record }, { ok: `${record.ruta}: guardada para todos los ${record.dia.toLowerCase()}.` });
+    // Si ese día ya tenía un cambio propio, queda igual a lo que se guardó (si no, seguiría mandando el viejo).
+    if (saved && e.modo === "dia" && e.existeDia) {
+      await registros.save("rutas", { id: rutaDiaId(e.fecha, record.ruta), fecha: e.fecha, ...record, dia: dayNameISO(e.fecha), basadaEn: e.plantillaId || "" }).catch(() => {});
+    }
+    fecha = e.modo === "dia" ? e.fecha : "";
   } else {
-    const fecha = e.modo === "plantilla" ? e.soloDia : e.fecha;
+    fecha = editorFechaDia();
     if (!isISODate(fecha)) {
-      setFlash("editor", "Elegí el día.", "error");
+      showToast("Elegí el día.", { tone: "error" });
       render();
+      focusById("coord-ed-solodia");
       return;
     }
-    saved = await guardar("rutas", { id: rutaDiaId(fecha, record.ruta), fecha, ...record, dia: dayNameISO(fecha), basadaEn: e.plantillaId || "" }, { section: "rutas", ok: `${record.ruta}: cambio guardado solo para el ${dayLabel(fecha).toLowerCase()}. La semana no cambió.` });
-    if (saved && e.solicitudId) {
-      const sol = getSolicitudes().find((s) => s.id === e.solicitudId);
-      // `solicitudes` es por fecha: el servidor pide la fecha también al actualizar.
-      await guardar("solicitudes", { id: e.solicitudId, fecha: isISODate(sol?.fecha) ? sol.fecha : fecha, estado: "aplicado", respuesta: e.respuesta.trim() || `Aplicado en la ruta ${record.ruta} del ${fmtDate(fecha)}.` }, { section: "rutas", ok: `Cambio aplicado y pedido del supervisor marcado como aplicado.` });
-    }
-    if (saved) {
-      rutasFecha = fecha;
-      setRutasVista("dia");
-    }
+    saved = await guardar("rutas", { id: rutaDiaId(fecha, record.ruta), fecha, ...record, dia: dayNameISO(fecha), basadaEn: e.plantillaId || "" }, { ok: `${record.ruta}: guardada solo para el ${shortDay(fecha)}. La semana no cambió.` });
+  }
+  if (saved && e.solicitudId) {
+    const sol = getSolicitudes().find((s) => s.id === e.solicitudId);
+    // `solicitudes` es por fecha: el servidor pide la fecha también al actualizar.
+    await guardar("solicitudes", { id: e.solicitudId, fecha: isISODate(sol?.fecha) ? sol.fecha : fecha || hoyAR(), estado: "aplicado", respuesta: e.respuesta.trim() || `Aplicado en ${record.ruta}${fecha ? ` del ${fmtDate(fecha)}` : " (toda la semana)"}.` }, { ok: "Cambio aplicado. El supervisor ya lo ve." });
   }
   if (saved && editor === e) {
+    if (fecha) rutasFecha = fecha;
+    if (getView().tab === "rutas") setRutasVista(e.destino === "semana" && e.modo === "plantilla" ? "semana" : "dia");
     closeEditor();
     render();
-    goTo("coord-rutas");
+    toTop();
   }
 }
 
@@ -2919,7 +3150,7 @@ async function subirDocumento(c) {
   };
   if (!s.file) return fallar("Elegí la foto o el PDF.", `coord-subida-archivo-${id}`);
   if (s.tipo === TIPO_CARNET && perros.length > 1 && !s.perroId) return fallar("Elegí de qué perro es el carnet.", `coord-subida-perro-${id}`);
-  if (sinSenal()) return fallar("No se subió porque no hay señal. Tocá «Subir» de nuevo cuando vuelva.", `coord-subida-ok-${id}`, true);
+  if (sinSenal()) return fallar("Sin señal: tocá «Subir» cuando vuelva.", `coord-subida-ok-${id}`, true);
   s.estado = "subiendo";
   s.error = "";
   announce("Subiendo el archivo.");
@@ -2932,8 +3163,8 @@ async function subirDocumento(c) {
     const vinculados = [...new Set([...(Array.isArray(actual.archivos) ? actual.archivos : []), registro.id])];
     await registros.save("clientes", { id, archivos: vinculados }).catch(() => {});
     if (subida === s) subida = null;
-    const que = registro.tipo === TIPO_CARNET ? "El carnet de vacunas" : "El documento";
-    setFileFlash(`cliente-${id}`, `Listo: ${que.toLowerCase()}${dog ? ` de ${dog.name}` : ""} quedó guardado${registro.ubicacion === "drive" ? " en Drive" : ""} y vinculado a ${c.nombre || "este cliente"}.`);
+    const que = registro.tipo === TIPO_CARNET ? "Carnet" : "Documento";
+    setFileFlash(`cliente-${id}`, `${que}${dog ? ` de ${dog.name}` : ""} guardado${registro.ubicacion === "drive" ? " en Drive" : ""}.`);
   } catch (error) {
     s.estado = "";
     s.error = mensajeArchivo(error, "subir");
@@ -2945,9 +3176,39 @@ async function subirDocumento(c) {
   }
 }
 
+// Foto del perro: sube la grande y guarda la miniatura (necesita señal).
+async function subirFoto(dogId, file) {
+  const dog = DOG_BY_ID.get(dogId);
+  if (!dog || !file) return;
+  if (sinSenal()) {
+    showToast("Sin señal: la foto necesita señal.", { tone: "error" });
+    scheduleRerender();
+    return;
+  }
+  fotoBusy.add(dogId);
+  announce(`Subiendo la foto de ${dog.name}.`);
+  scheduleRerender();
+  try {
+    await fotosPerros.subir(dogId, dog.name, file);
+    showToast(`Foto de ${dog.name} guardada.`);
+  } catch (error) {
+    showToast(`La foto no se subió: ${mensajeArchivo(error, "subir")}`, { tone: "error" });
+  } finally {
+    fotoBusy.delete(dogId);
+    scheduleRerender();
+  }
+}
+
+// Cambios de estado que se pueden deshacer: guardan y ofrecen «Deshacer» 5 segundos.
+function guardarConDeshacer(col, data, previo, ok, okDeshacer = "Listo, quedó como estaba.") {
+  return guardar(col, data, { ok, undo: () => run(`undo-${col}-${data.id}`, () => guardar(col, previo, { ok: okDeshacer })) });
+}
+
 function handleCoordinadorClick(event) {
   if (!event.target.closest(".coord-shell")) return false;
   const t = event.target;
+
+  /* ---------- Generales ---------- */
 
   const toggle = t.closest("[data-coord-toggle]");
   if (toggle) {
@@ -2964,6 +3225,22 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
+  if (t.closest("[data-coord-toast-undo]")) {
+    const undo = toast?.undo;
+    toast = null;
+    window.clearTimeout(toastTimer);
+    if (undo) undo();
+    scheduleRerender();
+    return true;
+  }
+
+  if (t.closest("[data-coord-toast-x]")) {
+    toast = null;
+    window.clearTimeout(toastTimer);
+    scheduleRerender();
+    return true;
+  }
+
   if (t.closest("[data-coord-retry]")) {
     retrySync();
     migrationDone = false;
@@ -2971,33 +3248,53 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
-  const goto = t.closest("[data-coord-goto]");
-  if (goto) {
-    goTo(goto.dataset.coordGoto);
+  const go = t.closest("[data-coord-go]");
+  if (go) {
+    const target = go.dataset.coordGo;
+    goView(target);
+    clienteFormOpen = false;
+    avisoFormOpen = false;
+    pedidoFormOpen = false;
+    altaFormOpen = false;
+    altaVaciarConfirm = false;
+    rechazoAbierto = "";
+    render();
+    toTop();
     return true;
   }
 
-  const gotoPedido = t.closest("[data-coord-goto-pedido]");
-  if (gotoPedido) {
-    openAndGo("pedidos", `coord-pedido-${gotoPedido.dataset.coordGotoPedido}`);
+  const goRutas = t.closest("[data-coord-go-rutas]");
+  if (goRutas) {
+    goView("rutas");
+    setRutasVista(goRutas.dataset.coordGoRutas);
+    render();
+    toTop();
     return true;
   }
 
-  const openSection = t.closest("[data-coord-open]");
-  if (openSection) {
-    const key = openSection.dataset.coordOpen;
-    const focus = { avisos: "#coord-aviso-barrio", clientes: "#coord-clientes-buscar" }[key] || null;
-    openAndGo(key, `coord-${key}`, focus);
+  // Un campo se completa con un toque (barrio, fecha…).
+  const setField = t.closest("[data-coord-set-field]");
+  if (setField) {
+    const input = document.getElementById(setField.dataset.coordSetField);
+    if (input) {
+      input.value = setField.dataset.value;
+      const formEl = input.closest("[data-coord-form]");
+      if (formEl) saveDraft(formEl.dataset.coordForm, serializeForm(formEl));
+      const keep = setField.closest(".cd-chiprow")?.querySelectorAll(".cd-pill") || [];
+      keep.forEach((pill) => pill.setAttribute("aria-pressed", String(pill === setField)));
+      announce(`${setField.textContent.trim()} elegido.`);
+    }
     return true;
   }
 
-  const undo = t.closest("[data-coord-undo]");
-  if (undo) {
-    const deleted = lastDeleted;
-    lastDeleted = null;
-    if (deleted) {
-      const { pendiente, ...record } = deleted.record;
-      run("undo", () => guardar(deleted.col, record, { section: deleted.section, ok: "Listo, se recuperó." }));
+  /* ---------- Fotos ---------- */
+
+  // La hora grande abre el selector del teléfono también en la compu.
+  if (t.matches?.("input.cd-hora")) {
+    try {
+      t.showPicker?.();
+    } catch {
+      // Algunos navegadores no lo permiten: se escribe a mano.
     }
     return true;
   }
@@ -3015,13 +3312,23 @@ function handleCoordinadorClick(event) {
     const c = findIn(getClientes(), subir.dataset.coordSubir);
     if (c) {
       if (subida?.estado === "subiendo") {
-        announceError("Esperá a que termine la subida que está en curso.");
+        announceError("Esperá a que termine la subida en curso.");
         return true;
       }
       abrirSubida(c);
+      openCards.add(`cli-${c.id}`);
       render();
-      focusById(`coord-subida-tipo-${c.id}`);
+      focusById(`coord-subida-tipo-${c.id}-carnet`);
     }
+    return true;
+  }
+
+  const subidaSet = t.closest("[data-coord-subida-set]");
+  if (subidaSet && subida) {
+    subida[subidaSet.dataset.coordSubidaSet] = subidaSet.dataset.value;
+    subida.error = "";
+    render();
+    focusById(subidaSet.id);
     return true;
   }
 
@@ -3047,7 +3354,7 @@ function handleCoordinadorClick(event) {
 
   if (t.closest("[data-coord-filtro-carnet]")) {
     soloSinCarnet = !soloSinCarnet;
-    announce(soloSinCarnet ? "Mostrando solo los perros sin carnet de vacunas." : "Mostrando todos los perros.");
+    announce(soloSinCarnet ? "Solo perros sin carnet." : "Todos los perros.");
     render();
     focusById("coord-filtro-carnet");
     return true;
@@ -3065,11 +3372,11 @@ function handleCoordinadorClick(event) {
 
   const verDia = t.closest("[data-coord-ver-dia]");
   if (verDia) {
-    if (editor) {
-      goTo("coord-rutas");
-      return true;
-    }
-    showRoutesDay(verDia.dataset.coordVerDia);
+    rutasFecha = verDia.dataset.coordVerDia;
+    setRutasVista("dia");
+    if (getView().tab !== "rutas") goView("rutas");
+    render();
+    focusById(verDia.id || "coord-view-title");
     return true;
   }
 
@@ -3106,9 +3413,9 @@ function handleCoordinadorClick(event) {
       }
       cargaConfirm = false;
       cargaProgreso = "";
-      if (lastError) setFlash("rutas", `Se guardaron ${ok} de ${base.length} rutas. Error: ${lastError}`, "error");
-      else setFlash("rutas", `Listo: ${ok} rutas cargadas en la semana.${pend ? " Sin señal: se envían cuando vuelva." : ""}`);
-      setRutasVista("semana");
+      if (lastError) showToast(`Se guardaron ${ok} de ${base.length} rutas. Error: ${lastError}`, { tone: "error" });
+      else showToast(`Listo: ${ok} rutas cargadas.${pend ? " Se envían con señal." : ""}`);
+      setRutasVista("dia");
       scheduleRerender();
     });
     return true;
@@ -3119,8 +3426,7 @@ function handleCoordinadorClick(event) {
     const p = findIn(getPlantillas(), editPlantilla.dataset.coordEditPlantilla);
     if (p) {
       openEditor(p, { modo: "plantilla" });
-      render();
-      goTo("coord-editor");
+      showEditor();
     }
     return true;
   }
@@ -3129,8 +3435,7 @@ function handleCoordinadorClick(event) {
   if (newRoute) {
     const { dia, turno } = newRoute.dataset;
     openEditor({ ruta: nextRouteCode(plantillasDe(dia), turno), dia, turno, paradas: [], supervisor: "" }, { modo: "plantilla", nuevo: true });
-    render();
-    goTo("coord-editor", "#coord-ed-ruta");
+    showEditor("coord-ed-ruta");
     return true;
   }
 
@@ -3140,8 +3445,7 @@ function handleCoordinadorClick(event) {
     const r = effectiveRoutes(fecha).find((x) => x.ruta === editDia.dataset.coordEditDia);
     if (r) {
       openEditor(r, { modo: "dia", fecha });
-      render();
-      goTo("coord-editor");
+      showEditor();
     }
     return true;
   }
@@ -3150,8 +3454,7 @@ function handleCoordinadorClick(event) {
   if (newDia) {
     const { fecha, turno } = newDia.dataset;
     openEditor({ ruta: nextRouteCode(effectiveRoutes(fecha), turno), dia: dayNameISO(fecha), turno, paradas: [] }, { modo: "dia", fecha, nuevo: true });
-    render();
-    goTo("coord-editor", "#coord-ed-ruta");
+    showEditor("coord-ed-ruta");
     return true;
   }
 
@@ -3159,7 +3462,7 @@ function handleCoordinadorClick(event) {
   if (copyRuta) {
     const fecha = copyRuta.dataset.fecha;
     const r = effectiveRoutes(fecha).find((x) => x.ruta === copyRuta.dataset.coordCopyRuta);
-    if (r) copyAndTell(routeText(r, { fecha }), "rutas", `${r.ruta} copiada. Pegala en el grupo de WhatsApp del equipo.`);
+    if (r) copyAndTell(routeText(r, { fecha }), "rutas", `${r.ruta} copiada. Pegala en WhatsApp.`);
     return true;
   }
 
@@ -3167,20 +3470,49 @@ function handleCoordinadorClick(event) {
   if (copyDia) {
     const fecha = copyDia.dataset.coordCopyDia;
     const text = effectiveRoutes(fecha).map((r) => routeText(r, { fecha })).join("\n\n");
-    copyAndTell(text, "rutas", `Rutas del ${dayLabel(fecha).toLowerCase()} copiadas.`);
+    copyAndTell(text, "rutas", `Rutas del ${shortDay(fecha)} copiadas.`);
     return true;
   }
 
   // Editor
   if (editor) {
+    if (t.closest("[data-coord-ed-picker]")) {
+      editor.picker = true;
+      editor.agregados = 0;
+      editorQuery = "";
+      editorHora = "";
+      showEditor("coord-view-title");
+      return true;
+    }
+    if (t.closest("[data-coord-ed-picker-close]")) {
+      editor.picker = false;
+      editorQuery = "";
+      editorHora = "";
+      render();
+      focusById("coord-ed-picker");
+      return true;
+    }
     const addDog = t.closest("[data-coord-add-dog]");
     if (addDog) {
       const dog = DOG_BY_ID.get(addDog.dataset.coordAddDog);
       if (dog) {
-        addStop(dog);
-        announce(`${dog.name} agregado a las ${editor.paradas[editor.paradas.length - 1].hora}.`);
+        addStop(dog, "", { keepQuery: true });
+        editor.agregados += 1;
+        const hora = editor.paradas[editor.paradas.length - 1].hora;
+        const ed = editor;
+        const index = editor.paradas.length - 1;
+        showToast(`${dog.name} agregado a las ${hora}.`, {
+          local: true,
+          undo: () => {
+            if (editor === ed && ed.paradas[index]?.perroId === dog.id) {
+              ed.paradas.splice(index, 1);
+              ed.agregados = Math.max(0, ed.agregados - 1);
+              announce(`${dog.name} quitado.`);
+            }
+          },
+        });
         render();
-        focusById("coord-ed-buscar");
+        focusById(`coord-add-${dog.id}`);
       }
       return true;
     }
@@ -3188,9 +3520,37 @@ function handleCoordinadorClick(event) {
       const nombre = editorQuery.trim();
       if (nombre) {
         addStop(null, nombre);
-        announce(`${nombre} agregado como perro sin ficha.`);
+        editor.agregados += 1;
+        showToast(`${nombre} agregado (sin ficha).`);
         render();
         focusById("coord-ed-buscar");
+      }
+      return true;
+    }
+    const edSet = t.closest("[data-coord-ed-set]");
+    if (edSet) {
+      editor[edSet.dataset.coordEdSet] = edSet.dataset.value;
+      editor.sucio = true;
+      render();
+      focusById(edSet.id);
+      return true;
+    }
+    const destino = t.closest("[data-coord-ed-destino]");
+    if (destino) {
+      editor.destino = destino.dataset.coordEdDestino === "semana" ? "semana" : "dia";
+      announce(editor.destino === "semana" ? "Se guarda para toda la semana." : "Se guarda solo para un día.");
+      render();
+      focusById(destino.id);
+      return true;
+    }
+    const minBtn = t.closest("[data-coord-stop-min]");
+    if (minBtn) {
+      const stop = editor.paradas[Number(minBtn.dataset.coordStopMin)];
+      if (stop) {
+        stop.minutos = Number(minBtn.dataset.value) || 45;
+        editor.sucio = true;
+        render();
+        focusById(minBtn.id);
       }
       return true;
     }
@@ -3205,7 +3565,7 @@ function handleCoordinadorClick(event) {
         render();
         const target = document.getElementById(`coord-ed-${up ? "up" : "down"}-${j}`);
         focusById(target && !target.disabled ? target.id : `coord-ed-hora-${j}`);
-        announce(`${editor.paradas[j].perroNombre} ahora es la parada ${j + 1}.`);
+        announce(`${editor.paradas[j].perroNombre} ahora es el ${j + 1}.`);
       }
       return true;
     }
@@ -3214,55 +3574,70 @@ function handleCoordinadorClick(event) {
       const i = Number(del.dataset.coordStopDel);
       const [removed] = editor.paradas.splice(i, 1);
       editor.sucio = true;
-      announce(`${removed?.perroNombre || "Perro"} quitado de la ruta.`);
+      const ed = editor;
+      showToast(`${removed?.perroNombre || "Perro"} quitado.`, {
+        local: true,
+        undo: () => {
+          if (editor === ed && removed) {
+            ed.paradas.splice(Math.min(i, ed.paradas.length), 0, removed);
+            announce(`${removed.perroNombre} volvió a la ruta.`);
+          }
+        },
+      });
       render();
-      focusById(editor.paradas.length ? `coord-ed-hora-${Math.min(i, editor.paradas.length - 1)}` : "coord-ed-buscar");
+      focusById(editor.paradas.length ? `coord-ed-del-${Math.min(i, editor.paradas.length - 1)}` : "coord-ed-picker");
       return true;
     }
     if (t.closest("[data-coord-ed-sort]")) {
       sortStops();
-      announce("Paradas ordenadas por hora.");
+      announce("Ordenados por hora.");
       render();
       focusById("coord-ed-sort");
       return true;
     }
-    const save = t.closest("[data-coord-ed-save]");
-    if (save) {
-      run("editor-save", () => saveEditor(save.dataset.coordEdSave));
+    if (t.closest("[data-coord-ed-save]")) {
+      // Desde la grilla de fotos también se guarda (un toque menos); si falta algo, vuelve a la ruta.
+      if (editor.picker) {
+        editor.picker = false;
+        editorQuery = "";
+        editorHora = "";
+      }
+      run("editor-save", () => saveEditor());
       return true;
     }
     if (t.closest("[data-coord-ed-revert]")) {
       const record = editor.existeDia;
       run("editor-revert", async () => {
-        const ok = await borrar("rutas", record, { section: "rutas", ok: `${record.ruta} del ${fmtDate(record.fecha)} vuelve a ser igual que la semana.`, undo: false });
+        const ok = await borrar("rutas", record, { ok: `${record.ruta} del ${shortDay(record.fecha)}: igual que la semana.` });
         if (ok) {
           closeEditor();
           scheduleRerender();
+          toTop();
         }
       });
       return true;
     }
     if (t.closest("[data-coord-ed-copy]")) {
       const text = routeText(routeRecordFromEditor(), editor.modo === "dia" ? { fecha: editor.fecha } : {});
-      copyAndTell(text, "editor", "Ruta copiada. Pegala en el grupo de WhatsApp del equipo.");
+      copyAndTell(text, "editor", "Ruta copiada. Pegala en WhatsApp.");
       return true;
     }
     if (t.closest("[data-coord-ed-close]")) {
       if (editor.sucio) {
         editorConfirm = "salir";
         render();
-        focusById("coord-ed-close-cancel");
+        toTop("coord-ed-close-cancel");
       } else {
         closeEditor();
         render();
-        goTo("coord-rutas");
+        toTop();
       }
       return true;
     }
     if (t.closest("[data-coord-ed-close-ok]")) {
       closeEditor();
       render();
-      goTo("coord-rutas");
+      toTop();
       return true;
     }
     if (t.closest("[data-coord-ed-close-cancel]")) {
@@ -3279,15 +3654,8 @@ function handleCoordinadorClick(event) {
   if (aplicar) {
     const s = findIn(getSolicitudes(), aplicar.dataset.coordSolAplicar);
     if (!s) return true;
-    if (editor?.sucio && editor.solicitudId !== s.id) {
-      setFlash("editor", "Primero guardá o cerrá la ruta que estás editando.", "error");
-      render();
-      goTo("coord-editor");
-      return true;
-    }
     aplicarSolicitud(s);
-    render();
-    goTo("coord-editor");
+    showEditor();
     return true;
   }
 
@@ -3295,7 +3663,7 @@ function handleCoordinadorClick(event) {
   if (rechazar) {
     rechazoAbierto = rechazar.dataset.coordSolRechazar;
     render();
-    focusById(`coord-rechazo-${rechazoAbierto}`);
+    focusById(`coord-rapido-${rechazoAbierto}-0`);
     return true;
   }
 
@@ -3307,23 +3675,23 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
+  const rapido = t.closest("[data-coord-sol-rapido]");
   const rechazarOk = t.closest("[data-coord-sol-rechazar-ok]");
-  if (rechazarOk) {
-    const id = rechazarOk.dataset.coordSolRechazarOk;
+  if (rapido || rechazarOk) {
+    const id = rapido ? rapido.dataset.coordSolRapido : rechazarOk.dataset.coordSolRechazarOk;
     const area = document.getElementById(`coord-rechazo-${id}`);
-    const respuesta = (area?.value || rechazos[id] || "").trim();
-    const inSection = Boolean(t.closest("#coord-solicitudes"));
-    const sectionKey = inSection ? "solicitudesTodas" : "solicitudes";
+    const respuesta = (rapido ? rapido.dataset.texto : area?.value || rechazos[id] || "").trim();
     if (respuesta.length < 3) {
-      setFlash(sectionKey, "Escribí una respuesta corta para el supervisor.", "error");
       rechazos[id] = respuesta;
+      showToast("Elegí una respuesta o escribila.", { tone: "error" });
       render();
       focusById(`coord-rechazo-${id}`);
       return true;
     }
     const sol = findIn(getSolicitudes(), id);
+    const fecha = isISODate(sol?.fecha) ? sol.fecha : hoyAR();
     run(`sol-${id}`, async () => {
-      const saved = await guardar("solicitudes", { id, fecha: isISODate(sol?.fecha) ? sol.fecha : hoyAR(), estado: "rechazado", respuesta }, { section: sectionKey, ok: "Pedido rechazado. El supervisor ve tu respuesta." });
+      const saved = await guardarConDeshacer("solicitudes", { id, fecha, estado: "rechazado", respuesta }, { id, fecha, estado: "pendiente", respuesta: sol?.respuesta || "" }, "Rechazado. El supervisor ve tu respuesta.", "Volvió a pendiente.");
       if (saved) {
         delete rechazos[id];
         rechazoAbierto = "";
@@ -3334,12 +3702,34 @@ function handleCoordinadorClick(event) {
 
   /* ---------- Clientes ---------- */
 
+  if (t.closest("[data-coord-cliente-new]")) {
+    clearDraft("cliente");
+    clienteFormOpen = true;
+    render();
+    toTop("coord-cliente-nombre");
+    return true;
+  }
+
+  const verCliente = t.closest("[data-coord-ver-cliente]");
+  if (verCliente) {
+    const c = findIn(getClientes(), verCliente.dataset.coordVerCliente);
+    if (c) {
+      clienteQuery = c.nombre || "";
+      openCards.add(`cli-${c.id}`);
+      goView("clientes");
+      render();
+      toTop(`coord-cli-edit-${c.id}`);
+    }
+    return true;
+  }
+
   if (t.closest("[data-coord-cliente-save]")) {
-    const form = t.closest("[data-coord-form]");
+    const form = document.getElementById("coord-cliente-form");
+    if (!form) return true;
     const values = serializeForm(form);
     saveDraft("cliente", values);
     if (!values.nombre?.trim()) {
-      setFlash("clientes", "Falta el nombre del tutor.", "error");
+      showToast("Falta el nombre del tutor.", { tone: "error" });
       render();
       focusById("coord-cliente-nombre");
       return true;
@@ -3373,9 +3763,12 @@ function handleCoordinadorClick(event) {
     }
     if (Object.keys(asignados).length) data.archivosPerro = asignados;
     run("cliente-save", async () => {
-      const saved = await guardar("clientes", data, { section: "clientes", ok: values.id ? `Cambios de ${data.nombre} guardados.` : `${data.nombre} quedó cargado como cliente.` });
+      const saved = await guardar("clientes", data, { ok: values.id ? `${data.nombre}: cambios guardados.` : `${data.nombre}: cliente cargado.` });
       if (saved) {
         clearDraft("cliente");
+        clienteFormOpen = false;
+        scheduleRerender();
+        toTop();
         if (values.pedidoId && !values.id) {
           const pedido = findIn(getPedidos(), values.pedidoId);
           if (pedido && estadoDe(pedido) === "nuevo") await registros.save("pedidos", { id: pedido.id, estado: "en-curso" }).catch(() => {});
@@ -3387,9 +3780,9 @@ function handleCoordinadorClick(event) {
 
   if (t.closest("[data-coord-cliente-cancel]")) {
     clearDraft("cliente");
-    setFlash("clientes", "Formulario vacío.");
+    clienteFormOpen = false;
     render();
-    focusById("coord-cliente-nombre");
+    toTop();
     return true;
   }
 
@@ -3399,13 +3792,29 @@ function handleCoordinadorClick(event) {
     if (c) {
       drafts.cliente = { id: c.id, pedidoId: c.pedidoId || "", nombre: c.nombre || "", telefono: c.telefono || "", barrio: c.barrio || "", perros: c.perros || [], plan: c.plan || PENDIENTE, dias: c.dias || [], turno: c.turno || PENDIENTE, estado: c.estado || "activo", notas: c.notas || "", archivos: c.archivos || [] };
       clearedForms.delete("cliente");
+      clienteFormOpen = true;
       render();
-      goTo("coord-cliente-form", "#coord-cliente-nombre");
+      toTop("coord-cliente-nombre");
     }
     return true;
   }
 
   /* ---------- Avisos ---------- */
+
+  if (t.closest("[data-coord-aviso-new]")) {
+    avisoFormOpen = true;
+    render();
+    focusById("coord-aviso-barrio");
+    return true;
+  }
+
+  if (t.closest("[data-coord-aviso-cancel]")) {
+    avisoFormOpen = false;
+    clearDraft("aviso");
+    render();
+    focusById("coord-aviso-new");
+    return true;
+  }
 
   if (t.closest("[data-coord-aviso-save]")) {
     const form = t.closest("[data-coord-form]");
@@ -3417,10 +3826,10 @@ function handleCoordinadorClick(event) {
       : !values.mensaje?.trim()
         ? ["Escribí qué pasa.", "coord-aviso-mensaje"]
         : values.vigenteHasta && (!isISODate(values.vigenteHasta) || values.vigenteHasta < hoy)
-          ? ["La fecha de «vigente hasta» tiene que ser hoy o después.", "coord-aviso-vigenteHasta"]
+          ? ["«Hasta» tiene que ser hoy o después.", "coord-aviso-vigenteHasta"]
           : null;
     if (error) {
-      setFlash("avisos", error[0], "error");
+      showToast(error[0], { tone: "error" });
       render();
       focusById(error[1]);
       return true;
@@ -3428,8 +3837,12 @@ function handleCoordinadorClick(event) {
     const barrio = values.barrio.trim();
     const tipo = AVISO_TIPOS.includes(values.tipo) ? values.tipo : "otro";
     run("aviso-save", async () => {
-      const saved = await guardar("avisos", { fecha: hoy, barrio, tipo, mensaje: values.mensaje.trim(), vigenteHasta: values.vigenteHasta || hoy, titulo: `${tipo[0].toUpperCase()}${tipo.slice(1)} en ${barrio}` }, { section: "avisos", ok: `Aviso de ${barrio} guardado. Ya lo ve el equipo.` });
-      if (saved) clearDraft("aviso");
+      const saved = await guardar("avisos", { fecha: hoy, barrio, tipo, mensaje: values.mensaje.trim(), vigenteHasta: values.vigenteHasta || hoy, titulo: `${tipo[0].toUpperCase()}${tipo.slice(1)} en ${barrio}` }, { ok: `Aviso de ${barrio} enviado al equipo.` });
+      if (saved) {
+        clearDraft("aviso");
+        avisoFormOpen = false;
+        scheduleRerender();
+      }
     });
     return true;
   }
@@ -3437,8 +3850,7 @@ function handleCoordinadorClick(event) {
   const avisoCopy = t.closest("[data-coord-aviso-copy]");
   if (avisoCopy) {
     const aviso = findIn(getAvisos(), avisoCopy.dataset.coordAvisoCopy);
-    const sectionKey = t.closest("#coord-avisos") ? "avisos" : "avisosTop";
-    if (aviso) copyAndTell(avisoText(aviso), sectionKey, "Aviso copiado. Pegalo en el grupo de WhatsApp del equipo.");
+    if (aviso) copyAndTell(avisoText(aviso), "avisos", "Aviso copiado. Pegalo en WhatsApp.");
     return true;
   }
 
@@ -3446,10 +3858,8 @@ function handleCoordinadorClick(event) {
   if (avisoFin) {
     const aviso = findIn(getAvisos(), avisoFin.dataset.coordAvisoFin);
     if (aviso) run(`aviso-${aviso.id}`, async () => {
-      // El aviso sale de la lista de vigentes: el mensaje y el foco quedan donde se puede seguir.
-      const quedan = avisosVigentes().length > 1;
-      const saved = await guardar("avisos", { id: aviso.id, vigenteHasta: addDaysISO(hoyAR(), -1) }, { section: quedan ? "avisosTop" : "avisos", ok: `Aviso de ${aviso.barrio || "barrio"} marcado como terminado.` });
-      if (saved) focusById(quedan ? "coord-avisos-vigentes" : "coord-avisos-summary");
+      await guardarConDeshacer("avisos", { id: aviso.id, vigenteHasta: addDaysISO(hoyAR(), -1) }, { id: aviso.id, vigenteHasta: aviso.vigenteHasta || aviso.fecha || hoyAR() }, `Aviso de ${aviso.barrio || "barrio"} terminado.`, "El aviso volvió.");
+      focusById("coord-view-title");
     });
     return true;
   }
@@ -3461,8 +3871,8 @@ function handleCoordinadorClick(event) {
     const id = resolve.dataset.coordResolve;
     const dog = DOG_BY_ID.get(id);
     run(`resuelto-${id}`, async () => {
-      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` });
-      if (saved) focusById(`coord-dato-${id}`);
+      await guardarConDeshacer("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, `${dog?.name || id}: resuelto.`, `${dog?.name || id}: volvió a pendientes.`);
+      focusById("coord-view-title");
     });
     return true;
   }
@@ -3472,7 +3882,7 @@ function handleCoordinadorClick(event) {
     const id = unresolve.dataset.coordUnresolve;
     const dog = DOG_BY_ID.get(id);
     run(`resuelto-${id}`, async () => {
-      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, { section: "datos", ok: `${dog?.name || id}: volvió a pendientes.` });
+      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, { ok: `${dog?.name || id}: volvió a pendientes.` });
       if (saved) focusById(`coord-dato-${id}`);
     });
     return true;
@@ -3480,12 +3890,35 @@ function handleCoordinadorClick(event) {
 
   /* ---------- Pedidos ---------- */
 
+  const pedidosFiltroBtn = t.closest("[data-coord-pedidos-filtro]");
+  if (pedidosFiltroBtn) {
+    pedidosFiltro = pedidosFiltroBtn.dataset.coordPedidosFiltro;
+    render();
+    focusById(pedidosFiltroBtn.id);
+    return true;
+  }
+
+  if (t.closest("[data-coord-pedido-new]")) {
+    pedidoFormOpen = true;
+    render();
+    focusById("coord-pedido-tipo");
+    return true;
+  }
+
+  if (t.closest("[data-coord-pedido-cancel]")) {
+    pedidoFormOpen = false;
+    clearDraft("pedido");
+    render();
+    focusById("coord-pedido-new");
+    return true;
+  }
+
   if (t.closest("[data-coord-pedido-save]")) {
     const form = t.closest("[data-coord-form]");
     const values = serializeForm(form);
     saveDraft("pedido", values);
     if (!values.perro?.trim() && !values.detalle?.trim()) {
-      setFlash("pedidos", "Escribí el perro o qué hay que resolver.", "error");
+      showToast("Escribí el perro o qué hay que resolver.", { tone: "error" });
       render();
       focusById("coord-pedido-perro");
       return true;
@@ -3493,8 +3926,13 @@ function handleCoordinadorClick(event) {
     const tipo = values.tipo || PEDIDO_TIPOS[0];
     const perro = values.perro?.trim() || "";
     run("pedido-save", async () => {
-      const saved = await guardar("pedidos", { fecha: hoyAR(), tipo, estado: "nuevo", origen: "app", titulo: `${tipo}: ${perro || "sin perro indicado"}`, detalle: values.detalle?.trim() || "", datos: { perro, canal: values.canal || PEDIDO_CANALES[0] } }, { section: "pedidos", ok: `Pedido guardado en "Nuevo".` });
-      if (saved) clearDraft("pedido");
+      const saved = await guardar("pedidos", { fecha: hoyAR(), tipo, estado: "nuevo", origen: "app", titulo: `${tipo}: ${perro || "sin perro indicado"}`, detalle: values.detalle?.trim() || "", datos: { perro, canal: values.canal || PEDIDO_CANALES[0] } }, { ok: "Pedido guardado en «Nuevo»." });
+      if (saved) {
+        clearDraft("pedido");
+        pedidoFormOpen = false;
+        pedidosFiltro = "nuevo";
+        scheduleRerender();
+      }
     });
     return true;
   }
@@ -3503,10 +3941,11 @@ function handleCoordinadorClick(event) {
   if (move) {
     const id = move.dataset.coordPedidoMove;
     const estado = move.dataset.estado;
+    const pedido = findIn(getPedidos(), id);
+    const antes = pedido ? estadoDe(pedido) : "nuevo";
     run(`pedido-${id}`, async () => {
-      const saved = await guardar("pedidos", { id, estado }, { section: "pedidos", ok: `Pedido movido a "${ESTADO_LABEL[estado]}".` });
-      // La tarjeta cambia de columna: el foco va a la tarjeta (si no, se perdería).
-      if (saved) focusById(`coord-pedido-${id}`);
+      await guardarConDeshacer("pedidos", { id, estado }, { id, estado: antes }, `Pedido en «${ESTADO_LABEL[estado]}».`, `Pedido de vuelta en «${ESTADO_LABEL[antes]}».`);
+      focusById(`coord-pedidos-${pedidosFiltro}`);
     });
     return true;
   }
@@ -3515,7 +3954,7 @@ function handleCoordinadorClick(event) {
   if (pedidoDelete) {
     const pedido = findIn(getPedidos(), pedidoDelete.dataset.coordPedidoDelete);
     if (pedido) run(`pedido-${pedido.id}`, async () => {
-      if (await borrar("pedidos", pedido, { section: "pedidos", ok: "Pedido borrado." })) focusById("coord-undo-pedidos");
+      if (await borrar("pedidos", pedido, { ok: "Pedido borrado." })) focusById("coord-toast-undo");
     });
     return true;
   }
@@ -3526,8 +3965,10 @@ function handleCoordinadorClick(event) {
     if (!pedido) return true;
     drafts.cliente = draftClienteFromPedido(pedido);
     clearedForms.delete("cliente");
-    setFlash("clientes", `Formulario completado con el pedido de ${pedido.datos?.responsable || "la web"}. Revisalo y guardalo.`);
-    openAndGo("clientes", "coord-cliente-form", "#coord-cliente-nombre");
+    goView("clientes");
+    clienteFormOpen = true;
+    render();
+    toTop("coord-cliente-nombre");
     return true;
   }
 
@@ -3537,28 +3978,46 @@ function handleCoordinadorClick(event) {
     if (!pedido) return true;
     drafts.alta = draftFromPedido(pedido);
     clearedForms.delete("alta");
-    setFlash("alta", `Formulario completado con el pedido de ${pedidoPerro(pedido) || "la web"}. Revisalo y guardalo.`);
-    openAndGo("alta", "coord-alta", "#coord-alta-nombre");
+    goView("mas:fichas");
+    altaFormOpen = true;
+    render();
+    toTop("coord-alta-nombre");
     return true;
   }
 
-  /* ---------- Altas ---------- */
+  /* ---------- Fichas (alta de perro nuevo) ---------- */
+
+  if (t.closest("[data-coord-alta-new]")) {
+    altaFormOpen = true;
+    render();
+    toTop("coord-alta-nombre");
+    return true;
+  }
+
+  if (t.closest("[data-coord-alta-close]")) {
+    altaFormOpen = false;
+    altaVaciarConfirm = false;
+    render();
+    toTop();
+    return true;
+  }
 
   if (t.closest("[data-coord-alta-save]")) {
-    const form = t.closest("[data-coord-form]");
+    const form = document.getElementById("coord-alta-form");
+    if (!form) return true;
     const values = serializeForm(form);
     saveDraft("alta", values);
     if (!values.nombre?.trim()) {
-      setFlash("alta", "Falta el nombre del perro.", "error");
+      showToast("Falta el nombre del perro.", { tone: "error" });
       render();
       focusById("coord-alta-nombre");
       return true;
     }
     const nombre = values.nombre.trim();
     const { archivos: delPedido, ...resto } = values;
-    const datos = { ...resto, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Individual" };
+    const datos = { ...resto, tamano: values.tamano || PENDIENTE, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Individual" };
     if (altaCarnet && !altaCarnetSubido && sinSenal()) {
-      setFlash("alta", "Sin señal: el carnet no se puede subir sin conexión. Esperá a tener señal o quitá el carnet para guardar la ficha ahora (después lo subís desde Clientes).", "error");
+      showToast("Sin señal: el carnet necesita señal. Esperá o quitalo para guardar la ficha.", { tone: "error" });
       render();
       focusById("coord-alta-carnet-quitar");
       return true;
@@ -3573,7 +4032,7 @@ function handleCoordinadorClick(event) {
           altaCarnetSubido = await archivosApi.subir(TIPO_CARNET, altaCarnet, { perroNombre: nombre, pedidoId: values.pedidoId || "", nota: "Alta de perro nuevo" });
           altaCarnet = null;
         } catch (error) {
-          setFlash("alta", `No se pudo subir el carnet: ${mensajeArchivo(error, "subir")} La ficha todavía no se guardó: probá de nuevo o quitá el carnet.`, "error");
+          showToast(`No se pudo subir el carnet: ${mensajeArchivo(error, "subir")} La ficha no se guardó.`, { tone: "error" });
           return;
         } finally {
           altaSubiendo = false;
@@ -3586,11 +4045,14 @@ function handleCoordinadorClick(event) {
       const ficha = { fecha: hoyAR(), perroNombre: nombre, datos, categoria: "SIN EVALUAR", estado: "lista" };
       if (ids.length) ficha.archivos = ids;
       if (carnetId) ficha.carnet = { id: carnetId, nombre: carnetReg?.nombreArchivo || "" };
-      const saved = await guardar("fichas", ficha, { section: "alta", ok: `Ficha de ${nombre} guardada${carnetId ? " con el carnet de vacunas" : ""}. Arranca SIN EVALUAR y con primer paseo individual.` });
+      const saved = await guardar("fichas", ficha, { ok: `Ficha de ${nombre} guardada${carnetId ? " con carnet" : ""}.` });
       if (saved) {
         clearDraft("alta");
         altaCarnet = null;
         altaCarnetSubido = null;
+        altaFormOpen = false;
+        scheduleRerender();
+        toTop();
       }
     });
     return true;
@@ -3615,7 +4077,7 @@ function handleCoordinadorClick(event) {
     altaCarnet = null;
     altaCarnetSubido = null;
     clearDraft("alta");
-    setFlash("alta", "Formulario vacío.");
+    showToast("Ficha vacía.");
     render();
     focusById("coord-alta-nombre");
     return true;
@@ -3624,7 +4086,7 @@ function handleCoordinadorClick(event) {
   if (t.closest("[data-coord-alta-carnet-quitar]")) {
     altaCarnet = null;
     altaCarnetSubido = null;
-    announce("Carnet quitado de la ficha.");
+    announce("Carnet quitado.");
     render();
     focusById("coord-alta-carnet");
     return true;
@@ -3641,7 +4103,7 @@ function handleCoordinadorClick(event) {
   if (altaDelete) {
     const ficha = findIn(getFichas(), altaDelete.dataset.coordAltaDelete);
     if (ficha) run(`ficha-${ficha.id}`, async () => {
-      if (await borrar("fichas", ficha, { section: "alta", ok: "Ficha borrada." })) focusById("coord-undo-alta");
+      if (await borrar("fichas", ficha, { ok: "Ficha borrada." })) focusById("coord-toast-undo");
     });
     return true;
   }
@@ -3657,14 +4119,14 @@ function handleCoordinadorInput(event) {
   if (editor) {
     if (target.matches("[data-coord-ed-search]")) {
       editorQuery = target.value;
-      const box = document.getElementById("coord-ed-results");
-      if (box) box.innerHTML = dogResults();
+      const box = document.getElementById("coord-picker-grid");
+      if (box) box.innerHTML = pickerGrid();
       return;
     }
     if (target.matches("[data-coord-ed-hora]")) {
       editorHora = target.value;
-      const box = document.getElementById("coord-ed-results");
-      if (box) box.innerHTML = dogResults();
+      const box = document.getElementById("coord-picker-grid");
+      if (box) box.innerHTML = pickerGrid();
       return;
     }
     if (target.matches("[data-coord-ed-field]")) {
@@ -3675,7 +4137,7 @@ function handleCoordinadorInput(event) {
     if (target.matches("[data-coord-stop]")) {
       const stop = editor.paradas[Number(target.dataset.coordStop)];
       if (stop) {
-        stop[target.dataset.k] = target.dataset.k === "minutos" ? target.value : target.value;
+        stop[target.dataset.k] = target.value;
         editor.sucio = true;
       }
       return;
@@ -3701,7 +4163,7 @@ function handleCoordinadorInput(event) {
 
   if (target.matches("[data-coord-filter-perros]")) {
     const q = normalize(target.value);
-    target.parentElement.querySelectorAll(".coord-check").forEach((label) => {
+    target.closest(".coord-field")?.querySelectorAll(".cd-pick-dog").forEach((label) => {
       label.hidden = Boolean(q) && !label.dataset.name.includes(q) && !label.querySelector("input").checked;
     });
   }
@@ -3710,6 +4172,13 @@ function handleCoordinadorInput(event) {
 function handleCoordinadorChange(event) {
   const target = event.target;
   if (!target.closest?.(".coord-shell")) return false;
+
+  // Foto del perro (cámara o galería).
+  if (target.matches("[data-coord-foto]")) {
+    const file = target.files?.[0];
+    if (file) run(`foto-${target.dataset.coordFoto}`, () => subirFoto(target.dataset.coordFoto, file));
+    return true;
+  }
 
   if (target.matches("[data-coord-rutas-fecha]")) {
     if (isISODate(target.value)) {
@@ -3732,6 +4201,7 @@ function handleCoordinadorChange(event) {
   if (editor && target.matches("[data-coord-ed-field]")) {
     editor[target.dataset.coordEdField] = target.value;
     editor.sucio = true;
+    if (["soloDia", "paseador", "ayudante", "supervisor"].includes(target.dataset.coordEdField)) scheduleRerender();
     return true;
   }
 
@@ -3742,7 +4212,7 @@ function handleCoordinadorChange(event) {
     if (subida && target.files?.[0]) {
       subida.file = target.files[0];
       subida.error = "";
-      announce(`Elegiste ${subida.file.name}. Tocá «Subir» para guardarlo.`);
+      announce(`Elegiste ${subida.file.name}. Tocá «Subir».`);
       scheduleRerender();
     }
     return true;
@@ -3761,7 +4231,7 @@ function handleCoordinadorChange(event) {
     if (target.files?.[0]) {
       altaCarnet = target.files[0];
       altaCarnetSubido = null;
-      announce(`Elegiste ${altaCarnet.name}. Se sube al guardar la ficha.`);
+      announce(`Elegiste ${altaCarnet.name}. Se sube al guardar.`);
       scheduleRerender();
     }
     return true;
@@ -3785,7 +4255,7 @@ function handleCoordinadorSubmit(event) {
   const form = event.target.closest?.(".coord-shell [data-coord-form]");
   if (!form) return;
   event.preventDefault();
-  // Solo el botón de guardar del formulario (nunca un "Sí, vaciar" que esté a la vista).
+  // Solo el botón de guardar del formulario (nunca un "Vaciar" que esté a la vista).
   form.querySelector("[data-coord-cliente-save], [data-coord-aviso-save], [data-coord-pedido-save], [data-coord-alta-save]")?.click();
 }
 
@@ -3794,7 +4264,7 @@ function handleCoordinadorKeydown(event) {
   const target = event.target;
   if (target.matches?.(".coord-shell [data-coord-ed-search]")) {
     event.preventDefault();
-    document.querySelector("#coord-ed-results .coord-result")?.click();
+    document.querySelector("#coord-picker-grid .cd-dog-add")?.click();
   }
 }
 
