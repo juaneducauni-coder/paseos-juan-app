@@ -393,7 +393,8 @@ function whoLine(record, { web = false } = {}) {
     parts.push(`Cargado por ${esc(record.creadoPorNombre)}${record.creadoEn ? ` el ${fmtStamp(record.creadoEn)}` : ""}`);
   }
   if (record.actualizadoEn && record.actualizadoEn !== record.creadoEn) {
-    parts.push(`Último cambio${record.cambioPorNombre ? ` de ${esc(record.cambioPorNombre)}` : ""}: ${fmtStamp(record.actualizadoEn)}`);
+    const quien = record.actualizadoPorNombre || record.cambioPorNombre;
+    parts.push(`Último cambio${quien ? ` de ${esc(quien)}` : ""}: ${fmtStamp(record.actualizadoEn)}`);
   }
   const pending = record.pendiente
     ? `<p class="coord-meta is-pending">${icon("clock", "coord-icon")}<span>Sin señal: se enviará cuando vuelva.</span></p>`
@@ -457,7 +458,6 @@ function legacyId(oldId) {
 }
 
 function legacyRecords() {
-  const user = currentUser();
   const hoy = hoyAR();
   const out = [];
 
@@ -537,7 +537,6 @@ function legacyRecords() {
         perroNombre: dog?.name || dogId,
         resuelto: true,
         nota: `Marcado como resuelto el ${date} en un solo dispositivo (versión anterior de la página).`,
-        resueltoPorNombre: user.nombre,
         migrado: true,
       },
     });
@@ -1037,7 +1036,7 @@ function TodayPanel() {
 /* ---------- 2. Datos a confirmar ---------- */
 
 function ReviewCard(dog, record) {
-  const who = record ? record.resueltoPorNombre || record.creadoPorNombre : "";
+  const who = record ? record.actualizadoPorNombre || record.resueltoPorNombre || record.creadoPorNombre : "";
   return `
     <li class="coord-review ${record ? "is-resolved" : ""}" id="coord-dato-${dog.id}" tabindex="-1">
       <div class="coord-review-head">
@@ -1743,15 +1742,13 @@ function handleCoordinadorClick(event) {
     return true;
   }
 
-  const user = currentUser();
-
   // Datos a confirmar
   const resolve = event.target.closest("[data-coord-resolve]");
   if (resolve) {
     const id = resolve.dataset.coordResolve;
     const dog = REAL_DOGS.find((d) => d.id === id);
     run(`resuelto-${id}`, async () => {
-      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "", resueltoPorNombre: user.nombre }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` });
+      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` });
       if (saved) goTo("coord-datos");
     });
     return true;
@@ -1761,7 +1758,7 @@ function handleCoordinadorClick(event) {
   if (unresolve) {
     const id = unresolve.dataset.coordUnresolve;
     const dog = REAL_DOGS.find((d) => d.id === id);
-    run(`resuelto-${id}`, () => guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "", resueltoPorNombre: "", cambioPorNombre: user.nombre }, { section: "datos", ok: `${dog?.name || id}: volvió a pendientes.` }));
+    run(`resuelto-${id}`, () => guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, { section: "datos", ok: `${dog?.name || id}: volvió a pendientes.` }));
     return true;
   }
 
@@ -1797,7 +1794,7 @@ function handleCoordinadorClick(event) {
   if (move) {
     const id = move.dataset.coordPedidoMove;
     const estado = move.dataset.estado;
-    run(`pedido-${id}`, () => guardar("pedidos", { id, estado, cambioPorNombre: user.nombre }, { section: "pedidos", ok: `Pedido movido a "${ESTADO_LABEL[estado]}".` }));
+    run(`pedido-${id}`, () => guardar("pedidos", { id, estado }, { section: "pedidos", ok: `Pedido movido a "${ESTADO_LABEL[estado]}".` }));
     return true;
   }
 
@@ -1908,7 +1905,7 @@ function handleCoordinadorClick(event) {
     const pago = findIn(getPagos(), pagoLibro.dataset.coordPagoLibro);
     if (!pago) return true;
     const now = !pago.pasadoAlLibro;
-    run(`pago-${pago.id}`, () => guardar("pagos", { id: pago.id, pasadoAlLibro: now, cambioPorNombre: user.nombre }, {
+    run(`pago-${pago.id}`, () => guardar("pagos", { id: pago.id, pasadoAlLibro: now }, {
       section: "pagos",
       ok: now ? "Marcado como pasado al Libro contable." : "Marcado como pendiente de pasar al Libro.",
     }));
