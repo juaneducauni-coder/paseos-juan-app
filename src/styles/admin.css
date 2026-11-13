@@ -96,6 +96,14 @@ html[data-theme="dark"] .adm-shell {
   height: 18px;
 }
 
+.adm-icon-xs {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+
 /* ---------- Encabezado ---------- */
 
 .adm-header {
@@ -1414,9 +1422,17 @@ html[data-theme="dark"] .adm-shell {
   color: var(--adm-danger);
 }
 
-.adm-button:disabled {
+.adm-button:disabled,
+.adm-button[aria-disabled="true"] {
   cursor: progress;
   opacity: 0.6;
+}
+
+.adm-button--sm {
+  min-height: 44px;
+  border-radius: 12px;
+  font-size: 0.94rem;
+  padding: 0 12px;
 }
 
 .adm-form-actions {
@@ -1642,6 +1658,11 @@ html[data-theme="dark"] .adm-shell {
   color: var(--adm-ink);
   font-size: 0.94rem;
   line-height: 1.5;
+}
+
+.adm-inner > .adm-role-help {
+  border-top: 1px solid var(--adm-line);
+  padding: 12px 14px 14px 2rem;
 }
 
 .adm-role-help strong {
@@ -1913,6 +1934,173 @@ html[data-theme="dark"] .adm-shell {
   justify-self: start;
 }
 
+.adm-pago-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+
+.adm-pill--dashed {
+  border-style: dashed;
+  color: var(--adm-muted);
+}
+
+/* Archivos: botones para elegir (el input real queda escondido pero se puede usar con teclado). */
+
+.adm-file-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.adm-file-field legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--adm-ink);
+  font-weight: 800;
+}
+
+.adm-file-field legend small {
+  color: var(--adm-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.adm-file-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adm-file-button {
+  position: relative;
+  cursor: pointer;
+}
+
+.adm-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+}
+
+.adm-file-button:focus-within {
+  outline: 3px solid var(--adm-focus);
+  outline-offset: 3px;
+}
+
+.adm-file-chosen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+  border: 1px solid var(--adm-green);
+  border-radius: 12px;
+  background: var(--adm-green-soft);
+  color: var(--adm-ink);
+  overflow-wrap: anywhere;
+  padding: 4px 12px;
+}
+
+.adm-file-chosen > span {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.adm-file-chosen .adm-icon-sm {
+  color: var(--adm-green);
+}
+
+.adm-archivo-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-archivo {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--adm-line);
+  border-left: 5px solid var(--adm-line-strong);
+  border-radius: 12px;
+  background: var(--adm-surface);
+  overflow-wrap: anywhere;
+  padding: 12px;
+}
+
+.adm-archivo--ok { border-left-color: var(--adm-green); }
+.adm-archivo--info { border-left-color: var(--adm-info); }
+
+.adm-archivo-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.adm-archivo-title {
+  flex: 1 1 100%;
+  color: var(--adm-ink);
+}
+
+.adm-archivo-links {
+  color: var(--adm-ink);
+  line-height: 1.5;
+}
+
+.adm-archivo-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+
+.adm-archivo-where {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.adm-archivo-where.is-drive {
+  color: var(--adm-green);
+}
+
+.adm-archivo-where.is-temp {
+  color: var(--adm-warning);
+}
+
+.adm-pedido-list li {
+  border-bottom: 1px solid var(--adm-line);
+  padding-bottom: 8px;
+}
+
+.adm-pedido-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.adm-pedido-list .adm-link-button {
+  flex: 1 1 100%;
+  min-height: 40px;
+}
+
 .adm-clients td {
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -2064,12 +2252,29 @@ html[data-theme="dark"] .adm-shell {
     flex: 1 1 auto;
   }
 
+  /* Rol, lista y botón en una sola fila: así "Cambiar rol" no queda solo en otra línea. */
   .adm-role-change {
     flex: 1 1 100%;
+    flex-wrap: nowrap;
   }
 
+  /* Ancho 0 + crecer: la lista no empuja la tarjeta más allá de la pantalla. */
   .adm-role-change .adm-input--sm {
     flex: 1 1 auto;
+    width: 0;
+    min-width: 0;
+  }
+
+  .adm-role-change .adm-button {
+    flex: 0 0 auto;
+  }
+
+  .adm-file-choices .adm-file-button {
+    flex: 1 1 auto;
+  }
+
+  .adm-archivo-foot .adm-button {
+    flex: 1 1 100%;
   }
 
   .adm-live,
@@ -2088,7 +2293,9 @@ html[data-theme="dark"] .adm-shell {
   .adm-user-actions,
   .adm-users .adm-form-actions,
   .adm-form,
-  .adm-cred {
+  .adm-cred,
+  .adm-pago-actions,
+  .adm-archivo-foot .adm-button {
     display: none;
   }
 }
