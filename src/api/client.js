@@ -13,10 +13,23 @@
 const SESSION_KEY = "pj_sesion";
 const OUTBOX_KEY = "pj_pendientes";
 const CACHE_PREFIX = "pj_cache_";
-const POLL_MS = 60 * 1000;
+// Cada cuánto se buscan datos nuevos. Con la planilla de Google: cada minuto. Con el
+// almacenamiento provisorio de Vercel (cupo gratis chico): cada 5 minutos.
+let POLL_MS = 60 * 1000;
+fetch("/api/salud")
+  .then((r) => r.json())
+  .then((data) => {
+    if (/provisorio/i.test(data.almacenamiento || "")) POLL_MS = 5 * 60 * 1000;
+  })
+  .catch(() => {});
 
 const listeners = new Set();
 const watchers = new Map();
+const ticks = new Set();
+// Al volver a la pestaña o desbloquear el celular, se piden los datos nuevos enseguida.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") ticks.forEach((tick) => tick());
+});
 
 function readJson(key, fallback) {
   try {
@@ -225,8 +238,15 @@ export const registros = {
       if (document.visibilityState === "visible" && session.token()) registros.list(col, opts).catch(() => {});
     };
     tick();
-    const timer = setInterval(tick, POLL_MS);
+    ticks.add(tick);
+    let timer = setInterval(tick, POLL_MS);
+    // Si el intervalo cambia (se detectó el almacenamiento), se reprograma una vez.
+    setTimeout(() => {
+      clearInterval(timer);
+      timer = setInterval(tick, POLL_MS);
+    }, 3000);
     const stop = () => {
+      ticks.delete(tick);
       clearInterval(timer);
       watchers.delete(key);
     };
