@@ -3981,3 +3981,36 @@ html[data-theme="dark"] .tariff-table > * {
   background: var(--card);
   color: var(--ink);
 }
+
+/* Chat flotante: visible también en modo calmo y nunca más alto que la pantalla */
+html[data-motion="calm"] .floating-chat.is-open .chat-window {
+  opacity: 1;
+  transform: none;
+}
+
+.floating-chat.is-open .chat-window {
+  max-height: calc(100dvh - 120px);
+  min-height: min(460px, calc(100dvh - 120px));
+}
+
+@media (max-width: 520px) {
+  .chat-window {
+    width: calc(100vw - 32px);
+  }
+}
+
+/* Foco visible en todos los campos y botones (navegación con teclado) */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #2f9a6c;
+  outline-offset: 2px;
+}
+
+html[data-theme="dark"] input:focus,
+html[data-theme="dark"] textarea:focus,
+html[data-theme="dark"] select:focus {
+  background: var(--field);
+}

@@ -1,8 +1,9 @@
+// Conversaciones de ejemplo para la demo del chat. Sin datos reales de clientes.
 export const initialConversations = [
   {
     id: "conv-laura-kiara",
-    clientName: "Laura",
-    dogs: ["Kiara", "Cashi"],
+    clientName: "Tutor de ejemplo 1",
+    dogs: ["Perro de ejemplo 1"],
     status: "Abierto",
     lastUpdated: Date.now() - 100000,
     messages: [
@@ -10,7 +11,7 @@ export const initialConversations = [
         id: "msg-1",
         conversationId: "conv-laura-kiara",
         senderRole: "cliente",
-        senderName: "Laura",
+        senderName: "Tutor de ejemplo 1",
         text: "¿Mañana hay paseo?",
         timestamp: "10:30",
         read: false,
@@ -20,8 +21,8 @@ export const initialConversations = [
   },
   {
     id: "conv-martin-bruno",
-    clientName: "Martín",
-    dogs: ["Bruno"],
+    clientName: "Tutor de ejemplo 2",
+    dogs: ["Perro de ejemplo 2"],
     status: "Documentación pendiente",
     lastUpdated: Date.now() - 200000,
     messages: [
@@ -29,7 +30,7 @@ export const initialConversations = [
         id: "msg-2",
         conversationId: "conv-martin-bruno",
         senderRole: "cliente",
-        senderName: "Martín",
+        senderName: "Tutor de ejemplo 2",
         text: "Ya subí el carnet de vacunas.",
         timestamp: "10:15",
         read: true,
@@ -49,8 +50,8 @@ export const initialConversations = [
   },
   {
     id: "conv-sol-pistacho",
-    clientName: "Sol",
-    dogs: ["Pistacho"],
+    clientName: "Tutor de ejemplo 3",
+    dogs: ["Perro de ejemplo 3"],
     status: "Consulta comercial",
     lastUpdated: Date.now() - 300000,
     messages: [
@@ -58,7 +59,7 @@ export const initialConversations = [
         id: "msg-4",
         conversationId: "conv-sol-pistacho",
         senderRole: "cliente",
-        senderName: "Sol",
+        senderName: "Tutor de ejemplo 3",
         text: "Quiero consultar el Plan 2.",
         timestamp: "09:00",
         read: false,

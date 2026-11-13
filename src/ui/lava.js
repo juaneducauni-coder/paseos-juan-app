@@ -112,7 +112,9 @@ export function hydrateReveal() {
         }
       });
     },
-    { threshold: 0.14 },
+    // Umbral 0 con margen: en contenedores muy altos un porcentaje fijo puede no alcanzarse nunca
+    // y el contenido quedaría invisible.
+    { threshold: 0, rootMargin: "0px 0px -8% 0px" },
   );
 
   document.querySelectorAll(".reveal").forEach((element) => state.revealObserver.observe(element));

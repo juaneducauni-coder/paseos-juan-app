@@ -193,7 +193,7 @@ export function SharedChatPanel(role, title, subtitle) {
     quickActions = ["Avisar demora", "Confirmar retiro", "Confirmar entrega", "Consultar cambio de conducta", "Avisar situación de campo"];
   }
 
-  const senderName = role === "coordinador" ? "Coordinador" : role === "supervisor" ? "Nico (Supervisor)" : "Paseador";
+  const senderName = role === "coordinador" ? "Coordinador" : role === "supervisor" ? "Supervisor" : "Paseador";
   const bgClass = role === "supervisor" || role === "paseador" ? "dark-panel" : "";
 
   return `
@@ -269,8 +269,8 @@ export function SharedChatPanel(role, title, subtitle) {
 export function FloatingClientChat() {
   const conversations = getChatConversations();
   const demoClient = getDemoClient();
-  const clientName = demoClient?.name?.split(" ")[0] || "Martín";
-  // Default to Martín's conversation for demo purposes
+  const clientName = demoClient?.name?.split(" ")[0] || "Tutor de ejemplo";
+  // Conversación de ejemplo por defecto para la demo
   const myChat = conversations.find(c => c.id === "conv-martin-bruno") || conversations[1];
   
   const draft = localStorage.getItem("paseosJuanChatDraft") || "";
