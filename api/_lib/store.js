@@ -4,6 +4,7 @@
 // 2. Vercel Blob privado si hay BLOB_READ_WRITE_TOKEN (provisorio, para pruebas).
 // 3. Archivos locales en .data/ (desarrollo y pruebas automáticas).
 import { promises as fs } from "node:fs";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { HttpError } from "./http.js";
 
@@ -29,7 +30,7 @@ function fileStore() {
   }
   async function writeJson(target, data) {
     await fs.mkdir(path.dirname(target), { recursive: true });
-    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    const tmp = `${target}.${process.pid}.${Date.now()}.${randomBytes(4).toString("hex")}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(data, null, 2));
     await fs.rename(tmp, target);
   }

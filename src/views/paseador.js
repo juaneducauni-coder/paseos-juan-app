@@ -2,9 +2,12 @@
 // Pensada para usar en la calle: celular en una mano, correas en la otra, al sol.
 // Lo urgente primero, botones grandes, textos cortos.
 //
-// Datos: src/data/realData.js (planilla RPJ, BASE RUTAS e Inventario de equipamiento).
-// Lo que Sebastián marca (progreso, equipo, borrador de incidente) se guarda solo en
-// este dispositivo (localStorage). No hay datos de tutores en esta página.
+// Datos fijos: src/data/realData.js (planilla RPJ, BASE RUTAS e Inventario de equipamiento).
+// Lo que se marca se guarda en los datos compartidos (src/api/client.js, ver
+// docs/datos-compartidos.md): avance de cada perro en `paseos`, equipo en `checklists`
+// e incidentes en `incidentes`. El supervisor lee y escribe los mismos registros de `paseos`.
+// En este celular solo queda el borrador del incidente mientras se escribe.
+// No hay datos de tutores en esta página.
 import {
   REAL_DOGS,
   dogsForShift,
@@ -19,18 +22,24 @@ import {
 } from "../data/realData.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
+import { session, registros, onDataChange } from "../api/client.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
-const WALKER = "Sebastián";
-const PROGRESS_KEY = "paseosJuan_paseador_progreso";
-const EQUIP_KEY = "paseosJuan_paseador_equipo";
+// Claves de la versión anterior (todo en el celular). Solo se leen una vez para migrar.
+const LEGACY_PROGRESS_KEY = "paseosJuan_paseador_progreso";
+const LEGACY_EQUIP_KEY = "paseosJuan_paseador_equipo";
+// Borrador del incidente mientras se escribe (no es un dato compartido).
 const INCIDENT_KEY = "paseosJuan_paseador_incidente";
 
+// Cada paso guarda su hora y deja el estado del contrato de `paseos`.
 const STEPS = [
-  { label: "Retiro", action: "Marcar retirado", done: "Retirado" },
-  { label: "Paseo", action: "Marcar paseado", done: "Paseado" },
-  { label: "Entrega", action: "Marcar entregado", done: "Entregado" },
+  { label: "Retiro", action: "Marcar retirado", done: "Retirado", field: "horaRetiro", estado: "retirado" },
+  { label: "Paseo", action: "Marcar en paseo", done: "En paseo", field: "horaPaseo", estado: "paseando" },
+  { label: "Entrega", action: "Marcar entregado", done: "Entregado", field: "horaEntrega", estado: "entregado" },
 ];
+const ESTADO_STEP = { pendiente: 0, retirado: 1, paseando: 2, entregado: 3 };
+const NO_SALE = "no-sale";
+const TURNO_ID = { Mañana: "manana", Tarde: "tarde" };
 
 const SHIFT_BY_LABEL = { Mañana: SHIFTS.manana, Tarde: SHIFTS.tarde };
 
@@ -47,7 +56,9 @@ const view = {
   confirmClear: false,
   previewOpen: false,
   incidentStatus: "",
+  incidentSavedText: "",
   equipStatus: "",
+  syncError: "",
 };
 
 // ---------- utilidades ----------
@@ -179,29 +190,214 @@ const MY_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian > 0);
 const OTHER_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian === 0 && row.juan > 0);
 const MY_MUZZLES = EQUIPMENT.filter((row) => /^bozal/i.test(row.item)).reduce((sum, row) => sum + row.sebastian, 0);
 
-// ---------- datos guardados en el dispositivo ----------
+// ---------- datos compartidos (src/api/client.js) ----------
 
-function slotKey(iso, shift) {
-  return `${iso}|${shift}`;
+function currentUser() {
+  return session.user() || {};
 }
 
-// Guarda solo lo de hoy: lo de días anteriores se descarta para no acumular.
-function saveForToday(storageKey, iso, slot, value) {
-  const all = readJSON(storageKey, {});
-  const kept = Object.fromEntries(Object.entries(all).filter(([key]) => key.startsWith(iso)));
-  kept[slot] = value;
-  writeJSON(storageKey, kept);
+function walkerName() {
+  return currentUser().nombre || "equipo";
 }
 
-function getProgress(iso, shift) {
-  const all = readJSON(PROGRESS_KEY, {});
-  return all[slotKey(iso, shift)] || {};
+// Ids del contrato (docs/datos-compartidos.md): un registro por perro, día y turno.
+function paseoId(iso, dogId, shift) {
+  return `${iso}_${dogId}_${TURNO_ID[shift]}`;
 }
 
-function getEquipment(iso, shift) {
-  const all = readJSON(EQUIP_KEY, {});
-  const list = all[slotKey(iso, shift)];
-  return Array.isArray(list) ? list : [];
+function checklistId(iso, shift, usuario = currentUser().usuario) {
+  return `${iso}_${usuario || "sin-usuario"}_${TURNO_ID[shift]}`;
+}
+
+// Lo recién tocado se muestra al instante, mientras viaja al servidor.
+const optimistic = new Map();
+
+function recordsFor(col, iso) {
+  const byId = new Map(registros.cached(col, { desde: iso }).map((record) => [record.id, record]));
+  optimistic.forEach((record, key) => {
+    if (!key.startsWith(`${col}:`)) return;
+    byId.set(record.id, { ...(byId.get(record.id) || {}), ...record, enviando: true });
+  });
+  return byId;
+}
+
+// Paso alcanzado según el estado y las horas guardadas (lo marque el paseador o el supervisor).
+function paseoState(record) {
+  const times = STEPS.map((step) => (record?.[step.field] ? String(record[step.field]) : ""));
+  if (!record) return { step: 0, noSale: false, times, record: null };
+  const byTimes = times.reduce((last, time, index) => (time ? index + 1 : last), 0);
+  const noSale = record.estado === NO_SALE;
+  const step = noSale ? 0 : Math.max(ESTADO_STEP[record.estado] ?? 0, byTimes);
+  return { step, noSale, times, record };
+}
+
+function progressFor(iso, shift, dogs) {
+  const records = recordsFor("paseos", iso);
+  return Object.fromEntries(dogs.map((dog) => [dog.id, paseoState(records.get(paseoId(iso, dog.id, shift)))]));
+}
+
+function shiftTotals(active, progress) {
+  const noSale = active.filter((dog) => progress[dog.id]?.noSale).length;
+  const delivered = active.filter((dog) => !progress[dog.id]?.noSale && progress[dog.id]?.step >= STEPS.length).length;
+  return { noSale, delivered, toWalk: active.length - noSale, closed: delivered + noSale === active.length };
+}
+
+function checklistFor(iso, shift) {
+  const record = recordsFor("checklists", iso).get(checklistId(iso, shift));
+  const items = record?.items && typeof record.items === "object" ? record.items : {};
+  return { record, checked: MY_EQUIPMENT.filter((row) => items[row.item] === true).map((row) => row.item) };
+}
+
+// Nombres para "Último cambio": el servidor guarda el usuario de quien cambió y el nombre de quien creó.
+function teamNames(iso) {
+  const names = new Map();
+  ["paseos", "checklists"].forEach((col) => {
+    registros.cached(col, { desde: iso }).forEach((record) => {
+      if (record.creadoPor && record.creadoPorNombre) names.set(record.creadoPor, record.creadoPorNombre);
+    });
+  });
+  return names;
+}
+
+function whoName(usuario, names) {
+  if (!usuario) return "Pendiente de confirmar";
+  if (usuario === currentUser().usuario) return "vos";
+  return names.get(usuario) || usuario;
+}
+
+function timeAR(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("es-AR", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
+}
+
+function lastChange(record, names) {
+  if (!record) return "";
+  if (record.enviando) return "Guardando…";
+  if (record.pendiente) return "Sin señal: se enviará solo.";
+  if (!record.actualizadoEn) return "";
+  const time = timeAR(record.actualizadoEn);
+  return `Último cambio: ${whoName(record.actualizadoPor, names)}${time ? `, ${time} hs` : ""}.`;
+}
+
+// Guarda de a uno, en orden, para que dos toques seguidos no se pisen.
+let saveChain = Promise.resolve();
+
+function saveShared(col, build, { optimisticRecord } = {}) {
+  const key = optimisticRecord ? `${col}:${optimisticRecord.id}` : "";
+  if (key) optimistic.set(key, optimisticRecord);
+  const job = saveChain.then(async () => {
+    const record = typeof build === "function" ? build() : build;
+    try {
+      const saved = await registros.save(col, record);
+      if (view.syncError) view.syncError = "";
+      return saved;
+    } catch (error) {
+      view.syncError = `No se guardó: ${error?.message || "error del servidor"} Probá de nuevo.`;
+      announceError(view.syncError);
+      return null;
+    } finally {
+      if (key && optimistic.get(key) === optimisticRecord) optimistic.delete(key);
+      scheduleRender();
+    }
+  });
+  saveChain = job.catch(() => null);
+  return job;
+}
+
+function savePaseo(dog, sel, changes, message) {
+  const iso = sel.now.iso;
+  const record = { id: paseoId(iso, dog.id, sel.shift), fecha: iso, perroId: dog.id, perroNombre: dog.name, turno: sel.shift, ...changes };
+  announce(message);
+  return saveShared("paseos", record, { optimisticRecord: record }).then((saved) => {
+    if (saved?.pendiente) announce(`${message} Sin señal: se enviará cuando haya señal.`);
+  });
+}
+
+function saveChecklist(sel, checked) {
+  const iso = sel.now.iso;
+  const items = Object.fromEntries(MY_EQUIPMENT.map((row) => [row.item, checked.includes(row.item)]));
+  const record = { id: checklistId(iso, sel.shift), fecha: iso, turno: sel.shift, items, completo: checked.length >= MY_EQUIPMENT.length };
+  return saveShared("checklists", record, { optimisticRecord: record });
+}
+
+// Trae los datos de hoy una vez por usuario y día, y después los refresca cada minuto.
+// Hasta que llega la primera respuesta (o se confirma que no hay señal), los botones de avance
+// quedan en espera: así un toque apurado no pisa lo que ya marcó el supervisor.
+const loaded = { key: "", stops: [], ready: false };
+
+function ensureShared(iso) {
+  const key = `${iso}|${currentUser().usuario || ""}`;
+  if (loaded.key === key) return;
+  loaded.stops.forEach((stop) => stop());
+  loaded.key = key;
+  loaded.stops = [];
+  loaded.ready = false;
+  Promise.all([registros.list("paseos", { desde: iso }), registros.list("checklists", { desde: iso })])
+    .then(() => migrateLegacy(iso))
+    .catch((error) => {
+      view.syncError = `No se pudieron traer los datos del equipo: ${error?.message || "error del servidor"}`;
+      announceError(view.syncError);
+      scheduleRender();
+    })
+    .finally(() => {
+      if (loaded.key !== key) return;
+      loaded.ready = true;
+      scheduleRender();
+      loaded.stops = [registros.watch("paseos", { desde: iso }), registros.watch("checklists", { desde: iso })];
+    });
+}
+
+// Migración: la versión anterior guardaba el avance solo en el celular. Lo de hoy se sube una vez.
+let legacyChecked = false;
+
+async function migrateLegacy(iso) {
+  if (legacyChecked) return;
+  legacyChecked = true;
+  const progress = readJSON(LEGACY_PROGRESS_KEY, null);
+  const equip = readJSON(LEGACY_EQUIP_KEY, null);
+  if (!progress && !equip) return;
+
+  const jobs = [];
+  const paseos = recordsFor("paseos", iso);
+  Object.entries(progress && typeof progress === "object" ? progress : {}).forEach(([slot, dogs]) => {
+    const [day, shift] = slot.split("|");
+    if (day !== iso || !TURNO_ID[shift] || !dogs || typeof dogs !== "object") return;
+    Object.entries(dogs).forEach(([dogId, times]) => {
+      const dog = REAL_DOGS.find((item) => item.id === dogId);
+      if (!dog || !Array.isArray(times) || !times.length) return;
+      const id = paseoId(iso, dogId, shift);
+      const shared = paseoState(paseos.get(id));
+      const steps = Math.min(times.length, STEPS.length);
+      // Si lo compartido ya está igual o más adelante (o el supervisor marcó "no sale"), no se pisa.
+      if (shared.noSale || shared.step >= steps) return;
+      const record = { id, fecha: iso, perroId: dog.id, perroNombre: dog.name, turno: shift, estado: STEPS[steps - 1].estado };
+      STEPS.forEach((step, index) => {
+        record[step.field] = index < steps ? shared.times[index] || String(times[index] || "") : "";
+      });
+      jobs.push(saveShared("paseos", record, { optimisticRecord: record }));
+    });
+  });
+
+  const checklists = recordsFor("checklists", iso);
+  Object.entries(equip && typeof equip === "object" ? equip : {}).forEach(([slot, list]) => {
+    const [day, shift] = slot.split("|");
+    if (day !== iso || !TURNO_ID[shift] || !Array.isArray(list)) return;
+    const known = list.filter((item) => MY_EQUIPMENT.some((row) => row.item === item));
+    if (!known.length || checklists.has(checklistId(iso, shift))) return;
+    jobs.push(saveChecklist({ now: { iso }, shift }, known));
+  });
+
+  const results = await Promise.all(jobs);
+  if (results.every(Boolean)) {
+    try {
+      localStorage.removeItem(LEGACY_PROGRESS_KEY);
+      localStorage.removeItem(LEGACY_EQUIP_KEY);
+    } catch {
+      // Sin almacenamiento: no hay nada que limpiar.
+    }
+    if (jobs.length) announce("Se subió al equipo lo que tenías marcado en este celular.");
+  }
 }
 
 function getDraft() {
@@ -217,6 +413,8 @@ function getDraft() {
     riesgo: draft.riesgo || "",
     lesiones: draft.lesiones || "",
     protocolo: Array.isArray(draft.protocolo) ? draft.protocolo : [],
+    // Id del registro en `incidentes` una vez guardado: si se corrige, se actualiza el mismo.
+    registroId: typeof draft.registroId === "string" ? draft.registroId : "",
   };
 }
 
@@ -237,18 +435,21 @@ export function walkerDashboard() {
   const active = all.filter((dog) => dog.status === "Activo");
   const flagged = all.filter((dog) => dog.status !== "Activo");
   const conflicts = conflictsFor(all);
+  ensureShared(sel.now.iso);
+  const progress = sel.isToday ? progressFor(sel.now.iso, sel.shift, active) : {};
 
   return `
     <main class="pw-main" id="pw-inicio">
-      ${TodayCard(sel, active, flagged, conflicts)}
-      ${DogsSection(sel, active, flagged, conflicts)}
+      ${SyncBar()}
+      ${TodayCard(sel, active, flagged, conflicts, progress)}
+      ${DogsSection(sel, active, flagged, conflicts, progress)}
       <div class="pw-columns">
         ${EquipmentSection(sel)}
         ${IncidentSection(sel, all)}
       </div>
       <footer class="pw-footer">
         <p>Datos: ${esc(BUSINESS_INFO.officialSources.routes)} e Inventario de equipamiento, actualizados el ${DATA_UPDATED}.</p>
-        <p>Lo que marcás en esta página se guarda solo en este celular.</p>
+        <p>Lo que marcás acá lo ven Juan y quien supervisa el turno. Sin señal, se guarda y se envía solo.</p>
       </footer>
     </main>
   `;
@@ -264,7 +465,7 @@ function WalkerHeader() {
         </span>
         <span class="pw-brand-text">
           <strong>Paseos Juan</strong>
-          <small>Paseador · ${WALKER}</small>
+          <small>Paseador · ${esc(walkerName())}</small>
         </span>
       </a>
       <div class="pw-header-actions">
@@ -281,12 +482,40 @@ function WalkerHeader() {
   `;
 }
 
-function TodayCard(sel, active, flagged, conflicts) {
+// Señal y errores: visible arriba de todo. Los anuncios para lector de pantalla van por pw-live.
+function SyncBar() {
+  const pending = registros.pendingCount();
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  let signal = "";
+  if (pending) {
+    signal = `Sin señal: ${pending} ${pending === 1 ? "cambio se enviará solo" : "cambios se enviarán solos"}.`;
+  } else if (offline) {
+    signal = "Sin señal. Lo que marques queda guardado y se envía solo cuando vuelva.";
+  }
+  const parts = [];
+  if (signal) {
+    parts.push(`<p class="pw-sync-msg pw-sync-msg--offline">${icon("uploadCloud", "pw-icon")}<span>${esc(signal)}</span></p>`);
+  }
+  if (view.syncError) {
+    parts.push(`
+      <div class="pw-sync-msg pw-sync-msg--error">
+        ${icon("alertTriangle", "pw-icon")}
+        <span>${esc(view.syncError)}</span>
+        <button class="pw-btn pw-btn--ghost pw-btn--compact" type="button" data-pw-dismiss-error>Cerrar aviso</button>
+      </div>
+    `);
+  }
+  // Sin nada que avisar queda vacío (y oculto), pero la región sigue en su lugar.
+  return `<div class="pw-sync" aria-live="polite" data-pw-sync>${parts.join("")}</div>`;
+}
+
+function TodayCard(sel, active, flagged, conflicts, progress) {
   const shiftData = SHIFT_BY_LABEL[sel.shift];
   const title = sel.isToday
     ? `Hoy, ${sel.day.toLowerCase()} · turno ${sel.shift.toLowerCase()}`
     : `${sel.day} · turno ${sel.shift.toLowerCase()}`;
-  const kicker = sel.isToday ? `Hola, ${WALKER} · ${sel.now.date}` : `Hola, ${WALKER} · Planificación: no es hoy`;
+  const hello = `Hola, ${esc(walkerName())}`;
+  const kicker = sel.isToday ? `${hello} · ${sel.now.date}` : `${hello} · Planificación: no es hoy`;
 
   return `
     <section class="pw-card pw-today" aria-labelledby="pw-today-title">
@@ -315,7 +544,7 @@ function TodayCard(sel, active, flagged, conflicts) {
         </div>
       </div>
       ${view.pickerOpen ? Picker(sel) : ""}
-      ${Priorities(sel, active, flagged, conflicts)}
+      ${Priorities(sel, active, flagged, conflicts, progress)}
     </section>
   `;
 }
@@ -349,7 +578,7 @@ function Picker(sel) {
 }
 
 // Máximo 3 prioridades, de la más urgente a la menos urgente.
-function Priorities(sel, active, flagged, conflicts) {
+function Priorities(sel, active, flagged, conflicts, progress) {
   const items = [];
 
   if (conflicts.length) {
@@ -392,9 +621,8 @@ function Priorities(sel, active, flagged, conflicts) {
   }
 
   if (sel.isToday && active.length) {
-    const checked = getEquipment(sel.now.iso, sel.shift).length;
-    const progress = getProgress(sel.now.iso, sel.shift);
-    const delivered = active.filter((dog) => (progress[dog.id] || []).length >= STEPS.length).length;
+    const checked = checklistFor(sel.now.iso, sel.shift).checked.length;
+    const totals = shiftTotals(active, progress);
     if (checked < MY_EQUIPMENT.length) {
       items.push({
         kind: "info",
@@ -406,10 +634,10 @@ function Priorities(sel, active, flagged, conflicts) {
       });
     } else {
       items.push({
-        kind: delivered === active.length ? "ok" : "info",
-        icon: delivered === active.length ? "checkCircle" : "pawPrint",
-        title: `Entregados: ${delivered} de ${active.length}`,
-        text: delivered === active.length ? "Turno completo. ¡Buen trabajo!" : "Equipo listo. Marcá cada retiro, paseo y entrega.",
+        kind: totals.closed ? "ok" : "info",
+        icon: totals.closed ? "checkCircle" : "pawPrint",
+        title: `Entregados: ${totals.delivered} de ${totals.toWalk}${totals.noSale ? ` · ${totals.noSale} no ${totals.noSale === 1 ? "sale" : "salen"}` : ""}`,
+        text: totals.closed ? "Turno completo. ¡Buen trabajo!" : "Equipo listo. Marcá cada retiro, paseo y entrega.",
         goto: "pw-perros",
         button: "Ver perros",
       });
@@ -448,10 +676,10 @@ function Priorities(sel, active, flagged, conflicts) {
   `;
 }
 
-function DogsSection(sel, active, flagged, conflicts) {
-  const progress = sel.isToday ? getProgress(sel.now.iso, sel.shift) : {};
-  const delivered = active.filter((dog) => (progress[dog.id] || []).length >= STEPS.length).length;
-  const percent = active.length ? Math.round((delivered / active.length) * 100) : 0;
+function DogsSection(sel, active, flagged, conflicts, progress) {
+  const totals = shiftTotals(active, progress);
+  const percent = totals.toWalk ? Math.round((totals.delivered / totals.toWalk) * 100) : 100;
+  const names = sel.isToday ? teamNames(sel.now.iso) : new Map();
 
   return `
     <section class="pw-section" id="pw-perros" aria-labelledby="pw-perros-title" tabindex="-1">
@@ -462,7 +690,7 @@ function DogsSection(sel, active, flagged, conflicts) {
         </div>
         ${sel.isToday && active.length ? `
           <div class="pw-progress" aria-label="Avance del turno">
-            <strong>${delivered} de ${active.length} entregados</strong>
+            <strong>${totals.delivered} de ${totals.toWalk} entregados${totals.noSale ? ` · ${totals.noSale} no ${totals.noSale === 1 ? "sale" : "salen"}` : ""}</strong>
             <span class="pw-progress-bar" aria-hidden="true"><span style="width:${percent}%"></span></span>
           </div>
         ` : ""}
@@ -496,7 +724,7 @@ function DogsSection(sel, active, flagged, conflicts) {
 
       ${active.length ? `
         <ul class="pw-dogs" role="list">
-          ${active.map((dog) => DogCard(dog, sel, progress[dog.id] || [], partnersInList(dog, conflicts))).join("")}
+          ${active.map((dog) => DogCard(dog, sel, progress[dog.id] || paseoState(null), partnersInList(dog, conflicts), names)).join("")}
         </ul>
         <p class="pw-muted pw-legend">
           Categoría operativa de todos los perros: <b>SIN EVALUAR</b>. ${esc(CATEGORIES["SIN EVALUAR"])}
@@ -512,9 +740,11 @@ function DogsSection(sel, active, flagged, conflicts) {
   `;
 }
 
-function DogCard(dog, sel, times, partners) {
-  const step = Math.min(times.length, STEPS.length);
-  const done = step >= STEPS.length;
+function DogCard(dog, sel, state, partners, names) {
+  const { times, noSale, record } = state;
+  const step = Math.min(state.step, STEPS.length);
+  const done = !noSale && step >= STEPS.length;
+  const change = lastChange(record, names);
   const ownNoJuntar = dog.safety.filter((text) => safetyKind(text) === "danger").join(" ");
   const extraPartners = partners.filter((name) => !ownNoJuntar.includes(name));
   const alerts = dog.safety.filter((text) => safetyKind(text) !== "info");
@@ -522,7 +752,7 @@ function DogCard(dog, sel, times, partners) {
   const hasAlert = alerts.length || partners.length;
 
   return `
-    <li class="pw-dog ${hasAlert ? "has-alert" : ""} ${done ? "is-done" : ""}" data-pw-dog="${dog.id}">
+    <li class="pw-dog ${hasAlert ? "has-alert" : ""} ${done ? "is-done" : ""} ${noSale ? "is-nosale" : ""}" data-pw-dog="${dog.id}">
       <div class="pw-dog-head">
         <h3>${esc(dog.name)}</h3>
         <span class="pw-dog-facts">${esc(dog.size)} · ${dog.minutes ? `${dog.minutes} min` : "Duración pendiente de confirmar"}</span>
@@ -550,24 +780,33 @@ function DogCard(dog, sel, times, partners) {
       <p class="pw-dog-category"><span>SIN EVALUAR</span> Registro maestro 14/08/2026</p>
 
       ${sel.isToday ? `
-        <ol class="pw-steps" aria-label="Avance de ${esc(dog.name)}">
-          ${STEPS.map((item, index) => `
-            <li class="${index < step ? "is-done" : ""} ${index === step ? "is-next" : ""}">
-              <span class="pw-step-dot" aria-hidden="true">${index < step ? icon("checkCircle", "pw-icon pw-icon--sm") : index + 1}</span>
-              <span>${item.label}${index < step ? `<small>${esc(times[index])}</small>` : ""}</span>
-              <span class="pw-sr">${index < step ? "hecho" : "pendiente"}</span>
-            </li>
-          `).join("")}
-        </ol>
+        ${noSale ? `
+          <p class="pw-nosale-label">${icon("x", "pw-icon")} No sale en este turno</p>
+        ` : `
+          <ol class="pw-steps" aria-label="Avance de ${esc(dog.name)}">
+            ${STEPS.map((item, index) => `
+              <li class="${index < step ? "is-done" : ""} ${index === step ? "is-next" : ""}">
+                <span class="pw-step-dot" aria-hidden="true">${index < step ? icon("checkCircle", "pw-icon pw-icon--sm") : index + 1}</span>
+                <span>${item.label}${index < step ? `<small>${times[index] ? esc(times[index]) : "Sin hora"}</small>` : ""}</span>
+                <span class="pw-sr">${index < step ? "hecho" : "pendiente"}</span>
+              </li>
+            `).join("")}
+          </ol>
+        `}
+        ${record?.nota ? `<p class="pw-dog-nota"><b>Nota:</b> ${esc(record.nota)}</p>` : ""}
+        ${change ? `<p class="pw-dog-change ${record.pendiente ? "is-pending" : ""}">${esc(change)}</p>` : ""}
         <div class="pw-dog-actions">
-          ${done ? `
+          ${noSale ? "" : done ? `
             <p class="pw-done-label">${icon("checkCircle", "pw-icon")} Entregado ${esc(times[STEPS.length - 1])}</p>
           ` : `
-            <button class="pw-btn pw-btn--primary pw-btn--block" type="button" data-pw-step="${dog.id}">
-              ${STEPS[step].action}
+            <button class="pw-btn pw-btn--primary pw-btn--block" type="button" data-pw-step="${dog.id}" ${loaded.ready ? "" : 'aria-disabled="true"'}>
+              ${loaded.ready ? STEPS[step].action : "Cargando lo marcado…"}
             </button>
           `}
-          ${step > 0 ? `
+          ${!noSale && step === 0 ? `
+            <button class="pw-btn pw-btn--ghost" type="button" data-pw-nosale="${dog.id}" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(dog.name)} no sale en este turno">No sale</button>
+          ` : ""}
+          ${noSale || step > 0 ? `
             <button class="pw-btn pw-btn--ghost" type="button" data-pw-undo="${dog.id}" aria-label="Deshacer el último paso de ${esc(dog.name)}">Deshacer</button>
           ` : ""}
         </div>
@@ -577,8 +816,9 @@ function DogCard(dog, sel, times, partners) {
 }
 
 function EquipmentSection(sel) {
-  const checked = getEquipment(sel.now.iso, sel.shift);
+  const { checked, record } = checklistFor(sel.now.iso, sel.shift);
   const complete = checked.length >= MY_EQUIPMENT.length;
+  const change = lastChange(record, teamNames(sel.now.iso));
 
   return `
     <section class="pw-section pw-card" id="pw-equipo" aria-labelledby="pw-equipo-title" tabindex="-1">
@@ -610,6 +850,7 @@ function EquipmentSection(sel) {
           ? `<button class="pw-btn pw-btn--ghost pw-btn--block" type="button" data-pw-equip-reset>Desmarcar todo</button>`
           : `<button class="pw-btn pw-btn--primary pw-btn--block" type="button" data-pw-equip-all>Tengo todo</button>`}
       </div>
+      ${change ? `<p class="pw-dog-change ${record?.pendiente ? "is-pending" : ""}">${esc(change)}</p>` : ""}
       <p class="pw-status" role="status">${esc(view.equipStatus)}</p>
       ${OTHER_EQUIPMENT.length ? `
         <p class="pw-muted pw-small">Lo tiene Juan: ${OTHER_EQUIPMENT.map((row) => `${esc(row.item.toLowerCase())} (${row.juan})`).join(", ")}.</p>
@@ -721,13 +962,13 @@ function IncidentSection(sel, dogs) {
           Armar mensaje para Juan
         </button>
         <button class="pw-btn pw-btn--ghost ${view.confirmClear ? "is-confirm" : ""}" type="button" data-pw-clear>
-          ${view.confirmClear ? "¿Seguro? Tocá de nuevo" : "Borrar reporte"}
+          ${view.confirmClear ? "¿Seguro? Tocá de nuevo" : draft.registroId ? "Empezar otro reporte" : "Borrar reporte"}
         </button>
       </div>
       <p class="pw-status ${view.incidentStatus.startsWith("Falta") || view.incidentStatus.startsWith("Cambiá") ? "is-warn" : ""}" role="status" data-pw-incident-status>${esc(view.incidentStatus)}</p>
 
       ${message && message.ok ? MessagePreview(message.text) : ""}
-      <p class="pw-muted pw-small">El borrador se guarda solo en este celular hasta que lo borres.</p>
+      <p class="pw-muted pw-small">Al armar el mensaje, el reporte queda guardado en la app para Juan y supervisión. Mientras lo escribís, el borrador queda solo en este celular.</p>
     </section>
   `;
 }
@@ -774,15 +1015,12 @@ function buildMessage(draft, sel) {
 
   const shift = shiftByClock(sel.now);
   const line = (label, value) => `${label}: ${value.trim() ? value.trim() : "Sin dato"}`;
-  const protocol = INCIDENT_PROTOCOL.map((step, index) => {
-    const short = step.split(/[:.]/)[0];
-    return `- ${draft.protocolo.includes(index) ? "Hecho" : "Pendiente"}: ${short}`;
-  });
+  const protocol = protocolLines(draft).map((text) => `- ${text}`);
 
   const text = [
     "REPORTE DE INCIDENTE - Paseos Juan",
     `Fecha: ${sel.now.date} · Hora: ${draft.hora || sel.now.time} · Turno: ${shift.toLowerCase()}`,
-    `Paseador: ${WALKER}`,
+    `Paseador: ${walkerName()}`,
     `Perros: ${draft.dogs.join(", ")}`,
     `Nivel de riesgo: ${draft.riesgo}`,
     line("Lesiones", draft.lesiones),
@@ -798,6 +1036,65 @@ function buildMessage(draft, sel) {
   ].join("\n");
 
   return { ok: true, text };
+}
+
+function protocolLines(draft) {
+  return INCIDENT_PROTOCOL.map((step, index) => {
+    const short = step.split(/[:.]/)[0];
+    return `${draft.protocolo.includes(index) ? "Hecho" : "Pendiente"}: ${short}`;
+  });
+}
+
+// Registro para la colección `incidentes` (mismos datos que el mensaje de WhatsApp).
+function incidentRecord(draft, sel) {
+  const ids = draft.dogs.map((name) => REAL_DOGS.find((dog) => dog.name === name)?.id).filter(Boolean);
+  const names = draft.dogs.join(", ");
+  return {
+    ...(draft.registroId ? { id: draft.registroId } : {}),
+    fecha: sel.now.iso,
+    hora: draft.hora || sel.now.time,
+    perros: ids,
+    perroNombre: names,
+    lugar: draft.lugar.trim(),
+    antes: draft.antes.trim(),
+    conducta: draft.conducta.trim(),
+    accion: draft.accion.trim(),
+    despues: draft.despues.trim(),
+    riesgo: draft.riesgo,
+    lesiones: draft.lesiones,
+    protocolo: protocolLines(draft),
+    titulo: `Incidente: ${names} · riesgo ${draft.riesgo.toLowerCase()}`,
+  };
+}
+
+function setIncidentStatus(message, warn = false) {
+  view.incidentStatus = message;
+  const status = document.querySelector("[data-pw-incident-status]");
+  if (status) {
+    status.textContent = message;
+    status.classList.toggle("is-warn", warn);
+  }
+  announce(message);
+}
+
+// Guarda el incidente en la app. Si ya se guardó ese mismo texto, no hace nada;
+// si se corrigió, actualiza el mismo registro (no crea otro).
+function saveIncident(draft, text) {
+  if (view.incidentSavedText === text) return Promise.resolve(null);
+  view.incidentSavedText = text;
+  const sel = selection();
+  return saveShared("incidentes", () => incidentRecord({ ...draft, registroId: getDraft().registroId || draft.registroId }, sel)).then((saved) => {
+    if (!saved) {
+      view.incidentSavedText = "";
+      return null;
+    }
+    const stored = readJSON(INCIDENT_KEY, null);
+    if (stored) writeJSON(INCIDENT_KEY, { ...stored, registroId: saved.id });
+    setIncidentStatus(saved.pendiente
+      ? "Sin señal: el reporte se guardará en la app cuando vuelva. Igual mandalo por WhatsApp."
+      : "Reporte guardado en la app. Ahora mandalo por WhatsApp a Juan.");
+    return saved;
+  });
 }
 
 function readDraftFromForm() {
@@ -861,6 +1158,71 @@ function announce(message) {
   });
 }
 
+// Errores: región aparte, fuera de la página, para que el lector de pantalla los lea siempre.
+function announceError(message) {
+  let live = document.getElementById("pw-live-error");
+  if (!live) {
+    live = document.createElement("div");
+    live.id = "pw-live-error";
+    live.className = "pw-sr";
+    live.setAttribute("aria-live", "assertive");
+    live.setAttribute("role", "alert");
+    document.body.appendChild(live);
+  }
+  live.textContent = "";
+  requestAnimationFrame(() => {
+    live.textContent = message;
+  });
+}
+
+// Selector para volver a encontrar el control con foco después de redibujar.
+const FOCUS_ATTRS = ["data-pw-step", "data-pw-undo", "data-pw-nosale", "data-pw-equip", "data-pw-day", "data-pw-shift"];
+
+function focusSelectorFor(element) {
+  if (!element || element === document.body || !element.closest?.(".pw-shell")) return "";
+  if (element.id) return `#${CSS.escape(element.id)}`;
+  const attr = FOCUS_ATTRS.find((name) => element.hasAttribute(name));
+  if (attr) return `[${attr}="${CSS.escape(element.getAttribute(attr))}"]`;
+  const field = element.dataset.pwField;
+  if (field) {
+    return element.type === "checkbox" || element.type === "radio"
+      ? `[data-pw-field="${field}"][value="${CSS.escape(element.value)}"]`
+      : `[data-pw-field="${field}"]`;
+  }
+  const other = [...element.attributes].find((item) => item.name.startsWith("data-pw-"));
+  return other ? `[${other.name}]` : "";
+}
+
+// Redibuja por datos nuevos (del servidor, de la cola o del supervisor) sin perder
+// el foco ni lo que se estaba escribiendo.
+function softRender() {
+  const active = document.activeElement;
+  const selector = focusSelectorFor(active);
+  const caret = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  render();
+  if (!selector) return;
+  const target = document.querySelector(selector);
+  if (!target) return;
+  target.focus({ preventScroll: true });
+  if (caret && typeof target.setSelectionRange === "function") {
+    try {
+      target.setSelectionRange(caret[0], caret[1]);
+    } catch {
+      // Algunos campos (hora) no tienen cursor.
+    }
+  }
+}
+
+let renderTimer = 0;
+
+function scheduleRender() {
+  clearTimeout(renderTimer);
+  // Un poco de espera junta varios avisos seguidos y deja que la cola actualice su cuenta.
+  renderTimer = setTimeout(() => {
+    if (document.querySelector(".pw-shell")) softRender();
+  }, 80);
+}
+
 // Vuelve a dibujar la página y devuelve el foco al control que se tocó.
 function rerender(focusSelector) {
   render();
@@ -902,7 +1264,13 @@ function handlePaseadorClick(event) {
   if (!event.target.closest(".pw-shell")) return false;
 
   if (event.target.closest("[data-pw-logout]")) {
-    navigate("/login");
+    navigate("/salir");
+    return true;
+  }
+
+  if (event.target.closest("[data-pw-dismiss-error]")) {
+    view.syncError = "";
+    rerender("#pw-today-title");
     return true;
   }
 
@@ -949,17 +1317,30 @@ function handlePaseadorClick(event) {
   if (stepButton) {
     const id = stepButton.dataset.pwStep;
     const sel = selection();
-    if (!sel.isToday) return true;
-    const progress = getProgress(sel.now.iso, sel.shift);
-    const times = progress[id] || [];
-    if (times.length >= STEPS.length) return true;
-    const doneStep = STEPS[times.length];
-    progress[id] = [...times, sel.now.time];
-    saveForToday(PROGRESS_KEY, sel.now.iso, slotKey(sel.now.iso, sel.shift), progress);
     const dog = REAL_DOGS.find((item) => item.id === id);
-    const nextFocus = progress[id].length >= STEPS.length ? `[data-pw-undo="${id}"]` : `[data-pw-step="${id}"]`;
-    rerender(nextFocus);
-    announce(`${dog?.name || "Perro"}: ${doneStep.done.toLowerCase()} a las ${sel.now.time}.`);
+    if (!sel.isToday || !dog || !loaded.ready) return true;
+    const state = progressFor(sel.now.iso, sel.shift, [dog])[id];
+    if (state.noSale || state.step >= STEPS.length) return true;
+    const next = STEPS[state.step];
+    // Se mandan también las horas anteriores: si no hay señal, la cola guarda el registro completo.
+    const changes = { estado: next.estado };
+    STEPS.forEach((item, index) => {
+      if (index < state.step) changes[item.field] = state.times[index];
+    });
+    changes[next.field] = sel.now.time;
+    savePaseo(dog, sel, changes, `${dog.name}: ${next.done.toLowerCase()} a las ${sel.now.time}.`);
+    rerender(state.step + 1 >= STEPS.length ? `[data-pw-undo="${id}"]` : `[data-pw-step="${id}"]`);
+    return true;
+  }
+
+  const noSaleButton = event.target.closest("[data-pw-nosale]");
+  if (noSaleButton) {
+    const id = noSaleButton.dataset.pwNosale;
+    const sel = selection();
+    const dog = REAL_DOGS.find((item) => item.id === id);
+    if (!sel.isToday || !dog || !loaded.ready) return true;
+    savePaseo(dog, sel, { estado: NO_SALE }, `${dog.name}: no sale en este turno.`);
+    rerender(`[data-pw-undo="${id}"]`);
     return true;
   }
 
@@ -967,20 +1348,29 @@ function handlePaseadorClick(event) {
   if (undoButton) {
     const id = undoButton.dataset.pwUndo;
     const sel = selection();
-    const progress = getProgress(sel.now.iso, sel.shift);
-    const times = progress[id] || [];
-    if (!times.length) return true;
-    progress[id] = times.slice(0, -1);
-    saveForToday(PROGRESS_KEY, sel.now.iso, slotKey(sel.now.iso, sel.shift), progress);
     const dog = REAL_DOGS.find((item) => item.id === id);
+    if (!sel.isToday || !dog || !loaded.ready) return true;
+    const state = progressFor(sel.now.iso, sel.shift, [dog])[id];
+    if (state.noSale) {
+      const back = state.times.reduce((last, time, index) => (time ? index + 1 : last), 0);
+      savePaseo(dog, sel, { estado: back ? STEPS[back - 1].estado : "pendiente" }, `${dog.name}: se deshizo "no sale".`);
+      rerender(back >= STEPS.length ? `[data-pw-undo="${id}"]` : `[data-pw-step="${id}"]`);
+      return true;
+    }
+    if (!state.step) return true;
+    const keep = state.step - 1;
+    const changes = { estado: keep ? STEPS[keep - 1].estado : "pendiente" };
+    STEPS.forEach((item, index) => {
+      changes[item.field] = index < keep ? state.times[index] : "";
+    });
+    savePaseo(dog, sel, changes, `${dog.name}: se deshizo "${STEPS[keep].done.toLowerCase()}".`);
     rerender(`[data-pw-step="${id}"]`);
-    announce(`${dog?.name || "Perro"}: se deshizo "${STEPS[times.length - 1].done.toLowerCase()}".`);
     return true;
   }
 
   if (event.target.closest("[data-pw-equip-all]")) {
     const sel = selection();
-    saveForToday(EQUIP_KEY, sel.now.iso, slotKey(sel.now.iso, sel.shift), MY_EQUIPMENT.map((row) => row.item));
+    saveChecklist(sel, MY_EQUIPMENT.map((row) => row.item));
     view.equipStatus = "Equipo completo. ¡A salir!";
     rerender("[data-pw-equip-reset]");
     announce(view.equipStatus);
@@ -989,7 +1379,7 @@ function handlePaseadorClick(event) {
 
   if (event.target.closest("[data-pw-equip-reset]")) {
     const sel = selection();
-    saveForToday(EQUIP_KEY, sel.now.iso, slotKey(sel.now.iso, sel.shift), []);
+    saveChecklist(sel, []);
     view.equipStatus = "Lista de equipo desmarcada.";
     rerender("[data-pw-equip-all]");
     announce(view.equipStatus);
@@ -1011,14 +1401,28 @@ function handlePaseadorClick(event) {
       return true;
     }
     view.previewOpen = true;
-    view.incidentStatus = "Mensaje listo. Revisalo y mandalo por WhatsApp.";
+    view.incidentStatus = view.incidentSavedText === result.text
+      ? "Mensaje listo. El reporte ya está guardado en la app."
+      : "Mensaje listo. Guardando el reporte en la app…";
     rerender("[data-pw-message]");
     announce(view.incidentStatus);
+    saveIncident(draft, result.text);
     return true;
+  }
+
+  // Al mandar o copiar, si el reporte cambió desde que se guardó, se actualiza en la app.
+  if (event.target.closest("[data-pw-whatsapp]")) {
+    const draft = getDraft();
+    const result = buildMessage(draft, selection());
+    if (result.ok) saveIncident(draft, result.text);
+    return false;
   }
 
   if (event.target.closest("[data-pw-copy]")) {
     const text = document.querySelector("[data-pw-message]")?.value || "";
+    const draft = getDraft();
+    const result = buildMessage(draft, selection());
+    if (result.ok) saveIncident(draft, result.text);
     copyText(text).then((ok) => {
       view.incidentStatus = ok ? "Texto copiado. Pegalo en el chat con Juan." : "No se pudo copiar: mantené apretado el texto y copialo a mano.";
       const status = document.querySelector("[data-pw-incident-status]");
@@ -1037,6 +1441,7 @@ function handlePaseadorClick(event) {
       rerender("[data-pw-clear]");
       return true;
     }
+    const wasSaved = Boolean(getDraft().registroId);
     try {
       localStorage.removeItem(INCIDENT_KEY);
     } catch {
@@ -1044,7 +1449,8 @@ function handlePaseadorClick(event) {
     }
     view.confirmClear = false;
     view.previewOpen = false;
-    view.incidentStatus = "Reporte borrado.";
+    view.incidentSavedText = "";
+    view.incidentStatus = wasSaved ? "Formulario limpio. El reporte anterior sigue guardado en la app." : "Reporte borrado.";
     rerender("#pw-incidente");
     announce(view.incidentStatus);
     return true;
@@ -1054,7 +1460,7 @@ function handlePaseadorClick(event) {
     view.confirmClear = false;
     const clear = document.querySelector("[data-pw-clear]");
     if (clear) {
-      clear.textContent = "Borrar reporte";
+      clear.textContent = getDraft().registroId ? "Empezar otro reporte" : "Borrar reporte";
       clear.classList.remove("is-confirm");
     }
   }
@@ -1066,12 +1472,12 @@ function handlePaseadorChange(event) {
   const equip = event.target.closest("[data-pw-equip]");
   if (equip) {
     const sel = selection();
-    const checked = getEquipment(sel.now.iso, sel.shift);
+    const { checked } = checklistFor(sel.now.iso, sel.shift);
     const item = equip.dataset.pwEquip;
     const next = equip.checked ? [...new Set([...checked, item])] : checked.filter((value) => value !== item);
-    saveForToday(EQUIP_KEY, sel.now.iso, slotKey(sel.now.iso, sel.shift), next);
+    saveChecklist(sel, next);
     view.equipStatus = next.length >= MY_EQUIPMENT.length ? "Equipo completo. ¡A salir!" : "";
-    rerender(`[data-pw-equip="${item}"]`);
+    rerender(`[data-pw-equip="${CSS.escape(item)}"]`);
     if (view.equipStatus) announce(view.equipStatus);
     return true;
   }
@@ -1093,4 +1499,10 @@ export function registerPaseadorEvents() {
   clickHandlers.push(handlePaseadorClick);
   changeHandlers.push(handlePaseadorChange);
   document.addEventListener("input", handlePaseadorInput);
+  // Una sola vez: cuando llegan datos nuevos (por ejemplo, lo que marcó el supervisor) se redibuja.
+  onDataChange((col) => {
+    if (col === "paseos" || col === "checklists" || col === "incidentes") scheduleRender();
+  });
+  window.addEventListener("online", scheduleRender);
+  window.addEventListener("offline", scheduleRender);
 }

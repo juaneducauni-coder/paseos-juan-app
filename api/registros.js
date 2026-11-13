@@ -10,7 +10,7 @@ import { coleccion, puedeLeer, puedeEscribir } from "./_lib/permisos.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
-const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre"];
+const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre"];
 const MAX_RECORD = 20 * 1024;
 
 export function nuevoId(fecha) {
@@ -69,6 +69,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       creadoPorNombre: previo?.creadoPorNombre || user.nombre,
       creadoEn: previo?.creadoEn || ahora,
       actualizadoPor: user.usuario,
+      actualizadoPorNombre: user.nombre,
       actualizadoEn: ahora,
     };
     await store.put(col, registro);

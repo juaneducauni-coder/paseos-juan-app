@@ -18,6 +18,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     const body = await readJson(req);
     const usuario = normalizeUser(body.usuario);
     const previo = await store.getUser(usuario);
+    if (body.crear && previo) throw new HttpError(409, "Ese usuario ya existe. Elegí otro nombre de usuario.");
     const rol = body.rol || previo?.rol;
     if (!ROLES.includes(rol)) throw new HttpError(400, "Rol no válido.");
     const nombre = String(body.nombre || previo?.nombre || "").trim().slice(0, 60);
