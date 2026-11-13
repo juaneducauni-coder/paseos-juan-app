@@ -1,7 +1,9 @@
 // Vista del rol Admin (Juan Buitrago, fundador).
 // Datos fijos: src/data/realData.js (BASE RUTAS, precios). Datos del día: servidor compartido
 // (src/api/client.js): paseos, incidentes, checklists, pedidos, rutas, plantillas y avisos.
-// Solo admin: pagos (registro de apoyo) y resumen de clientes. Usuarios: /api/usuarios.
+// Solo admin: pagos (registro de apoyo, con su comprobante) y resumen de clientes. Usuarios: /api/usuarios.
+// Archivos recibidos (carnets, comprobantes, documentos): colección "archivos" (admin y coordinador;
+// los comprobantes de pago los abre solo el admin). Se suben con archivos.subir: sin señal no se encolan.
 // Lo que no está confirmado se rotula como "Pendiente de confirmar".
 // Las marcas de "hecho" de las prioridades se guardan solo en este dispositivo.
 import {
@@ -24,7 +26,7 @@ import {
 } from "../data/realData.js";
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, registros, usuarios, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS } from "../api/client.js";
+import { session, registros, usuarios, archivos, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS } from "../api/client.js";
 
 const DONE_KEY = "paseosJuanAdmin_prioridadesHechas";
 const OPEN_KEY = "paseosJuanAdmin_seccionesAbiertas";
@@ -33,12 +35,26 @@ const SIZES = ["Pequeño", "Mediano", "Grande"];
 const SHIFT_MORNING = SHIFTS.manana.label;
 const SHIFT_AFTERNOON = SHIFTS.tarde.label;
 const LIVE_COLS = ["paseos", "incidentes", "checklists", "pedidos", "rutas", "plantillas", "avisos"];
-// Solo admin: registro de apoyo de pagos y clientes (para el resumen por barrio, sin teléfonos).
-const ADMIN_COLS = ["pagos", "clientes"];
+// Solo admin: registro de apoyo de pagos y clientes (para el resumen por barrio, sin teléfonos),
+// y los archivos recibidos (el admin es el único que abre los comprobantes de pago).
+const ADMIN_COLS = ["pagos", "clientes", "archivos"];
 // Un perro está atrasado si pasaron más de estos minutos desde la hora prevista y no se retiró.
 const LATE_MINUTES = 10;
 const PAGO_MEDIOS = ["Efectivo", "Transferencia", "Naranja X"];
 const LIBRO = "Libro contable del Sistema de Gestión";
+// Tipos de archivo del servidor (api/_lib/archivos.js), con su etiqueta y color.
+const ARCHIVO_TIPOS = {
+  "carnet de vacunas": { label: "Carnet de vacunas", tone: "ok" },
+  "comprobante de pago": { label: "Comprobante de pago", tone: "info" },
+  documento: { label: "Documento", tone: "neutral" },
+  foto: { label: "Foto", tone: "neutral" },
+};
+// Lo mismo que acepta prepararArchivo() en src/api/client.js.
+const ARCHIVO_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf";
+const ARCHIVO_MIME = /^(image\/(jpeg|png|webp)|application\/pdf)$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Cuántos archivos se muestran en "Archivos recibidos" (los más nuevos primero).
+const ARCHIVOS_SHOWN = 20;
 
 // Último mensaje de estado (se escribe en la región aria-live después de cada render).
 let pendingStatus = "";
@@ -59,13 +75,24 @@ const ui = {
   adminLoaded: false,
   adminError: "",
   pagosMes: null, // "AAAA-MM" o "todos"; null = mes actual
+  archivosTipo: "todos", // filtro de "Archivos recibidos"
+  savingPago: false, // se está subiendo el comprobante o guardando el pago
   lateSignature: "",
-  msgs: { users: null, live: null, pagos: null },
+  msgs: { users: null, live: null, pagos: null, archivos: null },
 };
 
 // Lo que se va escribiendo en los formularios, para no perderlo si la página se vuelve a dibujar.
 const emptyPago = () => ({ fecha: hoyAR(), concepto: "", monto: "", medio: "", pasadoAlLibro: false });
-const drafts = { crear: { nombre: "", usuario: "", rol: "paseador", pin: "" }, reset: { pin: "" }, roles: {}, pago: emptyPago() };
+// pagoArchivo: el comprobante elegido (File) se guarda acá porque el <input type="file"> se vacía al
+// redibujar. pagoSubido: si el comprobante ya subió pero el pago no se pudo guardar, no se sube dos veces.
+const drafts = {
+  crear: { nombre: "", usuario: "", rol: "paseador", pin: "" },
+  reset: { pin: "" },
+  roles: {},
+  pago: emptyPago(),
+  pagoArchivo: null,
+  pagoSubido: null,
+};
 
 /* ---------- Utilidades ---------- */
 
@@ -143,6 +170,22 @@ function dateAR(iso) {
 function ymdToAR(ymd) {
   const [y, m, d] = String(ymd || "").split("-");
   return y && m && d ? `${d}/${m}/${y}` : "";
+}
+
+// "820 KB" o "1,4 MB".
+function fileSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
+}
+
+function byNewest(a, b) {
+  return String(b.creadoEn || "").localeCompare(String(a.creadoEn || ""));
+}
+
+function isOffline() {
+  return navigator.onLine === false;
 }
 
 function currentUser() {
@@ -291,7 +334,12 @@ function liveData() {
   // Atrasos del turno actual: misma mitad del día que ahora.
   const lateNow = late.filter((stop) => (stop.prevista < MIDDAY) === (nowMin < MIDDAY));
   const avisos = avisosVigentes(hoy);
-  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos };
+  // Carnets de vacunas que llegaron por el formulario de la web en las últimas 24 horas.
+  const carnetsWeb = registros.cached("archivos", liveOpts("archivos", hoy))
+    .filter((archivo) => archivo.tipo === "carnet de vacunas" && archivo.creadoPor === "web"
+      && Date.now() - Date.parse(archivo.creadoEn || "") < DAY_MS)
+    .sort(byNewest);
+  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos, carnetsWeb };
 }
 
 function lateSignature(live) {
@@ -315,14 +363,20 @@ function startLive() {
   });
 }
 
-// Pagos y clientes (solo admin). Los errores se muestran en la sección de pagos.
+// Pagos, clientes y archivos (solo admin). Los errores de pagos y clientes se muestran en la
+// sección de pagos; los de archivos, en "Archivos recibidos".
 async function refreshAdminData() {
   const hoy = hoyAR();
   const results = await Promise.allSettled(ADMIN_COLS.map((col) => registros.list(col, liveOpts(col, hoy))));
-  const errors = [...new Set(results.filter((r) => r.status === "rejected").map((r) => r.reason?.message || "No se pudieron traer los datos."))];
+  const errorsOf = (cols) => [...new Set(results
+    .filter((r, i) => r.status === "rejected" && cols.includes(ADMIN_COLS[i]))
+    .map((r) => r.reason?.message || "No se pudieron traer los datos."))].join(" ");
   const before = ui.adminError;
-  ui.adminError = errors.join(" ");
-  if (ui.adminError) setMsg("pagos", `No se pudieron traer pagos o clientes: ${ui.adminError}`, true);
+  const pagosError = errorsOf(["pagos", "clientes"]);
+  const archivosError = errorsOf(["archivos"]);
+  ui.adminError = [pagosError, archivosError].filter(Boolean).join(" ");
+  if (pagosError) setMsg("pagos", `No se pudieron traer pagos o clientes: ${pagosError}`, true);
+  if (archivosError) setMsg("archivos", `No se pudo traer la lista de archivos: ${archivosError}`, true);
   if (before !== ui.adminError) rerender();
 }
 
@@ -426,11 +480,29 @@ function flushMsgs() {
   });
 }
 
+// Cómo volver a encontrar el elemento con foco después de redibujar: por id o, si no tiene,
+// por su atributo data-adm-* (y su posición entre los iguales). Los títulos de las secciones
+// plegables se buscan por la sección.
+function focusKey(el) {
+  if (!el || el === document.body || !el.closest?.(".adm-shell")) return null;
+  if (el.id) return { selector: `#${CSS.escape(el.id)}`, index: 0 };
+  let selector = "";
+  if (el.tagName === "SUMMARY" && el.parentElement) {
+    const attr = [...el.parentElement.attributes].find((a) => a.name.startsWith("data-adm-"));
+    if (attr) selector = `[${attr.name}="${CSS.escape(attr.value)}"] > summary`;
+  } else {
+    const attr = [...el.attributes].find((a) => a.name.startsWith("data-adm-") && a.name !== "data-adm-area");
+    if (attr) selector = `${el.tagName.toLowerCase()}[${attr.name}="${CSS.escape(attr.value)}"]`;
+  }
+  if (!selector) return null;
+  return { selector, index: Math.max(0, [...document.querySelectorAll(selector)].indexOf(el)) };
+}
+
 // Vuelve a dibujar sin perder el foco ni lo escrito (los borradores viven en "drafts").
 function rerender() {
   if (!isAdminPage() || session.user()?.rol !== "admin") return;
   const active = document.activeElement;
-  const id = active?.id;
+  const key = focusKey(active);
   let selection = null;
   try {
     if (active && typeof active.selectionStart === "number") selection = [active.selectionStart, active.selectionEnd];
@@ -438,8 +510,9 @@ function rerender() {
     selection = null;
   }
   render();
-  if (!id) return;
-  const again = document.getElementById(id);
+  if (!key) return;
+  const matches = document.querySelectorAll(key.selector);
+  const again = matches[key.index] || matches[0];
   if (!again) return;
   again.focus({ preventScroll: true });
   if (selection) {
@@ -518,8 +591,13 @@ function routeFor(shift) {
   return shift === SHIFT_MORNING ? SHIFTS.manana.route : SHIFTS.tarde.routes.join(" o ");
 }
 
+// ¿El pedido trae carnet de vacunas? (campo carnet del formulario web o un archivo con su pedidoId)
+function hasCarnet(pedido, live) {
+  return Boolean(pedido.carnet?.id) || live.carnetsWeb.some((archivo) => archivo.pedidoId === pedido.id);
+}
+
 // Hasta 3 prioridades calculadas, en orden: incidente de hoy, atrasos del turno actual,
-// pedidos web nuevos, cruces de seguridad, datos, evaluación.
+// pedidos nuevos (con los carnets que llegaron por la web), cruces de seguridad, datos, evaluación.
 function buildPriorities(live = liveData()) {
   const { conflicts } = safetyConflicts();
   const statusIssues = REAL_DOGS.filter((dog) => dog.status !== "Activo");
@@ -581,23 +659,50 @@ function buildPriorities(live = liveData()) {
     });
   }
 
-  if (live.pedidosNuevos.length) {
+  // Pedidos nuevos. Un carnet que llegó por la web en las últimas 24 h cuenta como "pedido nuevo
+  // con carnet" dentro de esta misma prioridad (no suma una prioridad aparte).
+  const pedidoIds = new Set(live.pedidosNuevos.map((pedido) => pedido.id));
+  const carnetsSueltos = live.carnetsWeb.filter((archivo) => !pedidoIds.has(archivo.pedidoId));
+  if (live.pedidosNuevos.length || carnetsSueltos.length) {
     const count = live.pedidosNuevos.length;
+    const conCarnet = live.pedidosNuevos.filter((pedido) => hasCarnet(pedido, live));
     const titleOf = (pedido) => pedido.titulo || pedido.tipo || "Pedido sin título";
-    const titles = live.pedidosNuevos.slice(0, 3).map(titleOf);
-    const oldest = titleOf(live.pedidosNuevos[count - 1]);
-    priorities.push({
-      id: `pedidos-${live.pedidosNuevos[0].id}-${count}`,
-      tag: "Pedidos",
-      tone: "info",
-      title: `${plural(count, "pedido nuevo", "pedidos nuevos")} sin responder`,
-      detail: `${listJoin(titles)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Llegan del formulario de la web o los carga el equipo.`,
-      action: count === 1
-        ? `Respondé el pedido “${oldest}”.`
-        : `Respondé los ${count} pedidos nuevos, empezando por el más viejo: “${oldest}”.`,
-      target: "adm-vivo",
-      targetLabel: count === 1 ? "Ver el pedido" : "Ver los pedidos",
-    });
+    const sueltosNames = [...new Set(carnetsSueltos.map((archivo) => archivo.perroNombre || "perro sin nombre"))];
+    const sueltosText = carnetsSueltos.length
+      ? `${count ? "Además, l" : "L"}${carnetsSueltos.length === 1 ? "legó 1 carnet de vacunas" : `legaron ${carnetsSueltos.length} carnets de vacunas`} por la web en las últimas 24 h (${listJoin(sueltosNames)}) de ${carnetsSueltos.length === 1 ? "un pedido que" : "pedidos que"} ya no ${carnetsSueltos.length === 1 ? "está" : "están"} como nuevo${carnetsSueltos.length === 1 ? "" : "s"}.`
+      : "";
+    if (count) {
+      const titles = live.pedidosNuevos.slice(0, 3).map((pedido) => `${titleOf(pedido)}${hasCarnet(pedido, live) ? " (con carnet)" : ""}`);
+      const oldestPedido = live.pedidosNuevos[count - 1];
+      const oldest = titleOf(oldestPedido);
+      const carnetCount = conCarnet.length + carnetsSueltos.length;
+      priorities.push({
+        id: `pedidos-${live.pedidosNuevos[0].id}-${count}-${carnetCount}`,
+        tag: "Pedidos",
+        tone: "info",
+        title: `${plural(count, "pedido nuevo", "pedidos nuevos")} sin responder${conCarnet.length ? ` · ${conCarnet.length === count && count === 1 ? "trae carnet de vacunas" : `${conCarnet.length} con carnet`}` : ""}`,
+        detail: `${listJoin(titles)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Llegan del formulario de la web o los carga el equipo.${sueltosText ? ` ${sueltosText}` : ""}`,
+        action: count === 1
+          ? `Respondé el pedido “${oldest}”${hasCarnet(oldestPedido, live) ? " y mirá el carnet que mandó" : ""}.`
+          : `Respondé los ${count} pedidos nuevos, empezando por el más viejo: “${oldest}”${hasCarnet(oldestPedido, live) ? " (trae carnet)" : ""}.`,
+        target: "adm-pedidos",
+        targetLabel: count === 1 ? "Ver el pedido" : "Ver los pedidos",
+      });
+    } else {
+      const first = carnetsSueltos[0];
+      priorities.push({
+        id: `carnets-web-${first.id}-${carnetsSueltos.length}`,
+        tag: "Pedidos",
+        tone: "info",
+        title: carnetsSueltos.length === 1
+          ? `Pedido nuevo con carnet: llegó el carnet de ${first.perroNombre || "un perro"} por la web`
+          : `Pedidos nuevos con carnet: llegaron ${carnetsSueltos.length} carnets por la web`,
+        detail: sueltosText,
+        action: `Abrí el carnet de ${first.perroNombre || "ese perro"} en “Archivos recibidos” y sumalo a su ficha.`,
+        target: "adm-archivos",
+        targetLabel: carnetsSueltos.length === 1 ? "Ver el carnet" : "Ver los carnets",
+      });
+    }
   }
 
   if (conflicts.length) {
@@ -736,6 +841,7 @@ export function adminDashboard() {
       </div>
       <div class="adm-sections">
         ${ReviewSection(open)}
+        ${ArchivosSection(open)}
         ${LoadSection(open)}
         ${ClientesSection(open)}
         ${PagosSection(open)}
@@ -888,7 +994,7 @@ function ShiftCard(shift) {
             }).join("")}
           </ul>
         </details>
-      ` : `<p class="adm-empty">Todavía nadie cargó paseos de este turno.</p>`}
+      ` : `<p class="adm-empty">Todavía nadie cargó paseos de este turno. Los marca el paseador en su página al retirar a cada perro.</p>`}
       ${info.planned !== null ? `<p class="adm-note">Previstos según BASE RUTAS: ${info.planned}.${shift.total ? " “Retirados” incluye a los que ya están paseando o entregados." : ""}</p>` : ""}
     </article>
   `;
@@ -1048,7 +1154,7 @@ function AvisosPanel(live) {
             </li>
           `).join("")}
         </ul>
-      ` : `<p class="adm-empty">No hay avisos vigentes por barrio.</p>`}
+      ` : `<p class="adm-empty">No hay avisos vigentes por barrio. Los cargan el coordinador o el supervisor cuando pasa algo en una zona.</p>`}
     </div>
   `;
 }
@@ -1065,9 +1171,9 @@ function LivePanel(live) {
           <h2 id="adm-live-title">El día en vivo</h2>
           <p>Lo que carga el equipo hoy, ${esc(ymdToAR(live.hoy))}. Se actualiza solo cada minuto.</p>
         </div>
-        <button class="adm-button adm-button--ghost adm-panel-action" type="button" data-adm-live-refresh>Actualizar ahora</button>
+        <button class="adm-button adm-button--ghost adm-panel-action" id="adm-live-refresh" type="button" data-adm-live-refresh>Actualizar ahora</button>
       </header>
-      ${offline ? `<p class="adm-msg is-error">Sin conexión: ves lo último que llegó.</p>` : ""}
+      ${offline ? `<p class="adm-msg is-error">Sin conexión: ves lo último que llegó. Se actualiza solo cuando vuelve la señal.</p>` : ""}
       ${MsgRegion("live")}
 
       ${live.incidentes.length ? IncidentList(live.incidentes) : `
@@ -1094,22 +1200,27 @@ function LivePanel(live) {
                 `;
               }).join("")}
             </ul>
-          ` : `<p class="adm-empty">Nadie cargó el checklist hoy.</p>`}
+          ` : `<p class="adm-empty">Nadie cargó el checklist hoy. Lo completa cada paseador en su página antes de salir.</p>`}
         </article>
 
-        <article class="adm-shift" aria-labelledby="adm-live-pedidos">
+        <article class="adm-shift" id="adm-pedidos" tabindex="-1" aria-labelledby="adm-live-pedidos">
           <h3 id="adm-live-pedidos">Pedidos nuevos <span class="adm-count">${pedidosNuevos.length}</span></h3>
           ${pedidosNuevos.length ? `
-            <ul class="adm-mini-list">
-              ${pedidosNuevos.slice(0, 6).map((pedido) => `
-                <li>
-                  <span><strong>${esc(pedido.titulo || pedido.tipo || "Pedido sin título")}</strong></span>
-                  <span class="adm-dog-meta">${esc(ymdToAR(pedido.fecha) || dateAR(pedido.creadoEn))} · ${pedido.origen === "web" ? "Formulario web" : esc(pedido.creadoPorNombre || "Cargado en la app")}</span>
-                </li>
-              `).join("")}
+            <ul class="adm-mini-list adm-pedido-list">
+              ${pedidosNuevos.slice(0, 6).map((pedido) => {
+                const carnetId = pedido.carnet?.id || live.carnetsWeb.find((archivo) => archivo.pedidoId === pedido.id)?.id || "";
+                return `
+                  <li>
+                    <span><strong>${esc(pedido.titulo || pedido.tipo || "Pedido sin título")}</strong></span>
+                    ${carnetId ? `<span class="adm-pill adm-pill--ok">${icon("fileCheck", "adm-icon-xs")} Trae carnet</span>` : ""}
+                    <span class="adm-dog-meta">${esc(ymdToAR(pedido.fecha) || dateAR(pedido.creadoEn))} · ${pedido.origen === "web" ? "Formulario web" : esc(pedido.creadoPorNombre || "Cargado en la app")}</span>
+                    ${carnetId ? `<button class="adm-link-button" type="button" data-adm-archivo-abrir="${esc(carnetId)}" data-adm-area="live">Ver el carnet${pedido.datos?.perro ? ` de ${esc(pedido.datos.perro)}` : ""}</button>` : ""}
+                  </li>
+                `;
+              }).join("")}
             </ul>
-            ${pedidosNuevos.length > 6 ? `<p class="adm-note">Y ${plural(pedidosNuevos.length - 6, "pedido más", "pedidos más")}.</p>` : ""}
-          ` : `<p class="adm-empty">No hay pedidos nuevos.</p>`}
+            ${pedidosNuevos.length > 6 ? `<p class="adm-note">Y ${plural(pedidosNuevos.length - 6, "pedido más", "pedidos más")}. Los responde el coordinador desde su página.</p>` : ""}
+          ` : `<p class="adm-empty">No hay pedidos nuevos. Llegan del formulario de la web o los carga el equipo.</p>`}
         </article>
       </div>
     </section>
@@ -1276,16 +1387,18 @@ function UsersPanel() {
         <button class="adm-button ${ui.showCreate ? "adm-button--ghost" : "adm-button--primary"}" type="button" data-adm-create-toggle aria-expanded="${ui.showCreate}" aria-controls="adm-create">
           ${icon(ui.showCreate ? "x" : "userPlus", "adm-icon-sm")} ${ui.showCreate ? "Cerrar el formulario" : "Crear usuario"}
         </button>
-        <button class="adm-button adm-button--ghost" type="button" data-adm-users-refresh>Actualizar lista</button>
+        <button class="adm-button adm-button--ghost" id="adm-users-refresh" type="button" data-adm-users-refresh>Actualizar lista</button>
       </div>
       ${ui.showCreate ? CreateForm() : ""}
       ${MsgRegion("users")}
       ${body}
 
-      <h3 class="adm-subtitle">Qué puede ver cada rol</h3>
-      <ul class="adm-role-help">
-        ${Object.keys(ROLE_LABELS).map((rol) => `<li><strong>${ROLE_LABELS[rol]}:</strong> ${esc(roleLine(rol))}</li>`).join("")}
-      </ul>
+      <details class="adm-inner" data-adm-inner="roles-ayuda" ${ui.openDogs.has("roles-ayuda") ? "open" : ""}>
+        <summary>Qué puede ver cada rol</summary>
+        <ul class="adm-role-help">
+          ${Object.keys(ROLE_LABELS).map((rol) => `<li><strong>${ROLE_LABELS[rol]}:</strong> ${esc(roleLine(rol))}</li>`).join("")}
+        </ul>
+      </details>
     </section>
   `;
 }
@@ -1485,7 +1598,7 @@ function FactsSection(open) {
         </li>
       `).join("")}
     </ul>
-    <details class="adm-inner">
+    <details class="adm-inner" data-adm-inner="categorias" ${ui.openDogs.has("categorias") ? "open" : ""}>
       <summary>Qué significa cada categoría de conducta</summary>
       <dl class="adm-categories">
         ${Object.entries(CATEGORIES).map(([name, text]) => `
@@ -1625,7 +1738,8 @@ function pagosData() {
     const rol = ui.users?.find((user) => user.usuario === p.creadoPor)?.rol;
     return rol && rol !== "admin";
   });
-  return { all, months, mes, filtered, faltan, faltanMes: filtered.filter((p) => !p.pasadoAlLibro), total, deOtros };
+  const sinComprobanteMes = filtered.filter((p) => !p.comprobanteId);
+  return { all, months, mes, filtered, faltan, faltanMes: filtered.filter((p) => !p.pasadoAlLibro), total, deOtros, sinComprobanteMes };
 }
 
 function PagoRow(pago) {
@@ -1643,14 +1757,61 @@ function PagoRow(pago) {
       <div class="adm-pago-meta">
         <span class="adm-pill adm-pill--neutral">${esc(pago.medio || "Medio sin indicar")}</span>
         <span class="adm-pill ${pago.pasadoAlLibro ? "adm-pill--ok" : "adm-pill--warning"}">${pago.pasadoAlLibro ? "Pasado al Libro" : "Falta pasar al Libro"}</span>
+        ${pago.comprobanteId
+          ? `<span class="adm-pill adm-pill--ok">${icon("fileCheck", "adm-icon-xs")} Con comprobante</span>`
+          : `<span class="adm-pill adm-pill--neutral adm-pill--dashed">Sin comprobante</span>`}
         ${pago.pendiente ? `<span class="adm-pill adm-pill--info">Se enviará cuando haya señal</span>` : ""}
         ${fromOther ? `<span class="adm-pill adm-pill--info">Lo cargó ${esc(ROLE_LABELS[creator.rol] || creator.rol)} antes del cambio</span>` : ""}
       </div>
       ${byLine(pago, true) ? `<p class="adm-note">${esc(byLine(pago, true))}.</p>` : ""}
-      <button class="adm-link-button" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
-        ${pago.pasadoAlLibro ? "Desmarcar “pasado al Libro”" : "Marcar como pasado al Libro"}
-      </button>
+      <div class="adm-pago-actions">
+        ${pago.comprobanteId ? `
+          <button class="adm-button adm-button--ghost adm-button--sm" type="button" data-adm-archivo-abrir="${esc(pago.comprobanteId)}" data-adm-area="pagos">
+            ${icon("eye", "adm-icon-sm")} Ver comprobante
+          </button>
+        ` : pago.pendiente ? "" : `
+          <label class="adm-button adm-button--ghost adm-button--sm adm-file-button">
+            ${icon("fileUp", "adm-icon-sm")} Adjuntar comprobante
+            <input class="adm-file-input" type="file" accept="${ARCHIVO_ACCEPT}" data-adm-pago-adjuntar="${esc(pago.id)}" aria-label="Adjuntar comprobante a ${esc(pago.concepto || "este pago")}" />
+          </label>
+        `}
+        <button class="adm-link-button" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
+          ${pago.pasadoAlLibro ? "Desmarcar “pasado al Libro”" : "Marcar como pasado al Libro"}
+        </button>
+      </div>
     </li>
+  `;
+}
+
+// Comprobante elegido para el pago nuevo (sigue elegido aunque la página se vuelva a dibujar).
+function PagoArchivoField() {
+  const file = drafts.pagoArchivo;
+  const offline = isOffline();
+  return `
+    <fieldset class="adm-file-field" aria-describedby="adm-pago-archivo-ayuda">
+      <legend>Comprobante <small>opcional · foto o PDF, hasta 3,5 MB</small></legend>
+      ${file ? `
+        <p class="adm-file-chosen" id="adm-pago-archivo-elegido">
+          ${icon(file.type === "application/pdf" ? "fileText" : "camera", "adm-icon-sm")}
+          <span><strong>${esc(file.name || "Comprobante")}</strong>${fileSize(file.size) ? ` · ${esc(fileSize(file.size))}` : ""}${drafts.pagoSubido ? " · ya subido" : ""}</span>
+          <button class="adm-link-button" id="adm-pago-archivo-quitar" type="button" data-adm-pago-quitar>Quitar</button>
+        </p>
+      ` : `
+        <div class="adm-file-choices">
+          <label class="adm-button adm-button--ghost adm-file-button">
+            ${icon("camera", "adm-icon-sm")} Sacar foto
+            <input class="adm-file-input" id="adm-pago-foto" type="file" accept="image/*" capture="environment" data-adm-pago-archivo />
+          </label>
+          <label class="adm-button adm-button--ghost adm-file-button">
+            ${icon("fileUp", "adm-icon-sm")} Elegir foto o PDF
+            <input class="adm-file-input" id="adm-pago-archivo" type="file" accept="${ARCHIVO_ACCEPT}" data-adm-pago-archivo />
+          </label>
+        </div>
+      `}
+      <p class="adm-note" id="adm-pago-archivo-ayuda">${offline
+        ? "Sin señal no se pueden subir archivos (no quedan en espera). Guardá el pago sin comprobante y adjuntalo desde la lista cuando vuelva la señal."
+        : "Sirve una captura de la transferencia de Naranja X o una foto del recibo. Lo ves solo vos."}</p>
+    </fieldset>
   `;
 }
 
@@ -1694,12 +1855,15 @@ function PagosSection(open) {
           <datalist id="adm-pago-medios">${PAGO_MEDIOS.map((medio) => `<option value="${esc(medio)}"></option>`).join("")}</datalist>
         </label>
       </div>
+      ${PagoArchivoField()}
       <label class="adm-check" for="adm-pago-libro">
         <input id="adm-pago-libro" type="checkbox" ${d.pasadoAlLibro ? "checked" : ""} data-adm-draft="pago" data-adm-key="pasadoAlLibro" />
         <span>Ya lo pasé al Libro contable</span>
       </label>
       <div class="adm-form-actions">
-        <button class="adm-button adm-button--primary" id="adm-pago-guardar" type="submit">${icon("plus", "adm-icon-sm")} Guardar pago</button>
+        <button class="adm-button adm-button--primary" id="adm-pago-guardar" type="submit" aria-disabled="${ui.savingPago}">
+          ${icon("plus", "adm-icon-sm")} ${ui.savingPago ? (drafts.pagoArchivo && !drafts.pagoSubido ? "Subiendo el comprobante…" : "Guardando…") : "Guardar pago"}
+        </button>
       </div>
     </form>
     ${MsgRegion("pagos")}
@@ -1712,17 +1876,145 @@ function PagosSection(open) {
           <option value="todos" ${data.mes === "todos" ? "selected" : ""}>Todos los meses</option>
         </select>
       </label>
-      <p class="adm-pagos-summary">
-        <strong>${plural(data.filtered.length, "pago", "pagos")}</strong> en ${esc(mesText)} · suma ${esc(formatPeso(data.total))} ·
-        <strong class="${data.faltanMes.length ? "adm-text-warning" : ""}" data-adm-pagos-faltan>${data.faltanMes.length} sin pasar al Libro</strong>${data.mes !== "todos" && data.faltan.length !== data.faltanMes.length ? ` (${data.faltan.length} contando todos los meses)` : ""}
-      </p>
+      ${data.filtered.length ? `
+        <p class="adm-pagos-summary">
+          <strong>${plural(data.filtered.length, "pago", "pagos")}</strong> en ${esc(mesText)} · suma ${esc(formatPeso(data.total))} ·
+          <strong class="${data.faltanMes.length ? "adm-text-warning" : ""}" data-adm-pagos-faltan>${data.faltanMes.length} sin pasar al Libro</strong>${data.mes !== "todos" && data.faltan.length !== data.faltanMes.length ? ` (${data.faltan.length} contando todos los meses)` : ""}${data.sinComprobanteMes.length ? ` · ${data.sinComprobanteMes.length} sin comprobante` : ""}
+        </p>
+      ` : data.faltan.length ? `
+        <p class="adm-pagos-summary"><strong class="adm-text-warning" data-adm-pagos-faltan>${plural(data.faltan.length, "pago", "pagos")} de otros meses sin pasar al Libro.</strong> Elegí “Todos los meses” para verlos.</p>
+      ` : ""}
     </div>
     ${data.deOtros.length ? `<p class="adm-note">${data.deOtros.length === 1 ? "1 pago lo cargó" : `${data.deOtros.length} pagos los cargó`} otro rol antes del cambio de roles (el coordinador ya no ve plata). Se ven acá con la marca “antes del cambio”.</p>` : ""}
     ${shown.length ? `
       <ul class="adm-pago-list" aria-label="Pagos de ${esc(mesText)}">${shown.map(PagoRow).join("")}</ul>
       ${data.filtered.length > shown.length ? `<p class="adm-note">Se muestran los últimos ${shown.length}. Hay ${plural(data.filtered.length - shown.length, "pago más", "pagos más")} en ${esc(mesText)}.</p>` : ""}
-    ` : `<p class="adm-empty">No hay pagos cargados en ${esc(mesText)}.</p>`}
-    <p class="adm-note">La suma es solo de este registro de apoyo: no reemplaza al Libro contable.</p>
+    ` : `<p class="adm-empty">No hay pagos cargados en ${esc(mesText)}. Cargalos con el formulario de arriba cuando te paguen.</p>`}
+    ${data.filtered.length ? `<p class="adm-note">La suma es solo de este registro de apoyo: no reemplaza al Libro contable.</p>` : ""}
+  `);
+}
+
+/* ---------- Archivos recibidos (carnets, comprobantes, documentos) ---------- */
+
+const UBICACIONES = {
+  drive: "En tu Google Drive",
+  vercel: "Guardado en Vercel (provisorio)",
+  local: "Guardado en el servidor de prueba",
+};
+
+function archivosData() {
+  const all = registros.cached("archivos", liveOpts("archivos")).slice().sort(byNewest);
+  const tipo = ui.archivosTipo !== "todos" && ARCHIVO_TIPOS[ui.archivosTipo] ? ui.archivosTipo : "todos";
+  const filtered = tipo === "todos" ? all : all.filter((archivo) => archivo.tipo === tipo);
+  const counts = Object.fromEntries(Object.keys(ARCHIVO_TIPOS).map((key) => [key, all.filter((archivo) => archivo.tipo === key).length]));
+  const enVercel = all.filter((archivo) => archivo.ubicacion === "vercel").length;
+  const enPrueba = all.filter((archivo) => archivo.ubicacion === "local").length;
+  const nuevos = all.filter((archivo) => Date.now() - Date.parse(archivo.creadoEn || "") < DAY_MS);
+  return { all, tipo, filtered, counts, enVercel, enPrueba, nuevos };
+}
+
+// A qué perro, cliente, pedido o pago corresponde un archivo (solo con lo que ya está en la página).
+function archivoLinks(archivo) {
+  const links = [];
+  if (archivo.perroNombre || archivo.perroId) {
+    links.push(`Perro: ${archivo.perroNombre || archivo.perroId}${archivo.perroNombre && archivo.perroId ? ` (${archivo.perroId})` : ""}`);
+  }
+  if (archivo.clienteId) {
+    const cliente = registros.cached("clientes", liveOpts("clientes")).find((item) => item.id === archivo.clienteId);
+    links.push(`Cliente: ${cliente?.nombre || archivo.clienteId}`);
+  }
+  if (archivo.pedidoId) {
+    const pedido = registros.cached("pedidos", liveOpts("pedidos")).find((item) => item.id === archivo.pedidoId);
+    const estado = pedido ? { nuevo: "nuevo", "en-curso": "en curso", resuelto: "resuelto" }[pedido.estado || "nuevo"] || pedido.estado : "";
+    links.push(pedido
+      ? `Pedido: ${pedido.titulo || pedido.tipo || "sin título"}${estado ? ` (${estado})` : ""}`
+      : "Pedido del formulario web");
+  }
+  const pago = pagoDeArchivo(archivo);
+  if (pago) links.push(`Pago: ${pago.concepto || "sin concepto"}${pago.fecha ? ` del ${ymdToAR(pago.fecha)}` : ""}`);
+  return links;
+}
+
+function pagoDeArchivo(archivo) {
+  if (archivo.tipo !== "comprobante de pago") return null;
+  return registros.cached("pagos", liveOpts("pagos")).find((item) => item.comprobanteId === archivo.id) || null;
+}
+
+function ArchivoRow(archivo) {
+  const tipo = ARCHIVO_TIPOS[archivo.tipo] || { label: archivo.tipo || "Archivo", tone: "neutral" };
+  const links = archivoLinks(archivo);
+  const who = archivo.creadoPorNombre || nameOf(archivo.creadoPor) || "";
+  const when = archivo.creadoEn ? `${dateAR(archivo.creadoEn)} a las ${timeAR(archivo.creadoEn)}` : ymdToAR(archivo.fecha);
+  const isNew = Date.now() - Date.parse(archivo.creadoEn || "") < DAY_MS;
+  const ubicacion = UBICACIONES[archivo.ubicacion] || "Lugar de guardado sin indicar";
+  const kind = archivo.mime === "application/pdf" ? "PDF" : /^image\//.test(archivo.mime || "") ? "Foto" : "";
+  const label = `${tipo.label}${archivo.perroNombre ? ` de ${archivo.perroNombre}` : ""}`;
+  const driveUrl = /^https:\/\//i.test(archivo.driveUrl || "") ? archivo.driveUrl : "";
+  return `
+    <li class="adm-archivo adm-archivo--${tipo.tone}">
+      <div class="adm-archivo-head">
+        <span class="adm-pill adm-pill--${tipo.tone}">${esc(tipo.label)}</span>
+        ${isNew ? `<span class="adm-pill adm-pill--info">Nuevo</span>` : ""}
+        <strong class="adm-archivo-title">${esc(archivo.perroNombre || pagoDeArchivo(archivo)?.concepto || archivo.nombreOriginal || archivo.nombreArchivo || tipo.label)}</strong>
+      </div>
+      <p class="adm-archivo-links">${links.length ? esc(links.join(" · ")) : "Sin vincular a un perro, cliente o pedido."}</p>
+      <p class="adm-note">${archivo.creadoPor === "web" ? "Llegó por el formulario de la web" : `Subido por ${esc(who || "alguien sin nombre")}`}${when ? ` el ${esc(when)}` : ""}${kind ? ` · ${kind}` : ""}${fileSize(archivo.tamano) ? ` · ${esc(fileSize(archivo.tamano))}` : ""}</p>
+      <div class="adm-archivo-foot">
+        <span class="adm-archivo-where ${archivo.ubicacion === "drive" ? "is-drive" : "is-temp"}">
+          ${icon(archivo.ubicacion === "drive" ? "checkCircle" : "database", "adm-icon-sm")}
+          ${archivo.ubicacion === "drive" && driveUrl
+            ? `<a class="adm-inline-link" href="${esc(driveUrl)}" target="_blank" rel="noopener noreferrer">${ubicacion}<span class="adm-sr-only"> (se abre en otra pestaña)</span></a>`
+            : esc(ubicacion)}
+        </span>
+        <button class="adm-button adm-button--ghost adm-button--sm" type="button" data-adm-archivo-abrir="${esc(archivo.id)}" data-adm-area="archivos" aria-label="Abrir ${esc(label)}">
+          ${icon("eye", "adm-icon-sm")} Abrir
+        </button>
+      </div>
+    </li>
+  `;
+}
+
+function ArchivosSection(open) {
+  const data = archivosData();
+  const shown = data.filtered.slice(0, ARCHIVOS_SHOWN);
+  const tipoText = data.tipo === "todos" ? "" : ` de tipo “${ARCHIVO_TIPOS[data.tipo].label.toLowerCase()}”`;
+  const summary = data.all.length
+    ? `${plural(data.all.length, "archivo", "archivos")}${data.nuevos.length ? ` · ${plural(data.nuevos.length, "nuevo", "nuevos")} en las últimas 24 h` : ""}`
+    : "Todavía no llegó ningún archivo";
+
+  return Section("adm-archivos", open, {
+    title: "Archivos recibidos",
+    summary,
+    iconName: "fileUp",
+  }, `
+    <p class="adm-lead">Carnets de vacunas, comprobantes y documentos que manda la gente desde el formulario de la web o que sube el equipo. Cada uno dice a qué perro, cliente o pedido corresponde. Los comprobantes de pago los abrís solo vos.</p>
+    ${isOffline() ? `<p class="adm-msg is-error">Sin señal: ves la lista que ya tenías. Para abrir o subir archivos hace falta señal.</p>` : ""}
+    ${data.enVercel || data.enPrueba ? `
+      <p class="adm-warn-box">${icon("alertCircle", "adm-icon-sm")} <span>${listJoin([
+        data.enVercel ? `${data.enVercel === 1 ? "1 archivo está guardado" : `${data.enVercel} archivos están guardados`} en Vercel (provisorio)` : "",
+        data.enPrueba ? `${data.enPrueba === 1 ? "1 archivo está" : `${data.enPrueba} archivos están`} en el servidor de prueba` : "",
+      ].filter(Boolean))}. Cuando se conecte la planilla, los archivos nuevos van a ir a tu Google Drive; los que ya llegaron quedan donde están.</span></p>
+    ` : ""}
+    ${data.all.length ? `
+      <div class="adm-pagos-head">
+        <label class="adm-field adm-field--inline" for="adm-archivos-tipo">
+          <span>Tipo</span>
+          <select class="adm-input adm-input--sm" id="adm-archivos-tipo" data-adm-archivos-tipo>
+            <option value="todos" ${data.tipo === "todos" ? "selected" : ""}>Todos (${data.all.length})</option>
+            ${Object.entries(ARCHIVO_TIPOS).map(([key, item]) => `<option value="${esc(key)}" ${data.tipo === key ? "selected" : ""}>${esc(item.label)} (${data.counts[key]})</option>`).join("")}
+          </select>
+        </label>
+      </div>
+    ` : ""}
+    ${MsgRegion("archivos")}
+    ${shown.length ? `
+      <ul class="adm-archivo-list" aria-label="Archivos recibidos${esc(tipoText)}">${shown.map(ArchivoRow).join("")}</ul>
+      ${data.filtered.length > shown.length ? `<p class="adm-note">Se muestran los últimos ${shown.length}. Hay ${plural(data.filtered.length - shown.length, "archivo más", "archivos más")}${esc(tipoText)}.</p>` : ""}
+    ` : data.all.length ? `
+      <p class="adm-empty">No hay archivos${esc(tipoText)}. Elegí “Todos” para ver el resto.</p>
+    ` : `
+      <p class="adm-empty">Todavía no llegó ningún archivo. Aparecen acá cuando un tutor manda el carnet desde el formulario de la web, cuando el equipo sube uno o cuando adjuntás un comprobante a un pago.</p>
+    `}
   `);
 }
 
@@ -1931,7 +2223,10 @@ function handleAdminClick(event) {
     ui.liveDay = null;
     ui.adminLoaded = false;
     ui.pagosMes = null;
+    ui.archivosTipo = "todos";
     drafts.pago = emptyPago();
+    drafts.pagoArchivo = null;
+    drafts.pagoSubido = null;
     navigate("/salir");
     return true;
   }
@@ -1957,7 +2252,7 @@ async function handleUsersSubmit(event) {
   const tipo = form.dataset.admForm;
 
   if (tipo === "pago") {
-    await savePago(form);
+    await savePago();
     return;
   }
 
@@ -2024,34 +2319,145 @@ async function handleUsersSubmit(event) {
   }
 }
 
-async function savePago(form) {
+async function savePago() {
   const d = drafts.pago;
   const concepto = d.concepto.trim();
   const medio = d.medio.trim();
   const monto = parseMonto(d.monto);
+  const file = drafts.pagoArchivo;
   let problem = "";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha)) problem = "Elegí la fecha del pago.";
   else if (concepto.length < 2) problem = "Escribí el concepto (por ejemplo, el plan y la semana).";
   else if (!Number.isFinite(monto) || monto <= 0) problem = "Escribí el monto en pesos, solo números (por ejemplo 35000).";
+  else if (file && !drafts.pagoSubido && isOffline()) {
+    problem = "Sin señal no se puede subir el comprobante (los archivos no quedan en espera). Tocá “Quitar” para guardar el pago sin comprobante y adjuntarlo después, o esperá a tener señal.";
+  }
   if (problem) {
     setMsg("pagos", problem, true);
     rerender();
     return;
   }
-  setBusy(form, true);
+  ui.busy = true;
+  ui.savingPago = true;
+  let comprobanteId = drafts.pagoSubido?.id || "";
+  if (file && !comprobanteId) {
+    setMsg("pagos", "Subiendo el comprobante…");
+    rerender();
+    try {
+      // Sin nota ni monto: la lista de archivos la ve también el coordinador, que no ve plata.
+      const registro = await archivos.subir("comprobante de pago", file);
+      comprobanteId = registro.id;
+      drafts.pagoSubido = { id: registro.id };
+    } catch (error) {
+      setMsg("pagos", `No se pudo subir el comprobante: ${error.message || "error del servidor."} El pago todavía no se guardó: probá de nuevo o tocá “Quitar” para guardarlo sin comprobante.`, true);
+      ui.busy = false;
+      ui.savingPago = false;
+      rerender();
+      return;
+    }
+  }
   try {
-    const saved = await registros.save("pagos", { fecha: d.fecha, concepto, monto, medio, pasadoAlLibro: d.pasadoAlLibro === true });
+    const saved = await registros.save("pagos", {
+      fecha: d.fecha,
+      concepto,
+      monto,
+      medio,
+      pasadoAlLibro: d.pasadoAlLibro === true,
+      ...(comprobanteId ? { comprobanteId } : {}),
+    });
     drafts.pago = emptyPago();
+    drafts.pagoArchivo = null;
+    drafts.pagoSubido = null;
     ui.pagosMes = d.fecha.slice(0, 7);
+    const conComprobante = comprobanteId ? " con su comprobante" : "";
     setMsg("pagos", saved.pendiente
-      ? "Se enviará cuando haya señal. Queda anotado en este dispositivo."
-      : `Listo: pago de ${formatPeso(monto)} guardado${d.pasadoAlLibro ? "" : ". Acordate de pasarlo al Libro contable"}.`);
+      ? `Se enviará cuando haya señal. Queda anotado en este dispositivo${conComprobante ? " (el comprobante ya se subió)" : ""}.`
+      : `Listo: pago de ${formatPeso(monto)} guardado${conComprobante}${d.pasadoAlLibro ? "" : ". Acordate de pasarlo al Libro contable"}.`);
   } catch (error) {
-    setMsg("pagos", error.message || "No se pudo guardar el pago.", true);
+    setMsg("pagos", `${error.message || "No se pudo guardar el pago."}${comprobanteId ? " El comprobante ya se subió: al tocar “Guardar pago” de nuevo no se sube otra vez." : ""}`, true);
+  } finally {
+    ui.busy = false;
+    ui.savingPago = false;
+    rerender();
+  }
+}
+
+// Comprobante elegido para el pago nuevo: se revisa el tipo enseguida y se guarda en memoria.
+function choosePagoArchivo(input) {
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (!ARCHIVO_MIME.test(file.type)) {
+    setMsg("pagos", "Ese archivo no sirve: solo fotos (JPG, PNG, WEBP) o PDF.", true);
+    rerender();
+    return;
+  }
+  if (file.type === "application/pdf" && file.size > 3.5 * 1024 * 1024) {
+    setMsg("pagos", "El PDF es muy pesado (máximo 3,5 MB). Probá con una captura de pantalla.", true);
+    rerender();
+    return;
+  }
+  drafts.pagoArchivo = file;
+  drafts.pagoSubido = null;
+  setMsg("pagos", `Comprobante elegido: ${file.name || "archivo"}. Se sube al tocar “Guardar pago”.`);
+  rerender();
+  focusLater("#adm-pago-archivo-quitar");
+}
+
+// Adjunta el comprobante a un pago que ya estaba cargado.
+async function adjuntarComprobante(input) {
+  const id = input.dataset.admPagoAdjuntar;
+  const file = input.files?.[0];
+  input.value = "";
+  const pago = registros.cached("pagos", liveOpts("pagos")).find((item) => item.id === id);
+  if (!file || !pago) return;
+  const what = `${pago.concepto || "el pago"}${pago.fecha ? ` del ${ymdToAR(pago.fecha)}` : ""}`;
+  let problem = "";
+  if (ui.busy) problem = "Esperá a que termine lo que se está guardando y probá de nuevo.";
+  else if (!ARCHIVO_MIME.test(file.type)) problem = "Ese archivo no sirve: solo fotos (JPG, PNG, WEBP) o PDF.";
+  else if (isOffline()) problem = "Sin señal no se puede subir el comprobante (los archivos no quedan en espera). Probá cuando vuelva la señal.";
+  if (problem) {
+    setMsg("pagos", problem, true);
+    rerender();
+    return;
+  }
+  ui.busy = true;
+  setMsg("pagos", `Subiendo el comprobante de ${what}…`);
+  rerender();
+  let registro = null;
+  try {
+    registro = await archivos.subir("comprobante de pago", file);
+    const saved = await registros.save("pagos", { id, fecha: pago.fecha, comprobanteId: registro.id });
+    setMsg("pagos", saved.pendiente
+      ? "El comprobante se subió. El cambio del pago se enviará cuando haya señal."
+      : `Listo: ${what} ya tiene su comprobante.`);
+  } catch (error) {
+    setMsg("pagos", `${registro ? "El comprobante se subió pero no se pudo vincular al pago" : "No se pudo subir el comprobante"}: ${error.message || "error del servidor."}`, true);
   } finally {
     ui.busy = false;
     rerender();
+    focusLater(registro ? `.adm-pago [data-adm-archivo-abrir="${CSS.escape(registro.id)}"]` : `[data-adm-pago-adjuntar="${CSS.escape(id)}"]`);
   }
+}
+
+// Abre un archivo con la sesión (pestaña nueva). Los errores van a la región de la sección.
+function abrirArchivo(button) {
+  const id = button.dataset.admArchivoAbrir;
+  const area = ui.msgs[button.dataset.admArea] !== undefined ? button.dataset.admArea : "archivos";
+  if (isOffline()) {
+    setMsg(area, "Sin señal no se puede abrir el archivo. Probá cuando vuelva la señal.", true);
+    rerender();
+    return;
+  }
+  archivos.abrir(id).catch((error) => {
+    const text = error.status === 403
+      ? "Tu usuario no puede abrir este archivo. Los comprobantes de pago los abre solo el admin."
+      : error.status === 404
+        ? "No se encontró el archivo guardado. Puede que lo hayan borrado de Drive."
+        : `No se pudo abrir el archivo: ${error.message || "error del servidor."}`;
+    setMsg(area, text, true);
+    rerender();
+  });
 }
 
 async function togglePagoLibro(id) {
@@ -2213,10 +2619,40 @@ function handleUsersClick(event) {
     return true;
   }
 
+  const abrir = event.target.closest("[data-adm-archivo-abrir]");
+  if (abrir) {
+    abrirArchivo(abrir);
+    return true;
+  }
+
+  if (event.target.closest("[data-adm-pago-quitar]")) {
+    drafts.pagoArchivo = null;
+    drafts.pagoSubido = null;
+    setMsg("pagos", "Comprobante quitado. El pago se guarda sin comprobante.");
+    rerender();
+    focusLater("#adm-pago-archivo");
+    return true;
+  }
+
   return false;
 }
 
 function handleDraftInput(event) {
+  if (event.target.matches?.("[data-adm-pago-archivo], [data-adm-pago-adjuntar]")) {
+    if (event.type !== "change") return;
+    if (event.target.dataset.admPagoAdjuntar !== undefined) adjuntarComprobante(event.target);
+    else choosePagoArchivo(event.target);
+    return;
+  }
+  const tipo = event.target.closest?.("[data-adm-archivos-tipo]");
+  if (tipo) {
+    if (event.type === "change" && ui.archivosTipo !== tipo.value) {
+      ui.archivosTipo = tipo.value;
+      rerender();
+      announce(tipo.value === "todos" ? "Se muestran todos los archivos." : `Se muestran los archivos de tipo ${(ARCHIVO_TIPOS[tipo.value]?.label || tipo.value).toLowerCase()}.`);
+    }
+    return;
+  }
   const month = event.target.closest?.("[data-adm-pagos-mes]");
   if (month) {
     if (event.type === "change" && ui.pagosMes !== month.value) {
@@ -2294,8 +2730,9 @@ function handleAdminActionClick(event) {
 
 function handleSectionToggle(event) {
   if (event.target.matches?.("[data-adm-section]")) rememberSections();
-  if (event.target.matches?.("[data-adm-dogs]")) {
-    const key = event.target.dataset.admDogs;
+  // Listas y ayudas plegables de adentro: se recuerda si están abiertas para no cerrarlas al redibujar.
+  if (event.target.matches?.("[data-adm-dogs], [data-adm-inner]")) {
+    const key = event.target.dataset.admDogs || event.target.dataset.admInner;
     if (event.target.open) ui.openDogs.add(key);
     else ui.openDogs.delete(key);
   }
