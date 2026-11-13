@@ -1,0 +1,103 @@
+/* ---- Instalar la app: botón chico y tarjeta de iPhone ----
+   Abajo, al lado del botón de accesibilidad (abajo a la izquierda) y lejos del
+   de WhatsApp (abajo a la derecha). Por debajo del panel de accesibilidad. */
+
+#instalar-root {
+  font-family: inherit;
+}
+
+.instalar-boton {
+  position: fixed;
+  left: 76px;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  z-index: 55;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 1px solid rgba(15, 31, 19, 0.16);
+  border-radius: 999px;
+  background: #faf8f2;
+  color: #015f3d;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: 0 10px 26px rgba(15, 31, 19, 0.14);
+  cursor: pointer;
+}
+
+.instalar-ios {
+  position: fixed;
+  left: 16px;
+  bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+  z-index: 55;
+  display: grid;
+  width: min(340px, calc(100vw - 32px));
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(15, 31, 19, 0.14);
+  border-radius: 18px;
+  background: #faf8f2;
+  color: #0f1311;
+  box-shadow: 0 18px 44px rgba(15, 31, 19, 0.18);
+}
+
+.instalar-ios p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.instalar-ios svg {
+  vertical-align: -3px;
+  color: #015f3d;
+}
+
+.instalar-ok {
+  justify-self: end;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #015f3d;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instalar-boton:focus-visible,
+.instalar-ok:focus-visible {
+  outline: 3px solid #5cc497;
+  outline-offset: 2px;
+}
+
+html[data-theme="dark"] .instalar-boton {
+  border-color: rgba(234, 244, 239, 0.22);
+  background: #18211c;
+  color: #5cc497;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="dark"] .instalar-ios {
+  border-color: rgba(234, 244, 239, 0.22);
+  background: #161e1a;
+  color: #eef3ef;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+}
+
+html[data-theme="dark"] .instalar-ios svg {
+  color: #5cc497;
+}
+
+html[data-theme="dark"] .instalar-ok {
+  background: #5cc497;
+  color: #0b120e;
+}
+
+@media print {
+  #instalar-root {
+    display: none;
+  }
+}
