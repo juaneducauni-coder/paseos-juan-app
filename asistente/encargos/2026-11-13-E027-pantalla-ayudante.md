@@ -15,3 +15,7 @@ Tareas definidas por Juan (ver `docs/datos-compartidos.md`, "Tareas del ayudante
 Del lado del paseador: ver en cada perro "Integrado por <ayudante>" y "Lo entrega <ayudante>", y la última hora de agua del grupo.
 
 Probar con dos usuarios (sebastian paseador, ayudante1 ayudante): sebastian retira → ayudante integra → ayudante devuelve 2 (no deja 3) → sebastian ve los cambios. Claro/oscuro, 390 y 1440 px.
+
+## Agregado (pedido de Juan): el paseo se marca con una FOTO
+
+En la pantalla del paseador y del ayudante, el paso "En paseo" deja de ser un botón: es un botón de cámara **"Foto del paseo"** (input `type="file" accept="image/*" capture="environment"`) que llama a `fotosPaseo.sacar(paseo, file)` de `src/api/client.js` (ver docs/datos-compartidos.md, "Foto del paseo"). Al sacarla, el perro pasa a "En paseo" y su tarjeta muestra la foto chiquita. Sin señal: igual se marca, con un ícono "foto por subir" y la cantidad de `fotosPaseo.pendientes()` en la barra de "Sin señal". El supervisor y el admin ven en cada perro la foto del paseo (abrirla con `archivos.abrir(fotoPaseoId)`).

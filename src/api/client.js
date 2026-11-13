@@ -496,3 +496,69 @@ session.loginGoogle = async function loginGoogle(credential) {
   session.set(data.token, data.user);
   return data.user;
 };
+
+// ---------- Foto del paseo (reemplaza el botón "En paseo") ----------
+// Sacar la foto marca el paseo: guarda la foto (tipo "foto", nota "Foto del paseo") y actualiza
+// el registro de "paseos" con estado "paseando", horaPaseo y fotoPaseoId.
+// Sin señal: el paseo se marca igual (queda en la cola de siempre) y la foto queda guardada
+// en el celular y se sube sola cuando vuelve la señal.
+const FOTOS_PENDIENTES_KEY = "pj_fotos_paseo_pendientes";
+
+function horaAR(date = new Date()) {
+  return new Intl.DateTimeFormat("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+export const fotosPaseo = {
+  // paseo: { id, fecha, perroId, perroNombre, turno, ruta } (id = AAAA-MM-DD_PJ-001_manana)
+  async sacar(paseo, file) {
+    if (!file || !/^image\//.test(file.type)) throw new ApiError(400, "Sacá una foto del perro.");
+    const archivo = await prepararArchivo(file);
+    const hora = horaAR();
+    const datosPaseo = { ...paseo, estado: "paseando", horaPaseo: hora };
+    try {
+      const result = await request("/api/archivos", {
+        method: "POST",
+        body: { tipo: "foto", archivo, perroId: paseo.perroId, perroNombre: paseo.perroNombre, nota: `Foto del paseo ${paseo.fecha} ${hora}` },
+      });
+      updateCaches("archivos", result.registro);
+      emit("archivos");
+      return registros.save("paseos", { ...datosPaseo, fotoPaseoId: result.registro.id });
+    } catch (error) {
+      if (error.status !== 0) throw error;
+      // Sin señal: se guarda la foto para después y el paseo se marca igual.
+      const pendientes = readJson(FOTOS_PENDIENTES_KEY, []).filter((p) => p.paseo.id !== paseo.id);
+      pendientes.push({ paseo: datosPaseo, archivo, usuario: session.user()?.usuario, at: Date.now() });
+      writeJson(FOTOS_PENDIENTES_KEY, pendientes);
+      return registros.save("paseos", { ...datosPaseo, fotoPendiente: true });
+    }
+  },
+  pendientes() {
+    return readJson(FOTOS_PENDIENTES_KEY, []).length;
+  },
+  // Sube las fotos que quedaron sin señal. Se llama sola cada 30 s y al volver la conexión.
+  async subirPendientes() {
+    const lista = readJson(FOTOS_PENDIENTES_KEY, []);
+    if (!lista.length || !session.token()) return 0;
+    const me = session.user()?.usuario;
+    const hechos = new Set();
+    for (const item of lista) {
+      if (item.usuario && item.usuario !== me) continue;
+      try {
+        const result = await request("/api/archivos", {
+          method: "POST",
+          body: { tipo: "foto", archivo: item.archivo, perroId: item.paseo.perroId, perroNombre: item.paseo.perroNombre, nota: `Foto del paseo ${item.paseo.fecha} ${item.paseo.horaPaseo}` },
+        });
+        await registros.save("paseos", { id: item.paseo.id, fecha: item.paseo.fecha, fotoPaseoId: result.registro.id, fotoPendiente: false });
+        hechos.add(item.at);
+      } catch (error) {
+        if (error.status !== 0) hechos.add(item.at);
+      }
+    }
+    writeJson(FOTOS_PENDIENTES_KEY, readJson(FOTOS_PENDIENTES_KEY, []).filter((i) => !hechos.has(i.at)));
+    if (hechos.size) emit("paseos");
+    return hechos.size;
+  },
+};
+
+window.addEventListener("online", () => fotosPaseo.subirPendientes());
+setInterval(() => fotosPaseo.subirPendientes(), 30 * 1000);

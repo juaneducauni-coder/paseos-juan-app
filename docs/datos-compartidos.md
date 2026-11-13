@@ -60,7 +60,7 @@ Checklist del ayudante antes de salir (corto): botiquín (agua oxigenada y gasa)
 
 | Colección | Quién lee | Quién escribe | id | Campos |
 |---|---|---|---|---|
-| `paseos` | equipo* | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_PJ-001_manana` (o `_tarde`) | `fecha`, `perroId`, `perroNombre`, `turno` ("Mañana"/"Tarde"), `ruta`, `estado` ("pendiente", "retirado", "paseando", "entregado", "no-sale"), `horaRetiro`, `horaPaseo`, `horaEntrega` (y quién marcó cada paso: `horaRetiroPor`/`horaRetiroPorNombre`, `horaPaseoPor`/`horaPaseoPorNombre`, `horaEntregaPor`/`horaEntregaPorNombre`), `nota` |
+| `paseos` | equipo* | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_PJ-001_manana` (o `_tarde`) | `fecha`, `perroId`, `perroNombre`, `turno` ("Mañana"/"Tarde"), `ruta`, `estado` ("pendiente", "retirado", "paseando", "entregado", "no-sale"), `horaRetiro`, `horaPaseo`, `horaEntrega` (y quién marcó cada paso: `horaRetiroPor`/`horaRetiroPorNombre`, `horaPaseoPor`/`horaPaseoPorNombre`, `horaEntregaPor`/`horaEntregaPorNombre`), `fotoPaseoId` (foto que marca el paseo), `fotoPendiente` (true si se sacó sin señal y todavía no se subió), `nota` |
 | `checklists` | admin, supervisor, paseador, ayudante | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_usuario_manana` | `fecha`, `turno`, `items`, `completo` |
 | `incidentes` | equipo* | admin, supervisor, paseador, ayudante | automático | `fecha`, `hora`, `perros`, `perroNombre`, `lugar`, `barrio`, `antes`, `conducta`, `accion`, `despues`, `riesgo`, `lesiones`, `protocolo`, `titulo` |
 | `observaciones` | equipo* | equipo* | automático | `fecha`, `hora`, `perroId`, `perroNombre`, `lugar`, `estimulo`, `reaccion`, `accion`, `resultado`, `titulo` |
@@ -117,3 +117,14 @@ await fotosPerros.subir("PJ-001", "Pistacho", input.files[0]); // necesita seña
 - Se activa con la variable `GOOGLE_CLIENT_ID` en Vercel (ID de cliente OAuth de tipo "Aplicación web"). Sin eso, los botones no aparecen.
 - Equipo: el admin vincula el Gmail de cada usuario (`POST /api/usuarios` con `{ usuario, google: "correo@gmail.com" }`); después esa persona entra con "Iniciar sesión con Google" (`POST /api/auth/google`). El PIN sigue funcionando.
 - Formulario web: `botonGoogle(contenedor, (credential) => ...)` de `src/api/client.js` dibuja "Continuar con Google"; mandá `googleCredential` junto con el pedido y el servidor guarda el correo verificado (y el nombre si faltaba).
+
+## Foto del paseo (en vez del botón "En paseo")
+
+```js
+import { fotosPaseo } from "../api/client.js";
+// input type="file" accept="image/*" capture="environment"
+await fotosPaseo.sacar({ id, fecha, perroId, perroNombre, turno, ruta }, input.files[0]);
+fotosPaseo.pendientes(); // fotos sacadas sin señal que todavía no se subieron
+```
+
+Sacar la foto marca el paseo (`estado: "paseando"`, `horaPaseo`, `fotoPaseoId`). Sin señal, el paseo se marca igual y la foto se sube sola después. La foto la abren admin y coordinador (y el resto del equipo, porque es tipo "foto").
