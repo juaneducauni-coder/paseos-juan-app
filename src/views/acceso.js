@@ -1,7 +1,7 @@
 // Ingreso real con usuario y PIN, primer usuario administrador, cambio de PIN y avisos de acceso.
 import { shell } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, homeFor, ROLE_PAGES, ApiError } from "../api/client.js";
+import { session, homeFor, ROLE_PAGES, ApiError, botonGoogle } from "../api/client.js";
 
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -42,7 +42,8 @@ export function loginPage() {
           ${setup ? `<label>Repetí el PIN <input name="pin2" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" maxlength="8" required /></label>
           <p class="acc-help">Elegí 6 a 8 números que no sean fáciles de adivinar (nada de 123456 ni tu fecha de nacimiento).</p>` : ""}
           <button class="acc-button" type="submit">${setup ? "Crear y entrar" : "Entrar"}</button>
-        </form>`}
+        </form>
+        ${setup ? "" : `<div class="acc-google" data-acc-google hidden><span class="acc-o">o</span><div data-acc-google-boton></div></div>`}`}
         <p class="acc-status ${estado.error ? "is-error" : ""}" data-acc-status role="status" aria-live="polite">${esc(estado.mensaje)}</p>
         <p class="acc-foot"><a href="/" data-link>Volver a la página de Paseos Juan</a></p>
       </section>
@@ -161,3 +162,27 @@ async function onSubmit(event) {
 export function registerAccesoEvents() {
   document.addEventListener("submit", onSubmit);
 }
+
+// Botón "Entrar con Google" en el ingreso (solo si Google está activado en el servidor).
+async function montarGoogle() {
+  const caja = document.querySelector("[data-acc-google]");
+  const destino = caja?.querySelector("[data-acc-google-boton]");
+  if (!caja || !destino || destino.dataset.montado) return;
+  destino.dataset.montado = "1";
+  const ok = await botonGoogle(destino, async (credential) => {
+    const status = document.querySelector("[data-acc-status]");
+    try {
+      if (status) status.textContent = "Entrando con Google…";
+      const user = await session.loginGoogle(credential);
+      navigate(user.debeCambiarPin ? "/login" : homeFor(user.rol));
+    } catch (error) {
+      if (status) {
+        status.textContent = error.message;
+        status.classList.add("is-error");
+      }
+    }
+  }, { texto: "signin_with" }).catch(() => false);
+  caja.hidden = !ok;
+}
+
+new MutationObserver(() => montarGoogle()).observe(document.getElementById("app") || document.body, { childList: true, subtree: true });

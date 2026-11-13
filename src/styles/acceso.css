@@ -143,3 +143,18 @@ html[data-theme="dark"] .acc-alert {
   background: #2e2513;
   color: #f6e4b8;
 }
+
+.acc-google {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.acc-google[hidden] {
+  display: none;
+}
+
+.acc-o {
+  color: var(--text);
+  font-size: 0.9rem;
+}

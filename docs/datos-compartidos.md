@@ -111,3 +111,9 @@ await fotosPerros.subir("PJ-001", "Pistacho", input.files[0]); // necesita seña
 - Cualquiera del equipo puede sacar la foto (input `type="file" accept="image/*" capture="environment"`).
 - La miniatura se ve en todas las listas; la grande se abre con `archivos.abrir(foto.archivoId)`.
 - Supervisor, paseador y ayudante solo ven fotos; carnets y documentos siguen siendo de admin y coordinador.
+
+## Iniciar sesión con Google
+
+- Se activa con la variable `GOOGLE_CLIENT_ID` en Vercel (ID de cliente OAuth de tipo "Aplicación web"). Sin eso, los botones no aparecen.
+- Equipo: el admin vincula el Gmail de cada usuario (`POST /api/usuarios` con `{ usuario, google: "correo@gmail.com" }`); después esa persona entra con "Iniciar sesión con Google" (`POST /api/auth/google`). El PIN sigue funcionando.
+- Formulario web: `botonGoogle(contenedor, (credential) => ...)` de `src/api/client.js` dibuja "Continuar con Google"; mandá `googleCredential` junto con el pedido y el servidor guarda el correo verificado (y el nombre si faltaba).

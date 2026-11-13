@@ -22,6 +22,7 @@ const routes = {
   registros: (await import("../api/registros.js")).default,
   evaluacion: (await import("../api/publico/evaluacion.js")).default,
   archivos: (await import("../api/archivos.js")).default,
+  google: (await import("../api/auth/google.js")).default,
 };
 
 async function call(route, { method = "GET", url = "/", body, token } = {}) {
@@ -150,6 +151,34 @@ test("fotos de perros: todo el equipo las ve, carnets no", async () => {
   assert.ok(lista.body.registros.every((r) => r.tipo === "foto"));
   const abre = await callRaw("archivos", { url: `/?id=${foto.body.registro.id}`, token: paseador });
   assert.equal(abre.status, 200);
+});
+
+test("entrar con Google: solo cuentas vinculadas y del ID de cliente correcto", async () => {
+  process.env.GOOGLE_CLIENT_ID = "cliente-prueba.apps.googleusercontent.com";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const token = new URL(url).searchParams.get("id_token");
+    const base = { iss: "https://accounts.google.com", exp: String(Math.floor(Date.now() / 1000) + 600), email_verified: "true", name: "Prueba" };
+    const datos = {
+      "tok-juan": { ...base, aud: process.env.GOOGLE_CLIENT_ID, email: "Juan@Gmail.com" },
+      "tok-otro": { ...base, aud: process.env.GOOGLE_CLIENT_ID, email: "nadie@gmail.com" },
+      "tok-aud": { ...base, aud: "otra-app", email: "juan@gmail.com" },
+    }[token];
+    return { ok: Boolean(datos), json: async () => datos || { error_description: "invalid" } };
+  };
+  try {
+    const vinc = await call("usuarios", { method: "POST", token: admin, body: { usuario: "juan", google: "juan@gmail.com" } });
+    assert.equal(vinc.status, 200);
+    const ok = await call("google", { method: "POST", body: { credential: "tok-juan" } });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.user.usuario, "juan");
+    assert.equal((await call("google", { method: "POST", body: { credential: "tok-otro" } })).status, 403);
+    assert.equal((await call("google", { method: "POST", body: { credential: "tok-aud" } })).status, 401);
+    assert.equal((await call("google", { method: "POST", body: { credential: "falso" } })).status, 401);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.GOOGLE_CLIENT_ID;
+  }
 });
 
 test("bloqueo después de 5 intentos fallidos", async () => {

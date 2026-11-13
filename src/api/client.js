@@ -439,3 +439,60 @@ export const fotosPerros = {
     return registros.save("fotos", { id: perroId, perroId, perroNombre, miniatura, archivoId: grande.id });
   },
 };
+
+// ---------- Iniciar sesión con Google ----------
+// Necesita GOOGLE_CLIENT_ID configurado en Vercel (lo informa /api/salud). Si no está, no se muestra nada.
+let googleConfig = null;
+
+async function googleClientIdPublico() {
+  if (googleConfig) return googleConfig;
+  googleConfig = fetch("/api/salud")
+    .then((r) => r.json())
+    .then((d) => d.googleClientId || null)
+    .catch(() => null);
+  return googleConfig;
+}
+
+function cargarScriptGoogle() {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existente = document.querySelector('script[data-gsi]');
+    if (existente) {
+      existente.addEventListener("load", () => resolve());
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.dataset.gsi = "1";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new ApiError(0, "No se pudo cargar Google."));
+    document.head.appendChild(s);
+  });
+}
+
+// Dibuja el botón oficial de Google dentro de `contenedor`. onCredential recibe el ID token.
+// Devuelve false si Google no está activado (el contenedor queda vacío).
+export async function botonGoogle(contenedor, onCredential, { texto = "continue_with" } = {}) {
+  const clientId = await googleClientIdPublico();
+  if (!clientId || !contenedor) return false;
+  await cargarScriptGoogle();
+  window.google.accounts.id.initialize({ client_id: clientId, callback: (r) => onCredential(r.credential), ux_mode: "popup" });
+  const oscuro = document.documentElement.dataset.theme === "dark";
+  window.google.accounts.id.renderButton(contenedor, {
+    type: "standard",
+    theme: oscuro ? "filled_black" : "outline",
+    size: "large",
+    text: texto,
+    shape: "pill",
+    locale: "es",
+    width: Math.min(contenedor.clientWidth || 320, 400),
+  });
+  return true;
+}
+
+session.loginGoogle = async function loginGoogle(credential) {
+  const data = await request("/api/auth/google", { method: "POST", body: { credential }, auth: false });
+  session.set(data.token, data.user);
+  return data.user;
+};

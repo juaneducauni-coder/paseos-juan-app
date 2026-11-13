@@ -4,6 +4,7 @@ import { handler, send, readJson, clientIp, HttpError } from "../_lib/http.js";
 import { store } from "../_lib/store.js";
 import { nuevoId } from "../registros.js";
 import { guardarArchivo } from "../_lib/archivos.js";
+import { verificarGoogle } from "../_lib/google.js";
 
 const CAMPOS = ["perro", "edad", "tamano", "raza", "energia", "perros", "mordida", "conducta",
   "responsable", "telefono", "zona", "referencia", "tipo", "horario", "dias", "comentario"];
@@ -27,6 +28,20 @@ export default handler({ POST: 1 }, async (req, res) => {
   for (const campo of CAMPOS) {
     const valor = String(body[campo] ?? "").trim().slice(0, 600);
     if (valor) datos[campo] = valor;
+  }
+  // Si el tutor usó "Continuar con Google", su correo queda verificado por Google.
+  if (body.googleCredential) {
+    try {
+      const g = await verificarGoogle(body.googleCredential);
+      datos.email = g.email;
+      datos.emailVerificado = "sí (Google)";
+      if (!datos.responsable && g.nombre) datos.responsable = g.nombre.slice(0, 600);
+    } catch {
+      // Si Google no confirma, el pedido igual se guarda con lo que escribió.
+    }
+  } else if (body.email) {
+    const email = String(body.email).trim().slice(0, 200);
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) datos.email = email;
   }
   if (!datos.perro || !datos.responsable || !datos.telefono) {
     throw new HttpError(400, "Faltan el nombre del perro, tu nombre o tu teléfono.");

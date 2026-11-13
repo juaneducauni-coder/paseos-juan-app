@@ -26,6 +26,16 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (usuario === admin.usuario && rol !== "admin") {
       throw new HttpError(400, "No podés sacarte el rol de admin a vos mismo.");
     }
+    // Gmail vinculado para "Entrar con Google" (opcional). "" lo desvincula.
+    let google = previo?.google || "";
+    if (body.google !== undefined) {
+      google = String(body.google || "").trim().toLowerCase();
+      if (google && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(google)) throw new HttpError(400, "El correo de Google no es válido.");
+      if (google) {
+        const otro = (await store.listUsers()).find((u) => u.google === google && u.usuario !== usuario);
+        if (otro) throw new HttpError(409, "Ese correo ya está vinculado a otro usuario.");
+      }
+    }
     let credenciales = previo ? { salt: previo.salt, hash: previo.hash } : null;
     let version = previo?.version || 1;
     if (body.pin) {
@@ -41,6 +51,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       rol,
       activo: body.activo === undefined ? previo?.activo ?? true : Boolean(body.activo),
       ...credenciales,
+      google,
       version: body.activo === false ? version + 1 : version,
       fallos: 0,
       bloqueadoHasta: null,
