@@ -35,8 +35,9 @@ export const COLECCIONES = {
   avisos: { leer: [...EQUIPO, "marketing"], escribir: ["admin", "coordinador", "supervisor"] },
   // Pedidos de clientes y evaluaciones (incluye los del formulario de la web).
   pedidos: { leer: ["admin", "coordinador", "marketing"], escribir: ["admin", "coordinador", "marketing"] },
-  // Fichas de perros nuevos (altas) antes de pasar al registro maestro.
-  fichas: { leer: ["admin", "coordinador", "supervisor"], escribir: ["admin", "coordinador"] },
+  // Fichas de perros nuevos (altas) antes de pasar al registro maestro. Tienen datos de tutores
+  // y de salud: solo admin y coordinador (el supervisor no las necesita).
+  fichas: { leer: ["admin", "coordinador"], escribir: ["admin", "coordinador"] },
   // Datos a confirmar marcados como resueltos. id = PJ-003
   resueltos: { leer: ["admin", "coordinador"], escribir: ["admin", "coordinador"] },
   // Archivos que manda la gente (carnet de vacunas, documentos, fotos, comprobantes) con a qué perro,
@@ -68,4 +69,18 @@ export function puedeVerArchivo(rol, archivo) {
   if (archivo?.tipo === "comprobante de pago") return false;
   if (rol === "coordinador") return true;
   return archivo?.tipo === "foto";
+}
+
+// Qué tipo de archivo puede SUBIR cada rol: admin todos; coordinador carnets, documentos y fotos;
+// supervisor, paseador y ayudante solo fotos (de perfil y del paseo).
+const SUBIDA = {
+  admin: ["carnet de vacunas", "comprobante de pago", "documento", "foto"],
+  coordinador: ["carnet de vacunas", "documento", "foto"],
+  supervisor: ["foto"],
+  paseador: ["foto"],
+  ayudante: ["foto"],
+};
+
+export function puedeSubirArchivo(rol, tipo) {
+  return Boolean(Object.prototype.hasOwnProperty.call(SUBIDA, rol) && SUBIDA[rol].includes(tipo));
 }

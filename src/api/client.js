@@ -390,7 +390,7 @@ export const archivos = {
     emit("archivos");
     return result.registro;
   },
-  // Abre el archivo en una pestaña nueva (lo baja con la sesión, no queda público).
+  // Abre la foto en una pestaña nueva (la baja con la sesión, no queda pública). Los PDF se descargan.
   async abrir(id) {
     const ventana = window.open("", "_blank");
     if (!ventana) {
@@ -404,8 +404,23 @@ export const archivos = {
         const data = await response.json().catch(() => ({}));
         throw new ApiError(response.status, data.error || "No se pudo abrir el archivo.");
       }
-      const url = URL.createObjectURL(await response.blob());
-      ventana.location.href = url;
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (/^image\//.test(blob.type)) {
+        ventana.location.href = url;
+      } else {
+        // PDF y lo que no sea imagen: se descarga (no se abre una pestaña blob: con el origen de la app).
+        ventana.close();
+        const disposicion = response.headers.get("Content-Disposition") || "";
+        const nombre = /filename="([^"]+)"/.exec(disposicion)?.[1] || "archivo";
+        const enlace = document.createElement("a");
+        enlace.href = url;
+        enlace.download = nombre;
+        enlace.rel = "noopener";
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+      }
       setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
     } catch (error) {
       ventana?.close();

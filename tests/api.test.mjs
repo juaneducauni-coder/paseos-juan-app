@@ -395,3 +395,141 @@ test("rutas: no acepta paradas con código de perro o hora inválidos", async ()
   const ok = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: "PJ-001", perroNombre: "Pistacho", hora: "09:00", minutos: 45 }] } });
   assert.ok(ok.status === 201 || ok.status === 200);
 });
+
+// ---------- E-039: control por registro, archivos por rol y setup en Vercel ----------
+async function crearYEntrar(usuario, nombre, rol, pin) {
+  await call("usuarios", { method: "POST", token: admin, body: { usuario, nombre, rol, pin, crear: true } });
+  return (await call("login", { method: "POST", body: { usuario, pin } })).body.token;
+}
+let supervisor;
+let supervisor2;
+let ayudante;
+let coordinador;
+let pas;
+
+test("E-039: el supervisor no lee fichas (datos de tutores y salud)", async () => {
+  supervisor = await crearYEntrar("superuno", "Supervisor Uno", "supervisor", "604918");
+  supervisor2 = await crearYEntrar("superdos", "Supervisor Dos", "supervisor", "604927");
+  ayudante = await crearYEntrar("ayudauno", "Ayudante Uno", "ayudante", "604936");
+  pas = await crearYEntrar("paseauno", "Paseador Uno", "paseador", "604945");
+  coordinador = (await call("login", { method: "POST", body: { usuario: "coordina", pin: "736195" } })).body.token;
+  await call("registros", { method: "POST", token: coordinador, body: { col: "fichas", perroNombre: "Luna", datos: { tutor: "Ana", salud: "alergia" } } });
+  assert.equal((await call("registros", { url: "/?col=fichas", token: supervisor })).status, 403);
+  assert.equal((await call("registros", { url: "/?col=fichas", token: coordinador })).status, 200);
+});
+
+test("E-039: el supervisor pide cambios pero no los marca aplicados", async () => {
+  const pide = await call("registros", { method: "POST", token: supervisor, body: { col: "solicitudes", fecha: "2026-11-13", tipo: "no sale", estado: "aplicado", respuesta: "trampa" } });
+  assert.equal(pide.status, 201);
+  assert.equal(pide.body.registro.estado, "pendiente");
+  assert.equal(pide.body.registro.respuesta, "");
+  const id = pide.body.registro.id;
+  const aprueba = await call("registros", { method: "POST", token: supervisor, body: { col: "solicitudes", id, fecha: "2026-11-13", estado: "aplicado", respuesta: "listo", detalle: "corrijo" } });
+  assert.equal(aprueba.status, 200);
+  assert.equal(aprueba.body.registro.estado, "pendiente");
+  assert.equal(aprueba.body.registro.respuesta, "");
+  assert.equal(aprueba.body.registro.detalle, "corrijo");
+  const otro = await call("registros", { method: "POST", token: supervisor2, body: { col: "solicitudes", id, fecha: "2026-11-13", detalle: "ajeno" } });
+  assert.equal(otro.status, 403);
+  const coord = await call("registros", { method: "POST", token: coordinador, body: { col: "solicitudes", id, fecha: "2026-11-13", estado: "aplicado", respuesta: "Hecho" } });
+  assert.equal(coord.body.registro.estado, "aplicado");
+  const despues = await call("registros", { method: "POST", token: supervisor, body: { col: "solicitudes", id, fecha: "2026-11-13", detalle: "otra cosa" } });
+  assert.equal(despues.status, 403);
+  // Ya respondido: el supervisor no lo borra; el admin sí.
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=solicitudes&id=${id}`, token: supervisor })).status, 403);
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=solicitudes&id=${id}`, token: admin })).body.borrado, true);
+});
+
+test("E-039: cada uno escribe solo su checklist", async () => {
+  const ajeno = await call("registros", { method: "POST", token: pas, body: { col: "checklists", id: "2026-11-13_ayudauno_manana", fecha: "2026-11-13", completo: true } });
+  assert.equal(ajeno.status, 403);
+  const raro = await call("registros", { method: "POST", token: pas, body: { col: "checklists", id: "2026-11-13_paseauno_noche", fecha: "2026-11-13" } });
+  assert.equal(raro.status, 403);
+  const propio = await call("registros", { method: "POST", token: pas, body: { col: "checklists", id: "2026-11-13_paseauno_manana", fecha: "2026-11-13", completo: true } });
+  assert.equal(propio.status, 201);
+  const delAdmin = await call("registros", { method: "POST", token: admin, body: { col: "checklists", id: "2026-11-13_ayudauno_tarde", fecha: "2026-11-13" } });
+  assert.equal(delAdmin.status, 201);
+});
+
+test("E-039: incidentes, observaciones y avisos ajenos no se editan (el coordinador sí edita avisos)", async () => {
+  const inc = await call("registros", { method: "POST", token: pas, body: { col: "incidentes", fecha: "2026-11-13", titulo: "Tirón" } });
+  const pisa = await call("registros", { method: "POST", token: ayudante, body: { col: "incidentes", id: inc.body.registro.id, fecha: "2026-11-13", titulo: "Otra cosa" } });
+  assert.equal(pisa.status, 403);
+  const propio = await call("registros", { method: "POST", token: pas, body: { col: "incidentes", id: inc.body.registro.id, fecha: "2026-11-13", titulo: "Tirón leve" } });
+  assert.equal(propio.status, 200);
+  const aviso = await call("registros", { method: "POST", token: supervisor, body: { col: "avisos", fecha: "2026-11-13", barrio: "Pilar", mensaje: "Obra" } });
+  const coordEdita = await call("registros", { method: "POST", token: coordinador, body: { col: "avisos", id: aviso.body.registro.id, fecha: "2026-11-13", mensaje: "Obra en la esquina" } });
+  assert.equal(coordEdita.status, 200);
+  const avisoCoord = await call("registros", { method: "POST", token: coordinador, body: { col: "avisos", fecha: "2026-11-13", barrio: "Pilar", mensaje: "Corte" } });
+  const supEdita = await call("registros", { method: "POST", token: supervisor2, body: { col: "avisos", id: avisoCoord.body.registro.id, fecha: "2026-11-13", mensaje: "x" } });
+  assert.equal(supEdita.status, 403);
+  const obs = await call("registros", { method: "POST", token: supervisor, body: { col: "observaciones", fecha: "2026-11-13", titulo: "Ladra" } });
+  assert.equal((await call("registros", { method: "POST", token: pas, body: { col: "observaciones", id: obs.body.registro.id, fecha: "2026-11-13", titulo: "y" } })).status, 403);
+});
+
+test("E-039: quién marcó cada paso del paseo lo fija el servidor", async () => {
+  const id = "2026-11-13_PJ-009_manana";
+  const base = { col: "paseos", id, fecha: "2026-11-13", perroId: "PJ-009" };
+  const retiro = await call("registros", { method: "POST", token: pas, body: { ...base, horaRetiro: "09:00", horaRetiroPor: "ayudauno", horaRetiroPorNombre: "Ayudante Uno" } });
+  assert.equal(retiro.body.registro.horaRetiroPor, "paseauno");
+  assert.equal(retiro.body.registro.horaRetiroPorNombre, "Paseador Uno");
+  // El ayudante reenvía el paso anterior tal cual (como hace la app) y marca integración y entrega.
+  const ayu = await call("registros", { method: "POST", token: ayudante, body: { ...base, horaRetiroPor: "paseauno", horaRetiroPorNombre: "Otro nombre", horaIntegradoPor: "paseauno", devuelvePor: "x", horaEntregaPorNombre: "Suelto" } });
+  assert.equal(ayu.body.registro.horaRetiroPor, "paseauno");
+  assert.equal(ayu.body.registro.horaRetiroPorNombre, "Paseador Uno");
+  assert.equal(ayu.body.registro.horaIntegradoPor, "ayudauno");
+  assert.equal(ayu.body.registro.horaIntegradoPorNombre, "Ayudante Uno");
+  assert.equal(ayu.body.registro.devuelvePor, "ayudauno");
+  assert.equal(ayu.body.registro.horaEntregaPorNombre, undefined);
+  // Vacío = desmarcar.
+  const suelta = await call("registros", { method: "POST", token: supervisor, body: { ...base, devuelvePor: "", devuelvePorNombre: "Mateo" } });
+  assert.equal(suelta.body.registro.devuelvePor, "");
+  assert.equal(suelta.body.registro.devuelvePorNombre, "");
+  assert.equal(suelta.body.registro.horaIntegradoPor, "ayudauno");
+});
+
+test("E-039: cada rol sube solo sus tipos de archivo y solo el admin los borra", async () => {
+  const archivo = { nombre: "x.png", mime: "image/png", base64: PNG };
+  assert.equal((await call("archivos", { method: "POST", token: pas, body: { tipo: "comprobante de pago", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: ayudante, body: { tipo: "carnet de vacunas", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: supervisor, body: { tipo: "documento", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: coordinador, body: { tipo: "comprobante de pago", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: admin, body: { tipo: "otra cosa", archivo } })).status, 400);
+  assert.equal((await call("archivos", { method: "POST", token: coordinador, body: { tipo: "carnet de vacunas", archivo } })).status, 201);
+  assert.equal((await call("archivos", { method: "POST", token: coordinador, body: { tipo: "documento", archivo } })).status, 201);
+  const foto = await call("archivos", { method: "POST", token: pas, body: { tipo: "foto", archivo } });
+  assert.equal(foto.status, 201);
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=archivos&id=${foto.body.registro.id}`, token: pas })).status, 403);
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=archivos&id=${foto.body.registro.id}`, token: admin })).body.borrado, true);
+});
+
+test("E-039: los PDF se descargan aislados (attachment + CSP sandbox)", async () => {
+  const pdf = Buffer.from("%PDF-1.4\n%prueba\n").toString("base64");
+  const sube = await call("archivos", { method: "POST", token: admin, body: { tipo: "documento", archivo: { nombre: "d.pdf", mime: "application/pdf", base64: pdf } } });
+  assert.equal(sube.status, 201);
+  const baja = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: admin });
+  assert.equal(baja.status, 200);
+  assert.match(baja.headers["Content-Disposition"], /^attachment;/);
+  assert.equal(baja.headers["Content-Security-Policy"], "default-src 'none'; sandbox");
+  const img = (await call("registros", { url: "/?col=archivos", token: admin })).body.registros.find((r) => r.mime === "image/png");
+  const ve = await callRaw("archivos", { url: `/?id=${img.id}`, token: admin });
+  assert.match(ve.headers["Content-Disposition"], /^inline;/);
+  assert.equal(ve.headers["Content-Security-Policy"], undefined);
+});
+
+test("E-039: en Vercel con SETUP_CODE, el primer admin necesita el código", async () => {
+  const original = store.listUsers;
+  store.listUsers = async () => [];
+  process.env.VERCEL = "1";
+  process.env.SETUP_CODE = "codigo-secreto-de-prueba";
+  try {
+    const sin = await call("setup", { method: "POST", body: { nombre: "Intruso", usuario: "intruso", pin: "482951" } });
+    assert.equal(sin.status, 403);
+    const mal = await call("setup", { method: "POST", body: { nombre: "Intruso", usuario: "intruso", pin: "482951", codigo: "otro" } });
+    assert.equal(mal.status, 403);
+  } finally {
+    store.listUsers = original;
+    delete process.env.VERCEL;
+    delete process.env.SETUP_CODE;
+  }
+});

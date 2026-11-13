@@ -5,6 +5,11 @@ import { state } from "../state.js";
 import { BUSINESS, PLAN_SIZES, MENU_ITEMS } from "../data/mock.js";
 import { render } from "../app.js";
 
+// Escapa texto para meterlo en HTML (contenido y atributos).
+export function esc(value) {
+  return String(value ?? "").replace(/[&<>"'`]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" })[c]);
+}
+
 export function whatsappLink(message) {
   return `https://wa.me/${BUSINESS.whatsapp}?text=${encodeURIComponent(message)}`;
 }
@@ -200,17 +205,17 @@ export function SharedChatPanel(role, title, subtitle) {
     <section class="shared-chat-panel reveal ${bgClass}">
       <header class="chat-panel-header">
         <div>
-          <h2>${title}</h2>
-          <p>${subtitle}</p>
+          <h2>${esc(title)}</h2>
+          <p>${esc(subtitle)}</p>
         </div>
       </header>
       <div class="chat-panel-layout">
         <aside class="chat-conversations-list">
           ${conversations.map(c => `
-            <button class="chat-conversation-item ${c.id === activeChatId ? 'is-active' : ''}" data-chat-select="${c.id}">
-              <strong>${c.clientName}</strong>
-              <small>${c.dogs.join(", ")}</small>
-              <em>${c.status}</em>
+            <button class="chat-conversation-item ${c.id === activeChatId ? 'is-active' : ''}" data-chat-select="${esc(c.id)}">
+              <strong>${esc(c.clientName)}</strong>
+              <small>${esc((c.dogs || []).join(", "))}</small>
+              <em>${esc(c.status)}</em>
             </button>
           `).join("")}
         </aside>
@@ -218,18 +223,18 @@ export function SharedChatPanel(role, title, subtitle) {
         ${activeChat ? `
           <div class="chat-active-window">
             <div class="chat-active-header">
-              <strong>${activeChat.clientName} · ${activeChat.dogs.join(", ")}</strong>
-              <span class="status-pill">${activeChat.status}</span>
+              <strong>${esc(activeChat.clientName)} · ${esc((activeChat.dogs || []).join(", "))}</strong>
+              <span class="status-pill">${esc(activeChat.status)}</span>
             </div>
             
             <div class="chat-messages-area">
               ${activeChat.messages.map(m => `
                 <div class="chat-message-bubble ${m.senderRole === role ? 'is-mine' : 'is-other'}">
                   <div class="chat-message-meta">
-                    <b>${m.senderName}</b>
-                    <time>${m.timestamp}</time>
+                    <b>${esc(m.senderName)}</b>
+                    <time>${esc(m.timestamp)}</time>
                   </div>
-                  <div class="chat-message-text">${m.text}</div>
+                  <div class="chat-message-text">${esc(m.text)}</div>
                 </div>
               `).join("")}
             </div>
@@ -238,14 +243,14 @@ export function SharedChatPanel(role, title, subtitle) {
               <div class="chat-input-area">
                 <div class="chat-quick-actions-row">
                   ${quickActions.map(action => `
-                    <button class="chat-quick-pill" type="button" data-chat-quick-shared="${action}" data-chat-role="${role}" data-chat-sender="${senderName}" data-chat-conversation="${activeChat.id}">
-                      ${action}
+                    <button class="chat-quick-pill" type="button" data-chat-quick-shared="${esc(action)}" data-chat-role="${esc(role)}" data-chat-sender="${esc(senderName)}" data-chat-conversation="${esc(activeChat.id)}">
+                      ${esc(action)}
                     </button>
                   `).join("")}
                 </div>
                 <div class="chat-compose-row">
-                  <input type="text" placeholder="Escribir mensaje..." data-chat-input-shared="${activeChat.id}" />
-                  <button class="primary-button" type="button" data-chat-send-shared="${activeChat.id}" data-chat-role="${role}" data-chat-sender="${senderName}">
+                  <input type="text" placeholder="Escribir mensaje..." data-chat-input-shared="${esc(activeChat.id)}" />
+                  <button class="primary-button" type="button" data-chat-send-shared="${esc(activeChat.id)}" data-chat-role="${esc(role)}" data-chat-sender="${esc(senderName)}">
                     Enviar
                   </button>
                 </div>
@@ -302,23 +307,23 @@ export function FloatingClientChat() {
           ${myChat.messages.map(m => `
             <div class="chat-message-bubble ${m.senderRole === 'cliente' ? 'is-mine' : 'is-other'}">
               <div class="chat-message-meta">
-                <b>${m.senderName}</b>
-                <time>${m.timestamp}</time>
+                <b>${esc(m.senderName)}</b>
+                <time>${esc(m.timestamp)}</time>
               </div>
-              <div class="chat-message-text">${m.text}</div>
+              <div class="chat-message-text">${esc(m.text)}</div>
             </div>
           `).join("")}
         </div>
         <div class="chat-quick-actions">
           ${quickActions.map(action => `
-            <button type="button" data-chat-quick-shared="${action}" data-chat-role="cliente" data-chat-sender="${clientName}" data-chat-conversation="${myChat.id}">
-              ${icon("alertCircle")} ${action}
+            <button type="button" data-chat-quick-shared="${esc(action)}" data-chat-role="cliente" data-chat-sender="${esc(clientName)}" data-chat-conversation="${esc(myChat.id)}">
+              ${icon("alertCircle")} ${esc(action)}
             </button>
           `).join("")}
         </div>
         <div class="chat-compose">
-          <textarea data-chat-input-shared="${myChat.id}" placeholder="Escribí tu consulta..."></textarea>
-          <button class="primary-button" type="button" data-chat-send-shared="${myChat.id}" data-chat-role="cliente" data-chat-sender="${clientName}">
+          <textarea data-chat-input-shared="${esc(myChat.id)}" placeholder="Escribí tu consulta..."></textarea>
+          <button class="primary-button" type="button" data-chat-send-shared="${esc(myChat.id)}" data-chat-role="cliente" data-chat-sender="${esc(clientName)}">
             ${icon("send")} Enviar
           </button>
         </div>
@@ -442,7 +447,14 @@ export function notFoundPage() {
 export function GlobalModal() {
   const modalStr = localStorage.getItem("paseosJuanActiveModal");
   if (!modalStr) return "";
-  const { type, data } = JSON.parse(modalStr);
+  let type = "";
+  try {
+    ({ type } = JSON.parse(modalStr) || {});
+  } catch {
+    // Dato roto en el celular: se descarta y no se muestra nada.
+    localStorage.removeItem("paseosJuanActiveModal");
+    return "";
+  }
 
   let html = "";
   switch(type) {
@@ -490,7 +502,7 @@ export function GlobalToast() {
 
   return `
     <div class="toast is-${toast.type === "error" ? "error" : "success"}" role="status" aria-live="polite">
-      ${toast.message}
+      ${esc(toast.message)}
     </div>
   `;
 }
