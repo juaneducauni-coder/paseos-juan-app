@@ -31,6 +31,7 @@ const KEYS = {
   ausencias: "paseosJuan_cliente_ausencias",
   carnet: "paseosJuan_cliente_carnet",
   comprobantes: "paseosJuan_cliente_comprobantes",
+  foto: "paseosJuan_cliente_foto",
 };
 
 const DEFAULT_DOG_NAME = "Tu perro";
@@ -94,6 +95,15 @@ function getFileList(key) {
 function getCarnet() {
   const saved = readJSON(KEYS.carnet, null);
   return saved && typeof saved.name === "string" ? saved : null;
+}
+
+function getDogPhoto() {
+  try {
+    const photo = localStorage.getItem(KEYS.foto);
+    return photo?.startsWith("data:image/") ? photo : "";
+  } catch {
+    return "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -378,27 +388,76 @@ function pageContent(ctx) {
     </p>
     ${todaySection(ctx)}
     ${quickActions(ctx)}
-    ${accessibilityBand()}
-    ${absenceSection(ctx)}
-    ${planSection(ctx)}
-    ${fichaSection(ctx)}
-    <div class="cl-two-col">
-      ${vaccineSection()}
-      ${paymentSection(ctx)}
+    <div class="cl-more-list" aria-label="Más opciones">
+      ${morePanel("cl-detalle-hoy", "calendarCheck", "Detalle de hoy", todayDetails(ctx))}
+      ${morePanel("cl-ausencia", "bell", "Ausencias", absenceSection(ctx))}
+      ${morePanel("cl-vacunas", "fileUp", "Carnet de vacunas", vaccineSection())}
+      ${morePanel("cl-plan", "calendarCheck", "Mi plan", planSection(ctx))}
+      ${morePanel("cl-ficha", "fileText", "Ficha de mi perro", fichaSection(ctx))}
+      ${morePanel("cl-pagos", "wallet", "Pagos y comprobantes", paymentSection(ctx))}
+      ${isPromoActive(ctx) ? morePanel("cl-promo", "medal", "Promo", promoSection()) : ""}
+      ${morePanel("cl-accesibilidad", "eye", "Accesibilidad", accessibilityBand())}
+      ${morePanel("cl-privacidad", "lock", "Mis datos", privacySection())}
     </div>
-    ${isPromoActive(ctx) ? promoSection() : ""}
-    ${privacySection()}
+  `;
+}
+
+function todayDetails(ctx) {
+  const status = todayStatus(ctx);
+  const steps = ["Programado", "Turno en curso", "Turno terminado"];
+  const pending = pendingItems(ctx);
+  return `
+    <section class="cl-card cl-section" aria-labelledby="cl-detail-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("calendarCheck", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-detail-title" class="cl-h2" tabindex="-1">Detalle de hoy</h2>
+          <p>Estado según el horario del turno. Seguimiento en vivo: ${PENDIENTE}.</p>
+        </div>
+      </header>
+      ${status.step >= 0 ? `
+        <ol class="cl-steps" aria-label="Estado del paseo según el horario del turno">
+          ${steps.map((step, index) => `
+            <li class="${index < status.step ? "is-done" : ""} ${index === status.step ? "is-current" : ""}" ${index === status.step ? 'aria-current="step"' : ""}>
+              <span class="cl-step-dot" aria-hidden="true"></span>
+              <span>${step}</span>
+            </li>
+          `).join("")}
+        </ol>
+      ` : ""}
+      ${weekStrip(ctx)}
+      <div class="cl-pending" data-cl-region="pendientes">${pendingList(ctx, pending)}</div>
+    </section>
+  `;
+}
+
+function morePanel(id, iconName, label, content) {
+  const open = ui.openGroups.has(id);
+  return `
+    <details class="cl-more" id="${id}" data-cl-details="${id}" ${open ? "open" : ""}>
+      <summary>
+        <span class="cl-more-icon">${icon(iconName, "cl-icon")}</span>
+        <span><strong>${label}</strong><small>Más</small></span>
+        ${icon("chevronDown", "cl-icon-sm cl-chevron")}
+      </summary>
+      <div class="cl-more-body">${content}</div>
+    </details>
   `;
 }
 
 function todaySection(ctx) {
-  const { now, shift, settings, plan, dogName, ficha } = ctx;
+  const { shift, settings, dogName, ficha } = ctx;
   const status = todayStatus(ctx);
   const alerts = safetyAlerts(ficha);
-  const steps = ["Programado", "Turno en curso", "Turno terminado"];
   const next = upcomingWalks(ctx, 1)[0];
   const nextIsToday = next && isoDate(next) === ctx.todayIso;
-  const pending = pendingItems(ctx);
+  const dogPhoto = getDogPhoto();
+  const initial = dogName.trim().charAt(0).toUpperCase() || "P";
+  const shortStatus = status.kind === "terminado"
+    ? "Ya volvió"
+    : status.kind === "libre" || status.kind === "ausente"
+      ? "No sale hoy"
+      : `Sale hoy · Turno ${settings.shift.toLowerCase()}`;
 
   const statusText = {
     libre: `Los días de paseo de tu plan son ${listJoin(settings.days.map((d) => d.toLowerCase()))}.`,
@@ -409,50 +468,29 @@ function todaySection(ctx) {
   }[status.kind];
 
   return `
-    <section class="cl-today" aria-labelledby="cl-today-title">
+    <section class="cl-today" aria-labelledby="cl-today-heading">
       <div class="cl-today-main cl-card">
-        <div class="cl-dog-chip">
-          <span class="cl-avatar">${icon("pawPrint", "cl-icon")}</span>
-          <span>
-            <strong data-cl-dogname>${esc(dogName)}</strong>
-            <small>${esc(plan.name)} · ${esc(settings.size)} · Turno ${esc(settings.shift.toLowerCase())}</small>
-          </span>
+        <p class="cl-eyebrow" id="cl-today-heading">Hoy</p>
+        <div class="cl-dog-hero">
+          <div class="cl-photo-wrap">
+            ${dogPhoto
+              ? `<img class="cl-dog-photo" src="${dogPhoto}" alt="Foto de ${esc(dogName)}" />`
+              : `<span class="cl-avatar" aria-label="Sin foto">${esc(initial)}</span>`}
+            <input id="cl-dog-photo" class="cl-file-input" type="file" accept="image/*" capture="environment" data-cl-dog-photo />
+            <label class="cl-photo-btn" for="cl-dog-photo">${dogPhoto ? "Cambiar foto" : "Sumar foto"}</label>
+          </div>
+          <div class="cl-dog-main">
+            <h1 class="cl-dog-name" data-cl-dogname>${esc(dogName)}</h1>
+            <p class="cl-status-chip is-${status.kind}">${esc(shortStatus)}</p>
+            <p class="cl-today-line">${esc(statusText)}</p>
+          </div>
         </div>
-        <p class="cl-eyebrow">Hoy · ${esc(dayName(now.date))} ${formatDate(now.date)}</p>
-        <h1 id="cl-today-title" class="cl-today-title">${status.title}</h1>
-        <p class="cl-lead">${statusText}</p>
-        ${status.step >= 0 ? `
-          <ol class="cl-steps" aria-label="Estado del paseo según el horario del turno">
-            ${steps.map((step, index) => `
-              <li class="${index < status.step ? "is-done" : ""} ${index === status.step ? "is-current" : ""}" ${index === status.step ? 'aria-current="step"' : ""}>
-                <span class="cl-step-dot" aria-hidden="true"></span>
-                <span>${step}</span>
-              </li>
-            `).join("")}
-          </ol>
-          <p class="cl-fine">El estado sigue el horario del turno. El seguimiento en vivo todavía no está disponible. Horario exacto de retiro: <strong>${PENDIENTE}</strong> (te lo confirmamos por WhatsApp).</p>
-        ` : ""}
+        ${statusRegion("foto")}
+        <div class="cl-next-inline">
+          <span>${icon("calendarCheck", "cl-icon-sm")} Próximo paseo</span>
+          <strong>${next ? `${nextIsToday ? "Hoy" : esc(dayName(next))} · ${formatDate(next)} · ${esc(settings.shift)}` : PENDIENTE}</strong>
+        </div>
         <div data-cl-region="alertas-hoy">${alertsBlock(alerts, true)}</div>
-        ${weekStrip(ctx)}
-      </div>
-
-      <div class="cl-today-side">
-        <article class="cl-card cl-next">
-          <p class="cl-eyebrow">${icon("calendarCheck", "cl-icon-sm")} Próximo paseo</p>
-          ${next ? `
-            <p class="cl-next-day">${nextIsToday ? "Hoy" : esc(dayName(next))}</p>
-            <p class="cl-next-date">${nextIsToday ? `${esc(dayName(next))} ${formatDate(next)}` : formatDate(next)}</p>
-            <p class="cl-next-shift">Turno ${esc(settings.shift.toLowerCase())} · ${shift.from} a ${shift.to}</p>
-          ` : `
-            <p class="cl-next-day">${PENDIENTE}</p>
-            <p class="cl-next-shift">No encontramos un próximo paseo con los días de tu plan.</p>
-          `}
-        </article>
-
-        <article class="cl-card cl-pending" aria-labelledby="cl-pending-title">
-          <h2 id="cl-pending-title" class="cl-h3">Tus pendientes</h2>
-          <div data-cl-region="pendientes">${pendingList(ctx, pending)}</div>
-        </article>
       </div>
     </section>
   `;
@@ -523,8 +561,9 @@ function weekStrip(ctx) {
 
 function quickActions(ctx) {
   const actions = [
-    { label: "Avisar una ausencia", go: "cl-ausencia", iconName: "bell" },
-    { label: "Subir carnet de vacunas", go: "cl-vacunas", iconName: "fileUp" },
+    { label: "Avisar ausencia", go: "cl-ausencia", iconName: "bell" },
+    { label: "Carnet de vacunas", go: "cl-vacunas", iconName: "fileUp" },
+    { label: "Mi plan", go: "cl-plan", iconName: "calendarCheck" },
   ];
   return `
     <nav class="cl-quick" aria-label="Acciones rápidas">
@@ -536,14 +575,8 @@ function quickActions(ctx) {
       `).join("")}
       <a class="cl-quick-btn is-whatsapp" href="${waLink("Hola, tengo una consulta sobre los paseos de mi perro.")}" target="_blank" rel="noreferrer">
         ${icon("message", "cl-icon")}
-        <span>Hablar por WhatsApp <small>${esc(BUSINESS_INFO.whatsappLabel)}</small></span>
+        <span>WhatsApp</span>
       </a>
-      ${isPromoActive(ctx) ? `
-        <button type="button" class="cl-quick-btn" data-cl-go="cl-promo">
-          ${icon("medal", "cl-icon")}
-          <span>Ver la promo <small>Hasta el ${esc(PROMO.untilLabel)}</small></span>
-        </button>
-      ` : ""}
     </nav>
   `;
 }
@@ -571,7 +604,7 @@ function accessibilityBand() {
 function absenceSection(ctx) {
   const options = upcomingWalks(ctx, 10);
   return `
-    <section class="cl-card cl-section" id="cl-ausencia" aria-labelledby="cl-ausencia-title">
+    <section class="cl-card cl-section" aria-labelledby="cl-ausencia-title">
       <header class="cl-section-head">
         <span class="cl-section-icon">${icon("bell", "cl-icon")}</span>
         <div>
@@ -623,7 +656,7 @@ function planSection(ctx) {
   const single = REAL_SINGLE_WALK[settings.size];
   const daysOk = settings.days.length === plan.walks;
   return `
-    <section class="cl-card cl-section" id="cl-plan" aria-labelledby="cl-plan-title">
+    <section class="cl-card cl-section" aria-labelledby="cl-plan-title">
       <header class="cl-section-head">
         <span class="cl-section-icon">${icon("calendarCheck", "cl-icon")}</span>
         <div>
@@ -717,7 +750,7 @@ function fichaSection(ctx) {
   const done = fichaProgress(ficha);
   const total = ALL_FIELDS.length;
   return `
-    <section class="cl-card cl-section" id="cl-ficha" aria-labelledby="cl-ficha-title">
+    <section class="cl-card cl-section" aria-labelledby="cl-ficha-title">
       <header class="cl-section-head">
         <span class="cl-section-icon">${icon("fileText", "cl-icon")}</span>
         <div>
@@ -808,7 +841,7 @@ function fichaField(field, ficha) {
 function vaccineSection() {
   const carnet = getCarnet();
   return `
-    <section class="cl-card cl-section" id="cl-vacunas" aria-labelledby="cl-vacunas-title">
+    <section class="cl-card cl-section" aria-labelledby="cl-vacunas-title">
       <header class="cl-section-head">
         <span class="cl-section-icon">${icon(carnet ? "fileCheck" : "uploadCloud", "cl-icon")}</span>
         <div>
@@ -840,7 +873,7 @@ function vaccineSection() {
 function paymentSection(ctx) {
   const receipts = getFileList(KEYS.comprobantes);
   return `
-    <section class="cl-card cl-section" id="cl-pagos" aria-labelledby="cl-pagos-title">
+    <section class="cl-card cl-section" aria-labelledby="cl-pagos-title">
       <header class="cl-section-head">
         <span class="cl-section-icon">${icon("wallet", "cl-icon")}</span>
         <div>
@@ -879,7 +912,7 @@ function paymentSection(ctx) {
 
 function promoSection() {
   return `
-    <section class="cl-card cl-section cl-promo" id="cl-promo" aria-labelledby="cl-promo-title">
+    <section class="cl-card cl-section cl-promo" aria-labelledby="cl-promo-title">
       <span class="cl-section-icon">${icon("medal", "cl-icon")}</span>
       <div>
         <p class="cl-eyebrow">Promo vigente hasta el ${esc(PROMO.untilLabel)}</p>
@@ -969,6 +1002,33 @@ function goTo(id) {
 
 function todayLabel() {
   return formatDate(argentinaNow().date);
+}
+
+function resizeDogPhoto(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("El archivo no es una imagen."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("No pudimos leer la imagen."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("No pudimos abrir la imagen."));
+      image.onload = () => {
+        const scale = Math.min(1, 240 / Math.max(image.naturalWidth, image.naturalHeight));
+        const width = Math.max(1, Math.round(image.naturalWidth * scale));
+        const height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,7 +1143,22 @@ function handleClienteClick(event) {
 }
 
 // Archivos: se anota solo el nombre y la fecha (el archivo no sale del dispositivo).
-function handleClienteChange(event) {
+async function handleClienteChange(event) {
+  const dogPhotoInput = event.target.closest("[data-cl-dog-photo]");
+  if (dogPhotoInput) {
+    const file = dogPhotoInput.files?.[0];
+    if (!file) return false;
+    try {
+      const dataUrl = await resizeDogPhoto(file);
+      localStorage.setItem(KEYS.foto, dataUrl);
+      setStatus("foto", "Foto guardada solo en este dispositivo.");
+    } catch {
+      setStatus("foto", "No pudimos guardar la foto. Probá con otra imagen.");
+    }
+    refreshPage("[data-cl-status='foto']");
+    return false;
+  }
+
   const input = event.target.closest("[data-cl-file]");
   if (input) {
     const file = input.files?.[0];

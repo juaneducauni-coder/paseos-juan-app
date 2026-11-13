@@ -291,9 +291,123 @@
 
 /* ---- Hoy ---- */
 
+.cl-dog-hero {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+}
+
+.cl-photo-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.cl-dog-photo,
+.cl-photo-wrap .cl-avatar {
+  width: 124px;
+  height: 124px;
+  border: 3px solid var(--cl-card);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--cl-green-line);
+  object-fit: cover;
+}
+
+.cl-photo-wrap .cl-avatar {
+  font-size: 2.8rem;
+  font-weight: 950;
+}
+
+.cl-photo-btn {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--cl-green-line);
+  border-radius: 14px;
+  background: var(--cl-card);
+  color: var(--cl-green-ink);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 850;
+  padding: 8px 14px;
+  text-align: center;
+}
+
+.cl-dog-main {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.cl-dog-name {
+  margin: 0;
+  color: var(--cl-ink);
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-weight: 950;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.cl-status-chip {
+  width: fit-content;
+  border: 1px solid var(--cl-green-line);
+  border-radius: 999px;
+  background: var(--cl-green-soft);
+  color: var(--cl-green-ink);
+  font-weight: 900;
+  padding: 8px 12px;
+}
+
+.cl-status-chip.is-libre,
+.cl-status-chip.is-ausente {
+  border-color: var(--cl-warn-line);
+  background: var(--cl-warn-bg);
+  color: var(--cl-warn-ink);
+}
+
+.cl-status-chip.is-terminado {
+  border-color: var(--cl-line-strong);
+  background: var(--cl-card-2);
+  color: var(--cl-ink);
+}
+
+.cl-today-line {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--cl-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-next-inline {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--cl-line);
+  color: var(--cl-text);
+  padding-top: 12px;
+}
+
+.cl-next-inline span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.cl-next-inline strong {
+  color: var(--cl-ink);
+  text-align: right;
+}
+
 .cl-today {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -677,6 +791,86 @@
 
 .cl-quick-btn.is-whatsapp:hover {
   background: #014a32;
+}
+
+/* ---- Contenido secundario plegable ---- */
+
+.cl-more-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cl-more {
+  overflow: clip;
+  border: 1px solid var(--cl-line);
+  border-radius: 20px;
+  background: var(--cl-card);
+  box-shadow: var(--cl-shadow);
+}
+
+.cl-more > summary {
+  display: grid;
+  min-height: 72px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  color: var(--cl-ink);
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 18px;
+}
+
+.cl-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cl-more > summary > span:nth-child(2) {
+  display: grid;
+  overflow: hidden;
+}
+
+.cl-more > summary strong,
+.cl-more > summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-more > summary strong {
+  font-size: 1.05rem;
+}
+
+.cl-more > summary small {
+  color: var(--cl-muted);
+  font-weight: 700;
+}
+
+.cl-more-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 15px;
+  background: var(--cl-green-soft);
+  color: var(--cl-green-ink);
+}
+
+.cl-more > summary .cl-chevron {
+  color: var(--cl-muted);
+}
+
+.cl-more[open] > summary .cl-chevron {
+  transform: rotate(180deg);
+}
+
+.cl-more-body {
+  border-top: 1px solid var(--cl-line);
+  padding: 14px;
+}
+
+.cl-more-body > .cl-card,
+.cl-more-body > .cl-privacy {
+  box-shadow: none;
 }
 
 /* ---- Accesibilidad ---- */
@@ -1398,6 +1592,46 @@
     padding: 20px;
   }
 
+  .cl-dog-hero {
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .cl-dog-photo,
+  .cl-photo-wrap .cl-avatar {
+    width: 96px;
+    height: 96px;
+  }
+
+  .cl-photo-wrap .cl-avatar {
+    font-size: 2.2rem;
+  }
+
+  .cl-photo-btn {
+    width: 100%;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .cl-dog-name {
+    font-size: clamp(1.8rem, 9vw, 2.5rem);
+  }
+
+  .cl-status-chip {
+    font-size: 0.88rem;
+    padding: 7px 10px;
+  }
+
+  .cl-next-inline {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .cl-next-inline strong {
+    text-align: left;
+  }
+
   .cl-steps {
     gap: 6px;
   }
@@ -1562,6 +1796,15 @@
   .cl-privacy {
     grid-template-columns: minmax(0, 1fr);
     padding-bottom: 96px;
+  }
+
+  .cl-more > summary {
+    min-height: 68px;
+    padding: 8px 14px;
+  }
+
+  .cl-more-body {
+    padding: 8px;
   }
 }
 
