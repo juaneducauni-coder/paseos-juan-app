@@ -5,7 +5,8 @@
 // Pensada para el celular (una mano, al sol), con 4 pestañas fijas abajo:
 // - Ahora: contador grande (a tiempo · atrasados · entregados) y una tarjeta por perro con foto,
 //   hora del próximo paso, estado y un botón grande (Marcar retirado → Marcar entregado), más
-//   "No sale", "Cambio" (pedido al coordinador en una hoja de abajo) y "Opciones" (nota, desmarcar,
+//   "No sale" (segundo toque: "Sí, avisar" al coordinador o "Solo marcar"), "Cambio" (pedido al
+//   coordinador en una hoja de abajo: tipo + Enviar, el motivo es opcional) y "Más" (nota, desmarcar,
 //   foto nueva). Los atrasados van primero; los listos quedan plegados. "Deshacer" dura 5 segundos
 //   y mientras dura las tarjetas no cambian de lugar. Arriba, una fila de botones cortos de alertas.
 // - Rutas: cada ruta con paseador, ayudante, checklist, WhatsApp y los perros en orden.
@@ -179,6 +180,21 @@ function listWithAnd(items, last = "y") {
 
 function plural(count, one, many) {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+// Minutos del día a "HH:MM".
+function clock(minutes) {
+  const total = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// Minutos a texto corto para leer al sol: "25 min", "2 h", "2 h 24 min".
+function duration(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
 function toMinutes(time) {
@@ -843,7 +859,7 @@ function stopStatus(stop, record, nowMinutes) {
   if (retirado) {
     const walked = start !== null ? nowMinutes - start : null;
     if (walked !== null && minutos && walked > minutos + DELIVERY_GRACE) {
-      return { ...base, kind: "demorada", label: `Demora ${walked - minutos} min`, tone: "danger", live: "atrasado", walked, late: true };
+      return { ...base, kind: "demorada", label: `Demora ${duration(walked - minutos)}`, tone: "danger", live: "atrasado", walked, late: true };
     }
     const label = estado === "paseando" ? "Paseando" : `Retirado${record?.horaRetiro ? ` ${record.horaRetiro}` : ""}`;
     return { ...base, kind: "curso", label, tone: "info", live: "atiempo", walked, late: pickupLate };
@@ -851,7 +867,7 @@ function stopStatus(stop, record, nowMinutes) {
 
   if (planned === null) return { ...base, kind: "sinhora", label: "Sin hora", tone: "neutral", live: "atiempo" };
   const delay = nowMinutes - planned;
-  if (delay > PICKUP_GRACE) return { ...base, kind: "atrasado", label: `Atrasado ${delay} min`, tone: "danger", live: "atrasado", delay, late: true };
+  if (delay > PICKUP_GRACE) return { ...base, kind: "atrasado", label: `Atrasado ${duration(delay)}`, tone: "danger", live: "atrasado", delay, late: true };
   if (delay >= 0) return { ...base, kind: "ahora", label: "Retirar ya", tone: "warn", live: "atiempo", delay };
   return { ...base, kind: "espera", label: "Pendiente", tone: "neutral", live: "atiempo" };
 }
@@ -1159,10 +1175,10 @@ function compliance(view, routes) {
 function lateDetail(item) {
   const { stop, status } = item;
   const parts = [];
-  if (status.kind === "atrasado") parts.push(`sin retiro, previsto ${stop.hora} (${status.delay} min)`);
-  if (status.pickupLate) parts.push(`retiro previsto ${stop.hora}, retirado ${status.record?.horaRetiro} (+${status.pickupDelay} min)`);
-  if (status.kind === "demorada") parts.push(`entrega demorada: ${status.walked} min de ${status.minutos} previstos`);
-  if (status.deliveryLate) parts.push(`entrega demorada: ${status.duration} min de ${status.minutos} previstos`);
+  if (status.kind === "atrasado") parts.push(`sin retiro, previsto ${stop.hora} (${duration(status.delay)})`);
+  if (status.pickupLate) parts.push(`retiro previsto ${stop.hora}, retirado ${status.record?.horaRetiro} (+${duration(status.pickupDelay)})`);
+  if (status.kind === "demorada") parts.push(`entrega demorada: ${duration(status.walked)} de ${duration(status.minutos)} previstos`);
+  if (status.deliveryLate) parts.push(`entrega demorada: ${duration(status.duration)} de ${duration(status.minutos)} previstos`);
   return `${stop.perroNombre} (${parts.join("; ") || "con atraso"})`;
 }
 
@@ -1264,6 +1280,8 @@ let closureSheetOpen = false;
 let sheetOpener = "";
 // Fotos que se están subiendo (por perro).
 const photoBusy = new Set();
+// Tarjeta que está preguntando "¿Avisar al coordinador?" después de tocar "No sale" (id de paseo).
+let absentAsk = "";
 
 function getNav() {
   const stored = readJSON(KEYS.nav, {});
@@ -1387,8 +1405,8 @@ function SupervisorHeader() {
       <div class="sv-header-end">
         ${SyncPill()}
         <span class="sv-a11y-slot" aria-hidden="true"></span>
-        <button class="sv-icon-btn" type="button" id="sv-logout" data-sv-logout aria-label="Salir">
-          ${icon("logOut", "sv-icon")}
+        <button class="sv-logout-btn" type="button" id="sv-logout" data-sv-logout>
+          ${icon("logOut", "sv-icon")} <span>Salir</span>
         </button>
       </div>
     </header>
@@ -1522,7 +1540,7 @@ function FallbackLine(view, routeInfo) {
   return `
     <p class="sv-line is-warn">
       ${icon("alertCircle", "sv-icon")}
-      <span>${routeInfo.loading ? "Cargando rutas…" : "Ruta de la planilla: el coordinador no la cargó."}</span>
+      <span>${routeInfo.loading ? "Cargando rutas…" : "Falta cargar la ruta de hoy"}</span>
     </p>
   `;
 }
@@ -1703,13 +1721,7 @@ function Counter(counts, total) {
         <p class="sv-tile ${counts.atrasado ? "is-danger" : "is-neutral"}"><b>${counts.atrasado}</b><span>${counts.atrasado === 1 ? "Atrasado" : "Atrasados"}</span></p>
         <p class="sv-tile is-ok"><b>${counts.entregado}</b><span>${counts.entregado === 1 ? "Entregado" : "Entregados"}</span></p>
       </div>
-      <details class="sv-help" data-sv-fold="ayuda-contador" ${isFoldOpen("ayuda-contador") ? "open" : ""}>
-        <summary>
-          ${counts.nosale ? `<span>${counts.nosale} no ${counts.nosale === 1 ? "sale" : "salen"}</span>` : ""}
-          <span class="sv-help-q" aria-hidden="true">?</span><span class="visually-hidden">${plural(total, "perro", "perros")} en el turno. Cómo se cuenta</span>
-        </summary>
-        <p>Atrasado: pasó la hora de retiro + ${PICKUP_GRACE} min, o el paseo pasó lo previsto + ${DELIVERY_GRACE} min. Se recalcula cada minuto.</p>
-      </details>
+      ${counts.nosale ? `<p class="sv-counter-note">${counts.nosale} no ${counts.nosale === 1 ? "sale" : "salen"} · ${plural(total, "perro", "perros")} en el turno</p>` : ""}
     </section>
   `;
 }
@@ -1801,7 +1813,7 @@ function DogCard(view, item, requests, showRoute = true) {
     status.kind === "entregado" && status.late
       ? `<span class="sv-state is-warn">Con atraso</span>`
       : status.kind === "curso" && status.pickupLate
-        ? `<span class="sv-state is-warn">Retiro +${status.pickupDelay} min</span>`
+        ? `<span class="sv-state is-warn">Retiro +${duration(status.pickupDelay)}</span>`
         : "";
   return `
     <li class="sv-dog is-${status.tone}" id="sv-dog-${domId}" tabindex="-1" aria-labelledby="sv-dog-name-${domId}">
@@ -1846,17 +1858,39 @@ function DogActions(item, domId, optionsOpen) {
   } else {
     main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-pickup="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como retirado" ${disabled}>${icon("checkCircle", "sv-icon")} Marcar retirado</button>`;
   }
+  const canAbsent = !status.retirado && status.kind !== "nosale";
+  // "No sale" no marca de una: pregunta si avisa al coordinador (un toque más manda el pedido).
+  if (canAbsent && absentAsk === id) return AbsentAsk(item, domId, busy);
   const secondary = [
-    !status.retirado && status.kind !== "nosale"
-      ? `<button type="button" class="sv-btn" id="sv-absent-${domId}" data-sv-absent="${dog}" data-ruta="${ruta}" aria-label="${name} no sale" ${disabled}>${icon("x", "sv-icon")} <span>No sale</span></button>`
+    canAbsent
+      ? `<button type="button" class="sv-btn" id="sv-absent-${domId}" data-sv-absent-ask="${esc(id)}" aria-label="${name} no sale" ${disabled}>${icon("x", "sv-icon")} <span>No sale</span></button>`
       : "",
     RequestButton(route.code, stop.perroId, "Cambio", stop.perroNombre),
-    `<button type="button" class="sv-btn" id="sv-opt-${domId}" data-sv-options="${esc(id)}" aria-expanded="${optionsOpen}" aria-controls="sv-optbox-${domId}" aria-label="Opciones de ${name}">${icon("sliders", "sv-icon")} <span>Opciones</span></button>`,
+    `<button type="button" class="sv-btn" id="sv-opt-${domId}" data-sv-options="${esc(id)}" aria-expanded="${optionsOpen}" aria-controls="sv-optbox-${domId}" aria-label="Más opciones de ${name}">${icon("sliders", "sv-icon")} <span>Más</span></button>`,
   ].filter(Boolean);
   return `
     <div class="sv-dog-actions" ${busy ? `aria-busy="true"` : ""}>
       ${main}
       <div class="sv-row cols-${secondary.length}">${secondary.join("")}</div>
+    </div>
+  `;
+}
+
+// Segundo toque de "No sale": avisar al coordinador (marca y manda el pedido) o solo marcar.
+function AbsentAsk(item, domId, busy) {
+  const { stop, route } = item;
+  const ruta = esc(route.code);
+  const dog = esc(stop.perroId);
+  const name = esc(stop.perroNombre);
+  const disabled = busy ? "disabled" : "";
+  return `
+    <div class="sv-dog-actions sv-ask" role="group" aria-labelledby="sv-ask-title-${domId}" ${busy ? `aria-busy="true"` : ""}>
+      <p class="sv-ask-title" id="sv-ask-title-${domId}">${name} no sale. ¿Avisar al coordinador?</p>
+      <button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-absent-send-${domId}" data-sv-absent-send="${dog}" data-ruta="${ruta}" ${disabled}>${icon("send", "sv-icon")} Sí, avisar</button>
+      <div class="sv-row cols-2">
+        <button type="button" class="sv-btn" id="sv-absent-only-${domId}" data-sv-absent="${dog}" data-ruta="${ruta}" ${disabled}>${icon("x", "sv-icon")} <span>Solo marcar</span></button>
+        <button type="button" class="sv-btn" id="sv-absent-cancel-${domId}" data-sv-absent-cancel="${dog}" ${disabled}><span>Volver</span></button>
+      </div>
     </div>
   `;
 }
@@ -1914,6 +1948,7 @@ function RoutesTab(view, routeInfo, byId) {
         ${routeInfo.loading ? "" : RequestButton("", "", "Pedir ruta")}
       </div>
     ` : routes.map((route) => RouteCard(view, route, byId)).join("")}
+    ${routes.length ? `<p class="sv-source">WhatsApp: elegís el chat. Teléfonos del equipo: ${PENDIENTE}.</p>` : ""}
     ${loose.length ? `
       <section class="sv-card" aria-labelledby="sv-loose-title">
         <h2 class="sv-h2" id="sv-loose-title">Sin ruta</h2>
@@ -1976,9 +2011,9 @@ function RouteCard(view, route, byId) {
       </ul>
       ${route.notas ? `<p class="sv-dog-note">${icon("message", "sv-icon")} <span>${esc(route.notas)}</span></p>` : ""}
       ${RequestNotice(requests)}
-      <div class="sv-row cols-2">
-        <a class="sv-btn" id="sv-wa-${safeId(route.code)}" href="https://wa.me/?text=${encodeURIComponent(whatsappText(view, route, items))}" target="_blank" rel="noopener noreferrer" aria-label="${walker ? `Escribirle a ${esc(walker)} por WhatsApp` : "Escribir al paseador por WhatsApp"}">
-          ${icon("message", "sv-icon")} <span>WhatsApp</span>
+      <div class="sv-row">
+        <a class="sv-btn sv-btn-wa" id="sv-wa-${safeId(route.code)}" href="https://wa.me/?text=${encodeURIComponent(whatsappText(view, route, items))}" target="_blank" rel="noopener noreferrer" aria-label="Avisar${walker ? ` a ${esc(walker)}` : " al paseador"} por WhatsApp. Se abre WhatsApp con el mensaje y elegís el chat">
+          ${icon("message", "sv-icon")} <span>Avisar por WhatsApp (elegí el chat)</span>
         </a>
         ${RequestButton(route.code, "", "Cambio")}
       </div>
@@ -2040,7 +2075,7 @@ function RequestCard(item, seen) {
       </p>
       <h2 class="sv-h3">${esc(requestTitle(item))}</h2>
       ${item.detalle ? `<p>${esc(item.detalle)}</p>` : ""}
-      <p class="sv-muted">Motivo: ${esc(item.motivo || PENDIENTE)}</p>
+      ${item.motivo ? `<p class="sv-muted">Motivo: ${esc(item.motivo)}</p>` : ""}
       <p class="sv-answer">${icon("message", "sv-icon")} <span>${esc(item.respuesta || (isAnswered(item) ? "Sin comentario." : "Todavía no respondió."))}</span></p>
       <p class="sv-source">${esc(when)}</p>
       ${fresh ? `<button type="button" class="sv-btn sv-btn-small" id="sv-seen-${safeId(item.id)}" data-sv-seen="${esc(item.id)}">OK, visto</button>` : ""}
@@ -2165,7 +2200,7 @@ function HelpSection() {
     ["warn", "Retirar ya", "Es la hora de retiro."],
     ["info", "Retirado", "En la calle."],
     ["ok", "Entregado", "Volvió a casa."],
-    ["danger", "Atrasado", `Retiro + ${PICKUP_GRACE} min o paseo + ${DELIVERY_GRACE} min.`],
+    ["danger", "Atrasado", `Retiro + ${PICKUP_GRACE} min o paseo + ${DELIVERY_GRACE} min. Se recalcula cada minuto.`],
   ];
   return `
     <section class="sv-card" aria-labelledby="sv-legend-title">
@@ -2180,7 +2215,9 @@ function HelpSection() {
       <h2 class="sv-h2" id="sv-how-title">Cómo se usa</h2>
       <ul class="sv-plain-list">
         <li><b>Marcar retirado / entregado:</b> un toque. Si te equivocás, «Deshacer» abajo.</li>
-        <li><b>Cambio:</b> se lo pedís al coordinador. Vos no cambiás la ruta.</li>
+        <li><b>No sale:</b> tocás «No sale» y después «Sí, avisar» (le llega al coordinador) o «Solo marcar».</li>
+        <li><b>Cambio:</b> se lo pedís al coordinador. Elegís qué y «Enviar». El motivo es opcional. Vos no cambiás la ruta.</li>
+        <li><b>WhatsApp:</b> abre WhatsApp con el mensaje armado y elegís el chat. Teléfonos del equipo: ${PENDIENTE}.</li>
         <li><b>Sin señal:</b> seguí marcando, se envía solo. Las fotos necesitan señal.</li>
       </ul>
     </section>
@@ -2374,6 +2411,14 @@ function RequestSheet(view, routeInfo) {
   const inShift = new Set(routes.flatMap((route) => route.stops.map((stop) => stop.perroId)).filter(Boolean));
   const extraDogs = REAL_DOGS.filter((dog) => !inShift.has(dog.id) && dog.status === "Activo").sort((a, b) => a.name.localeCompare(b.name));
   const stop = draft.perroId ? routes.find((route) => route.code === draft.ruta)?.stops.find((item) => item.perroId === draft.perroId) : null;
+  // Horas sugeridas a partir de la hora de retiro de la ruta: tocar una ya elige «Cambiar hora».
+  const stopRecord = stop ? paseosById().get(paseoId(view.fecha, stop.perroId, view.shift)) : null;
+  const pickedUp = ["retirado", "paseando", "entregado"].includes(stopRecord?.estado);
+  const planned = pickedUp ? null : toMinutes(stop?.hora);
+  const hourChips = planned === null ? [] : [15, 30, 60].map((plus) => {
+    const value = clock(planned + plus);
+    return { value, label: value };
+  });
   const radios = (name, options, current, prefix) =>
     options
       .map(({ value, label }, index) => `
@@ -2395,8 +2440,14 @@ function RequestSheet(view, routeInfo) {
           ${radios("sv-req-ruta", [...routes.map((route) => ({ value: route.code, label: route.code })), { value: "", label: "Todas" }], draft.ruta, "sv-req-ruta")}
         </fieldset>
       ` : ""}
+      ${hourChips.length ? `
+        <fieldset class="sv-chipset">
+          <legend>Cambiar hora <span class="sv-legend-note">(era ${esc(stop.hora)})</span></legend>
+          ${radios("sv-req-hora", hourChips, draft.tipo === "cambiar hora" ? draft.hora : "", "sv-req-hora")}
+        </fieldset>
+      ` : ""}
       ${draft.tipo === "cambiar hora" ? `
-        <label class="sv-field sv-field-short" for="sv-req-hora">Hora nueva${stop?.hora ? ` (era ${esc(stop.hora)})` : ""}
+        <label class="sv-field sv-field-short" for="sv-req-hora">${hourChips.length ? "Otra hora" : `Hora nueva${stop?.hora ? ` (era ${esc(stop.hora)})` : ""}`}
           <input type="time" id="sv-req-hora" data-sv-req="hora" value="${esc(draft.hora)}" step="300" />
         </label>
       ` : ""}
@@ -2409,7 +2460,7 @@ function RequestSheet(view, routeInfo) {
         </label>
       ` : ""}
       <fieldset class="sv-chipset">
-        <legend>Por qué</legend>
+        <legend>Por qué <span class="sv-legend-note">(opcional)</span></legend>
         ${radios("sv-req-motivo", MOTIVO_CHIPS.map((value) => ({ value, label: value })), draft.motivo, "sv-req-motivo")}
       </fieldset>
       <label class="sv-field" for="sv-req-texto">Detalle
@@ -2420,8 +2471,10 @@ function RequestSheet(view, routeInfo) {
         <span class="sv-switch-track" aria-hidden="true"></span>
         <span>Urgente</span>
       </label>
-      ${statusRegion("request-form")}
-      <button type="submit" class="sv-btn sv-btn-primary sv-btn-main" id="sv-req-save">${icon("send", "sv-icon")} Enviar</button>
+      <div class="sv-sheet-foot">
+        ${statusRegion("request-form")}
+        <button type="submit" class="sv-btn sv-btn-primary sv-btn-main" id="sv-req-save">${icon("send", "sv-icon")} Enviar</button>
+      </div>
     </form>
   `;
   return Sheet("sv-req-title", "Pedir cambio", esc(target), body, "Volver sin enviar");
@@ -2518,7 +2571,8 @@ function paseoPayload(view, route, stop, changes) {
 
 // Retiro, entrega y "no sale": actualiza el MISMO registro de paseos que usa el paseador.
 // Después del cambio queda "Deshacer" 5 segundos.
-async function markWalk(code, dogId, action, focusId) {
+// notify: con "no-sale", además le manda al coordinador el pedido «no sale» (sin motivo: es opcional).
+async function markWalk(code, dogId, action, focusId, notify = false) {
   const view = getView();
   const found = findStop(view, code, dogId);
   if (!found) return;
@@ -2546,7 +2600,7 @@ async function markWalk(code, dogId, action, focusId) {
     } else {
       changes = { estado: "retirado", horaRetiro: hora };
       const delay = status.planned !== null ? view.now.minutes - status.planned : 0;
-      text = `${name} retirado ${hora}${delay > PICKUP_GRACE ? ` (+${delay} min)` : ""}.`;
+      text = `${name} retirado ${hora}${delay > PICKUP_GRACE ? ` (+${duration(delay)})` : ""}.`;
     }
   } else if (action === "entrega") {
     if (!status.retirado) return;
@@ -2573,17 +2627,58 @@ async function markWalk(code, dogId, action, focusId) {
   // Se congela el orden antes de guardar: si llegan datos mientras viaja, la lista no se mueve.
   freezeOrder();
   const result = await persist("paseos", paseoPayload(view, route, stop, changes), "toast", text);
+  let request = null;
+  if (result && notify && changes.estado === "no-sale") request = await notifyAbsent(view, route, stop);
   inFlight.delete(id);
   const mainId = `sv-main-${cardDomId(route, stop)}`;
   if (!result) orderFreeze = null;
-  if (result) {
+  if (result && !(notify && !request)) {
     flash = null;
-    offerUndo(`${text}${result.pendiente ? " Sin señal: se envía solo." : ""}`, () => restoreWalk(code, dogId, prev, name), mainId);
+    const told = request ? " Avisado al coordinador." : "";
+    const offline = result.pendiente || request?.pendiente ? " Sin señal: se envía solo." : "";
+    offerUndo(`${text}${told}${offline}`, async () => {
+      await restoreWalk(code, dogId, prev, name);
+      // Si el pedido ya llegó y lo creaste vos recién, se borra también.
+      if (request?.id && !request.pendiente && !request.existing) {
+        try {
+          await registros.remove("solicitudes", request.id);
+          recent.delete(`solicitudes:${request.id}`);
+        } catch {
+          setFlash("toast", "El pedido al coordinador quedó enviado. Borralo desde Pedidos si no va.", "info");
+        }
+      }
+    }, mainId);
   }
   syncFolds();
   render();
   // Si la tarjeta pasó a "Listos" (plegado), el foco va a "Deshacer".
   if (!focusById(focusId) && !focusById(mainId)) focusById("sv-undo");
+}
+
+// Pedido «no sale» al coordinador desde la tarjeta (un toque). Si ya hay uno pendiente, no se repite.
+async function notifyAbsent(view, route, stop) {
+  const same = requestsFor(view.fecha, view.shift).find(
+    (item) => item.perroId === stop.perroId && item.tipo === "no sale" && (item.estado || "pendiente") === "pendiente",
+  );
+  if (same) return { ...same, existing: true };
+  const turno = SHIFTS[view.shift].label;
+  const record = {
+    fecha: view.fecha,
+    turno,
+    ruta: route.code,
+    tipo: "no sale",
+    perroId: stop.perroId,
+    perroNombre: stop.perroNombre,
+    detalle: `${stop.perroNombre} no sale hoy.`,
+    motivo: "",
+    urgente: false,
+    estado: "pendiente",
+    respuesta: "",
+    titulo: `No sale · ${stop.perroNombre} · ${route.code} · ${turno} ${view.fechaLabel}`,
+  };
+  const result = await persist("solicitudes", record, "toast", "Pedido enviado al coordinador.");
+  if (result && !result.pendiente) requestStates.set(result.id, "pendiente");
+  return result;
 }
 
 async function restoreWalk(code, dogId, prev, name) {
@@ -2673,8 +2768,6 @@ async function saveRequest(form) {
     setFlash("request-form", text, "error");
     return rerender(focusId);
   };
-  if (!MOTIVO_CHIPS.includes(draft.motivo)) return fail("Elegí por qué.", "sv-req-motivo-0");
-  if (draft.motivo === "Otro" && !texto) return fail("Escribí el motivo en Detalle.", "sv-req-texto");
   if (tipo === "cambiar hora" && !draft.hora && !texto) return fail("Poné la hora nueva.", "sv-req-hora");
   if (tipo === "agregar perro" && !extraDog && !texto) return fail("Elegí el perro a sumar.", "sv-req-extra");
   if (tipo === "otro" && !texto) return fail("Contá qué cambiar en Detalle.", "sv-req-texto");
@@ -2690,8 +2783,11 @@ async function saveRequest(form) {
     "cambiar paseador o ayudante": "Cambiar paseador o ayudante.",
     otro: "",
   }[tipo];
-  const motivo = draft.motivo === "Otro" ? texto : draft.motivo;
-  const detalle = [autoDetail, draft.motivo === "Otro" ? "" : texto].filter(Boolean).join(" ");
+  // El motivo es opcional: si eligió «Otro» y escribió algo, el detalle es el motivo.
+  const chip = MOTIVO_CHIPS.includes(draft.motivo) ? draft.motivo : "";
+  const otherReason = chip === "Otro" && texto;
+  const motivo = otherReason ? texto : chip;
+  const detalle = [autoDetail, otherReason ? "" : texto].filter(Boolean).join(" ");
   const perroId = extraDog ? extraDog.id : draft.perroId || "";
   const perroNombre = extraDog ? extraDog.name : name;
   const turno = SHIFTS[view.shift].label;
@@ -2944,8 +3040,30 @@ function handleSupervisorClick(event) {
     return true;
   }
 
+  const absentAskButton = target.closest("[data-sv-absent-ask]");
+  if (absentAskButton) {
+    absentAsk = absentAskButton.dataset.svAbsentAsk;
+    rerender(absentAskButton.id.replace(/^sv-absent-/, "sv-absent-send-"));
+    return true;
+  }
+
+  const absentCancel = target.closest("[data-sv-absent-cancel]");
+  if (absentCancel) {
+    absentAsk = "";
+    rerender(absentCancel.id.replace(/^sv-absent-cancel-/, "sv-absent-"));
+    return true;
+  }
+
+  const absentSend = target.closest("[data-sv-absent-send]");
+  if (absentSend) {
+    absentAsk = "";
+    markWalk(absentSend.dataset.ruta, absentSend.dataset.svAbsentSend, "no-sale", absentSend.id, true);
+    return true;
+  }
+
   const absent = target.closest("[data-sv-absent]");
   if (absent) {
+    absentAsk = "";
     markWalk(absent.dataset.ruta, absent.dataset.svAbsent, "no-sale", absent.id);
     return true;
   }
@@ -3125,6 +3243,13 @@ function handleSupervisorChange(event) {
     const draft = getRequestDraft(view);
     draft[target.dataset.svReq] = target.type === "checkbox" ? target.checked : target.value;
     writeJSON(KEYS.requestDraft, draft);
+    // Tocar una hora sugerida ya elige «Cambiar hora» (un solo paso).
+    if (target.dataset.svReq === "hora" && target.type === "radio") {
+      draft.tipo = "cambiar hora";
+      writeJSON(KEYS.requestDraft, draft);
+      rerender(target.id);
+      return true;
+    }
     // El tipo cambia los campos de la hoja (hora nueva o perro a sumar).
     if (target.dataset.svReq === "tipo") rerender(target.id);
     return true;
