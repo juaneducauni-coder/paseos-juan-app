@@ -180,6 +180,23 @@ function plural(count, one, many) {
   return `${count} ${count === 1 ? one : many}`;
 }
 
+// Atraso legible al sol: 144 → "2 h 24 min", 60 → "1 h", 25 → "25 min".
+function lateText(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (!h) return `${m} min`;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+// La hoja interna se llama "BASE RUTAS": en pantalla se dice "Planilla de rutas".
+function sheetText(text) {
+  return String(text || "")
+    .replace(/Planilla RPJ,\s*hoja BASE RUTAS/gi, "Planilla de rutas")
+    .replace(/\ben BASE RUTAS\b/g, "en la Planilla de rutas")
+    .replace(/BASE RUTAS/g, "Planilla de rutas");
+}
+
 const SHORT_DAYS = { Lunes: "Lun", Martes: "Mar", Miércoles: "Mié", Jueves: "Jue", Viernes: "Vie", Sábado: "Sáb", Domingo: "Dom" };
 
 function daysText(days) {
@@ -931,7 +948,7 @@ function buildPriorities(live = liveData()) {
       tone: "red",
       short: `${center}: no juntar`,
       title: `${center} comparte turno con perros marcados “no juntar”`,
-      detail: `Según BASE RUTAS, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (ruta ${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
+      detail: `Según la Planilla de rutas, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (ruta ${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
       action: `Confirmá con Sebastián cómo se separa a ${center} de ${listJoin(others)} en la ruta ${routes}.`,
       target: "adm-seguridad",
       targetLabel: "Ver cruces",
@@ -947,7 +964,7 @@ function buildPriorities(live = liveData()) {
       short: `${plural(reviews.length, "perro", "perros")} a revisar`,
       title: `${plural(reviews.length, "perro tiene", "perros tienen")} datos a revisar`,
       detail: statusIssues.length
-        ? `Primero el estado de ${listJoin(names)}: ${statusIssues.length === 1 ? "no está" : "no están"} claros entre la tabla de precios y BASE RUTAS. Los demás: plan que no coincide con los días, nombres distintos o duración.`
+        ? `Primero el estado de ${listJoin(names)}: ${statusIssues.length === 1 ? "no está" : "no están"} claros entre la tabla de precios y la Planilla de rutas. Los demás: plan que no coincide con los días, nombres distintos o duración.`
         : "Planes que no coinciden con los días, nombres distintos o duración a revisar.",
       action: statusIssues.length
         ? `Decidí el estado de ${listJoin(names)} y corregilo en la planilla.`
@@ -1118,8 +1135,8 @@ function InicioTab(live) {
     <div class="adm-home">
       <div class="adm-home-main">
         ${NextCard(priorities, done)}
-        ${PriorityList(priorities, done)}
         ${Numbers(live)}
+        ${PriorityList(priorities, done)}
       </div>
       <div class="adm-home-side">
         ${SafetyCard()}
@@ -1224,7 +1241,7 @@ function SafetyCard() {
     <section class="adm-card adm-safety" id="adm-seguridad" tabindex="-1" aria-labelledby="adm-safety-title">
       <div class="adm-h2-row">
         <h2 class="adm-h2" id="adm-safety-title">${ico("alertTriangle")} Seguridad</h2>
-        ${Help(`<p>Fuente: BASE RUTAS (${DATA_UPDATED}). Siempre visible.</p>
+        ${Help(`<p>Fuente: Planilla de rutas (${DATA_UPDATED}). Siempre visible.</p>
           ${missing.length || notRouted.length ? `<ul>
             ${missing.map((m) => `<li>${esc(m.dog)} figura “no juntar con ${esc(m.other)}”, pero ${esc(m.other)} no está en el registro: ${PENDIENTE}.</li>`).join("")}
             ${notRouted.map((n) => `<li>${esc(n.dog)} y ${esc(n.other)}: hoy ${esc(n.idle)} no tiene ruta. Si vuelve, revisá el turno.</li>`).join("")}
@@ -1247,7 +1264,7 @@ function SafetyCard() {
             `;
           }).join("")}
         </ul>
-      ` : `<p class="adm-empty">Sin cruces “no juntar” en BASE RUTAS.</p>`}
+      ` : `<p class="adm-empty">Sin cruces “no juntar” en la Planilla de rutas.</p>`}
       <ul class="adm-dog-chips" aria-label="Perros con indicaciones de seguridad">
         ${dogs.map((dog) => `
           <li>
@@ -1352,7 +1369,7 @@ const STOP_STATUS = {
 const ROUTE_SOURCE = {
   dia: "Cambio del día",
   plantilla: "Plantilla",
-  planilla: "BASE RUTAS",
+  planilla: "Planilla de rutas",
 };
 
 function stopStatus(stop) {
@@ -1365,7 +1382,7 @@ function StopRow(stop) {
   const dog = dogById(stop.perroId, stop.perroNombre);
   const perroId = stop.perroId || dog?.id || "";
   const extra = [
-    stop.status === "atrasado" ? `${stop.atraso} min tarde` : "",
+    stop.status === "atrasado" ? `${lateText(stop.atraso)} tarde` : "",
     stop.paseo?.horaRetiro ? `retiro ${stop.paseo.horaRetiro}` : "",
     stop.paseo?.horaEntrega ? `entrega ${stop.paseo.horaEntrega}` : "",
     stop.nota ? stop.nota : "",
@@ -1411,7 +1428,12 @@ function RouteCard(item) {
           ${item.atrasados ? `<span class="adm-chip adm-chip--red">${plural(item.atrasados, "atrasado", "atrasados")}</span>` : `<span class="adm-chip adm-chip--green">Sin atrasos</span>`}
           ${item.noSale ? `<span class="adm-chip adm-chip--yellow">${item.noSale} no ${item.noSale === 1 ? "sale" : "salen"}</span>` : ""}
         </span>
-        ${late.length ? `<ul class="adm-list adm-list--tight">${late.map(StopRow).join("")}</ul>` : ""}
+        ${late.length ? `
+          <details class="adm-more adm-more--late" data-adm-fold-inner="${esc(key)}-tarde" ${foldOpen(`${key}-tarde`) ? "open" : ""}>
+            <summary>Ver ${late.length === 1 ? "el atrasado" : `los ${late.length} atrasados`}</summary>
+            <ul class="adm-list adm-list--tight">${late.map(StopRow).join("")}</ul>
+          </details>
+        ` : ""}
         <details class="adm-more" data-adm-fold-inner="${esc(key)}" ${foldOpen(key) ? "open" : ""}>
           <summary>Ver las ${stops.length} paradas</summary>
           <ol class="adm-list adm-list--tight">${stops.map(StopRow).join("")}</ol>
@@ -1419,6 +1441,20 @@ function RouteCard(item) {
       ` : `<p class="adm-empty">Sin paradas cargadas.</p>`}
     </article>
   `;
+}
+
+// Resumen corto antes de las listas: "3 atrasados en PJ_1M". Las filas quedan plegadas en cada ruta.
+function LateSummary(compliance) {
+  const lines = compliance
+    .map((item) => {
+      const late = item.stops.filter((stop) => stop.status === "atrasado");
+      if (!late.length) return "";
+      const worst = Math.max(...late.map((stop) => stop.atraso || 0));
+      return `<li><strong>${plural(late.length, "atrasado", "atrasados")}</strong> en ${esc(item.route.ruta || "una ruta")} <span class="adm-row-meta">· hasta ${esc(lateText(worst))}</span></li>`;
+    })
+    .filter(Boolean);
+  if (!lines.length) return "";
+  return `<ul class="adm-late-summary" aria-label="Atrasos por ruta">${lines.join("")}</ul>`;
 }
 
 function RoutesFold(live) {
@@ -1437,7 +1473,8 @@ function RoutesFold(live) {
     open: late.length > 0,
     id: "adm-cumplimiento",
   }, `
-    ${effective.fromSheet ? `<div class="adm-warn-line">${ico("alertCircle")} <span>Sin plantilla en la app: horarios de BASE RUTAS.</span> ${Help(`<p>Todavía no hay plantilla de hoy cargada en la app: se usan los horarios de la planilla BASE RUTAS (12/11/2026). Paseadores sin asignar: ${PENDIENTE.toLowerCase()}. La plantilla la arma el coordinador.</p>`, "Por qué BASE RUTAS")}</div>` : ""}
+    ${effective.fromSheet ? `<div class="adm-warn-line">${ico("alertCircle")} <span>Sin plantilla en la app: horarios de la Planilla de rutas.</span> ${Help(`<p>Todavía no hay plantilla de hoy cargada en la app: se usan los horarios de la Planilla de rutas (12/11/2026). Paseadores sin asignar: ${PENDIENTE.toLowerCase()}. La plantilla la arma el coordinador.</p>`, "Por qué la Planilla de rutas")}</div>` : ""}
+    ${LateSummary(compliance)}
     ${shifts ? `<div class="adm-chips adm-chips--wrap">${shifts}</div>` : ""}
     ${!isOffline() && registros.cached("fotos").length < REAL_DOGS.length ? `<p class="adm-row-meta">${ico("camera", "adm-icon-xs")} “Foto” abre la cámara (necesita señal).</p>` : ""}
     ${compliance.length ? `<div class="adm-routes">${compliance.map(RouteCard).join("")}</div>` : `<p class="adm-empty">Hoy no hay rutas.</p>`}
@@ -1655,7 +1692,7 @@ const ROLE_PERMISSIONS = [
   { role: "Supervisor", who: ROLE_OWNERS.supervisor, can: ["Controlar los paseos del momento", "Quién falta retirar y atrasos contra el horario", "Entregas, incidentes y equipo", "Ve las rutas, no las arma"] },
   { role: "Paseador", who: ROLE_OWNERS.paseador, can: ["Hacer su ruta del turno, en orden y con horario", "Marcar retiro, paseo y entrega", "Reportar incidentes"] },
   { role: "Ayudante de paseador", who: PENDIENTE, can: ["Acompañar al paseador en su ruta", "Marcar pasos", "Reportar incidentes", "Sin datos de clientes"] },
-  { role: "Cliente", who: "Cada tutor, solo su perro", can: ["Ver la ficha de su perro", "Escribir al chat", "Subir carnet de vacunas", "Subir comprobante", "Ver sus pagos", "Ver el estado del paseo"] },
+  { role: "Cliente (página de ejemplo, sin cuenta)", who: "Muestra un perro de ejemplo, no datos reales", can: ["Ver el plan y la ficha de ejemplo", "Avisar una ausencia", "Ver el estado del paseo según el horario", "Mandar el carnet de vacunas por WhatsApp", "Hablar por WhatsApp"] },
 ];
 
 function EquipoTab() {
@@ -1830,7 +1867,7 @@ function PagoRow(pago) {
       ` : ""}
       <div class="adm-btn-row">
         <button class="adm-btn ${pago.pasadoAlLibro ? "adm-btn--done" : "adm-btn--soft"} adm-btn--sm" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
-          ${ico("check")} ${pago.pasadoAlLibro ? "En el Libro" : "Pasé al Libro"}
+          ${ico("check")} En el Libro
         </button>
         ${pago.comprobanteId ? `
           <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(pago.comprobanteId)}" data-adm-area="pagos" aria-label="Ver comprobante de ${esc(pago.concepto || "este pago")}">${ico("fileCheck")} Ver comprobante</button>
@@ -2031,16 +2068,20 @@ function MasTab() {
         <span class="adm-row-meta">Para WhatsApp</span>
       </button>
     </div>
-    <h2 class="adm-h2">Ver como</h2>
-    <div class="adm-btn-row adm-btn-row--3">
+    <div class="adm-h2-row">
+      <h2 class="adm-h2">Ver como</h2>
+      ${Help(`<p>Abre la página de cada rol con tu usuario. “Ayudante” abre la página del paseador: el modo ayudante (integrar, devolver, agua, botiquín) se ve entrando con un usuario ayudante.</p>`, "Qué abre cada botón")}
+    </div>
+    <div class="adm-btn-row adm-btn-row--2x2">
       <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/coordinador" data-link>${ico("route")} Coordina</a>
       <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/supervisor" data-link>${ico("radar")} Supervisa</a>
       <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/paseador" data-link>${ico("pawPrint")} Pasea</a>
+      <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/paseador" data-link aria-label="Ayudante (abre la página del paseador)">${ico("users")} Ayudante</a>
     </div>
     <div class="adm-btn-row">
       <a class="adm-btn adm-btn--ghost adm-btn--sm" href="/login" data-link>${ico("key")} Cambiar mi PIN</a>
     </div>
-    <div class="adm-foot">Datos al ${DATA_UPDATED}. ${Help(`<p>Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Rutas: ${esc(BUSINESS_INFO.officialSources.routes)}. Plata: ${esc(BUSINESS_INFO.officialSources.money)}.</p><p>Esta página no muestra teléfonos ni domicilios de tutores. Los pagos anotados acá son un registro de apoyo (solo admin): la fuente oficial es el ${LIBRO}.</p>`, "Fuentes")}</div>
+    <div class="adm-foot">Datos al ${DATA_UPDATED}. ${Help(`<p>Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Rutas: ${esc(sheetText(BUSINESS_INFO.officialSources.routes))}. Plata: ${esc(BUSINESS_INFO.officialSources.money)}.</p><p>Esta página no muestra teléfonos ni domicilios de tutores. Los pagos anotados acá son un registro de apoyo (solo admin): la fuente oficial es el ${LIBRO}.</p>`, "Fuentes")}</div>
   `;
 }
 
@@ -2124,7 +2165,7 @@ function CargaView() {
         `;
       }).join("")}
     </ul>
-    ${Help(`<p>Perros por día y turno, de BASE RUTAS (${DATA_UPDATED}). Solo perros activos.</p>
+    ${Help(`<p>Perros por día y turno, de la Planilla de rutas (${DATA_UPDATED}). Solo perros activos.</p>
       <p>${listJoin(load.twoShifts.map((dog) => esc(dog.name)))} ${load.twoShifts.length === 1 ? "sale" : "salen"} en los dos turnos: cuentan dos veces en el total.</p>
       <p>Mañana: ruta ${SHIFTS.manana.route} (${SHIFTS.manana.from} a ${SHIFTS.manana.to}), supervisa ${SHIFTS.manana.supervisor}. Tarde: rutas ${SHIFTS.tarde.routes.join(" y ")} (${SHIFTS.tarde.from} a ${SHIFTS.tarde.to}), supervisa ${SHIFTS.tarde.supervisor}.</p>
       <p>Máximo diario histórico: ${esc(BUSINESS_FACTS.find((f) => /máximo/i.test(f.label))?.value || PENDIENTE)} perros.</p>`, "Cómo se cuenta")}
@@ -2143,9 +2184,9 @@ function PlanesView() {
         </li>
       `).join("")}
       <li class="adm-card adm-plan">
-        <div class="adm-plan-head"><strong>Paseo suelto</strong><span class="adm-chip adm-chip--gray">Individual / grupo</span></div>
+        <div class="adm-plan-head"><strong>Paseo suelto</strong><span class="adm-chip adm-chip--gray">Grupo</span></div>
         <dl class="adm-plan-prices">
-          ${SIZES.map((size) => `<div><dt>${size}</dt><dd>${formatPeso(REAL_SINGLE_WALK[size].individual)}<small>${formatPeso(REAL_SINGLE_WALK[size].grupo)}</small></dd></div>`).join("")}
+          ${SIZES.map((size) => `<div><dt>${size}</dt><dd>${formatPeso(REAL_SINGLE_WALK[size].grupo)}</dd></div>`).join("")}
         </dl>
       </li>
     </ul>
@@ -2260,13 +2301,13 @@ function DatosView() {
           ${DogAvatar(dog.id, dog.name, "md")}
           <div class="adm-row-main">
             <span class="adm-chips"><strong class="adm-row-title">${esc(dog.name)}</strong><span class="adm-chip ${dog.status === "Activo" ? "adm-chip--gray" : "adm-chip--yellow"}">${esc(dog.status)}</span></span>
-            <span>${esc(dog.review || PENDIENTE)}</span>
+            <span>${esc(sheetText(dog.review) || PENDIENTE)}</span>
             <span class="adm-row-meta">${esc(dog.id)} · ${esc(dog.plan)}</span>
           </div>
         </li>
       `).join("")}
     </ul>
-    ${Help(`<p>Inconsistencias entre BASE RUTAS, la tabla de precios y Perros paseados. Se corrigen en la planilla (fuente oficial: ${esc(BUSINESS_INFO.officialSources.dogs)}).</p>`, "De dónde salen")}
+    ${Help(`<p>Inconsistencias entre la Planilla de rutas, la tabla de precios y Perros paseados. Se corrigen en la planilla (fuente oficial: ${esc(BUSINESS_INFO.officialSources.dogs)}).</p>`, "De dónde salen")}
   `;
 }
 
@@ -2331,8 +2372,8 @@ function IndicadoresView() {
   const load = weeklyLoad();
   const unevaluated = active.filter((dog) => dog.category === "SIN EVALUAR").length;
   const computed = [
-    { label: "Perros con ruta activa", value: String(active.length), source: `Calculado de BASE RUTAS, ${DATA_UPDATED}`, kind: "Calculado" },
-    { label: "Salidas por semana", value: String(load.weekTotal), source: `Calculado de BASE RUTAS, ${DATA_UPDATED}`, kind: "Calculado" },
+    { label: "Perros con ruta activa", value: String(active.length), source: `Calculado de la Planilla de rutas, ${DATA_UPDATED}`, kind: "Calculado" },
+    { label: "Salidas por semana", value: String(load.weekTotal), source: `Calculado de la Planilla de rutas, ${DATA_UPDATED}`, kind: "Calculado" },
     { label: "Perros evaluados", value: `${active.length - unevaluated} de ${active.length}`, source: "Registro maestro, 14/08/2026", kind: "Dato" },
   ];
   const facts = [...BUSINESS_FACTS, ...computed];
@@ -2384,7 +2425,7 @@ function summaryText() {
     "",
     `PRÓXIMO PASO: ${next ? next.action : "Revisar la carga semanal."}`,
     "",
-    `Datos de BASE RUTAS al ${DATA_UPDATED}.`,
+    `Datos de la Planilla de rutas al ${DATA_UPDATED}.`,
   ];
   return lines.join("\n");
 }
