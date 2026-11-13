@@ -49,3 +49,23 @@ RETORNO E-015
 1. Hallazgos por pantalla, ordenados por gravedad.
 2. Textos reescritos.
 ```
+
+---
+
+## E-026 — Gemini: prueba de uso en el celular (después del rediseño)
+
+Cuando JUAN 3.0 te mande las capturas nuevas de cada rol (paseador, ayudante, supervisor, coordinador y admin), adjuntalas y pegá esto:
+
+```
+Sos un paseador de perros apurado, con el celular en una mano y dos correas en la otra, al sol.
+Te paso capturas de la app de Paseos Juan. Para cada pantalla decime, en español argentino y muy corto:
+1. ¿Qué tocarías primero? ¿Es obvio? (sí/no y por qué, en una línea)
+2. Las 3 cosas que más te frenarían (texto difícil, botón chico, algo que no se entiende).
+3. Qué palabra o botón cambiarías y por cuál.
+No propongas funciones nuevas: solo hacé más fácil lo que ya está.
+
+Al terminar, respondé con:
+RETORNO E-026
+1. Hallazgos por pantalla (máximo 3 cada una).
+2. Cambios de texto propuestos.
+```
