@@ -7,7 +7,7 @@
 // Cada perro: "Retiré" → "Foto del paseo" (la foto lo pasa a "En paseo") → "Entregué". Sin foto
 // igual se entrega y queda marcado "sin foto del paseo".
 // Modo ayudante (rol "ayudante", docs/datos-compartidos.md "Tareas del ayudante"): en Ruta ve sus
-// tareas con fotos y botones grandes: integrar, devolver (máx. 2), agua, curación y otra manada.
+// tareas con fotos y botones grandes: integrar, devolver (máx. 2), agua, curación y cruce o perro suelto.
 //
 // Ruta del día (docs/datos-compartidos.md, "Rutas y horarios"): la arma el coordinador.
 // Ruta efectiva = registro de `rutas` de la fecha si existe; si no, la `plantillas` del día de la
@@ -88,9 +88,10 @@ const CURE_TYPES = ["Raspón", "Corte chico", "Pata", "Otro"];
 const HERD_LINES = ["Dividan los perros y pasen de a grupos", "Calmá a los que se alteran"];
 
 // Checklist del paseador: su equipo según el inventario, agrupado.
-const MY_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian > 0);
-const OTHER_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian === 0 && row.juan > 0);
-const MY_MUZZLES = EQUIPMENT.filter((row) => /^bozal/i.test(row.item)).reduce((sum, row) => sum + row.sebastian, 0);
+// El inventario tiene columna solo para Juan y Sebastián: a ellos se les muestra su cantidad.
+// Cualquier otro paseador ve el equipo de paseo sin cantidades (no se inventan) y sin "tenés N bozales".
+const EQUIPMENT_COLUMNS = ["sebastian", "juan"];
+const WALK_KIT = EQUIPMENT.filter((row) => row.sebastian > 0);
 const WALKER_GROUPS = [
   { title: "Para pasear", test: /correa|pechera|cintur|muslera|gancho/i, icon: "pawPrint" },
   { title: "Seguridad", test: /bozal/i, icon: "shieldCheck" },
@@ -117,12 +118,12 @@ const view = {
   toast: null,
   photoBusy: {},
   walkBusy: {},
-  // Modo ayudante: perros elegidos para devolver, curación en curso y "otra manada" abierto.
+  // Modo ayudante: perros elegidos para devolver, curación en curso y "cruce o perro suelto" abierto.
   helper: { picks: [], cure: null, herd: false, status: "" },
 };
 
 // Lo que dibujó el último render (lo usa el encabezado, que se arma después del contenido).
-let headerInfo = { title: "Paseos Juan", shift: "" };
+let headerInfo = { title: "Paseos Juan", route: "", shift: "" };
 
 // ---------- utilidades ----------
 
@@ -320,6 +321,37 @@ function walkerName() {
 
 function isHelper() {
   return currentUser().rol === "ayudante";
+}
+
+// Columna del inventario del usuario ("sebastian" o "juan"); vacío si no tiene columna propia.
+function equipColumn() {
+  const usuario = plain(currentUser().usuario || "");
+  return EQUIPMENT_COLUMNS.includes(usuario) ? usuario : "";
+}
+
+function myEquipment() {
+  const col = equipColumn();
+  return col ? EQUIPMENT.filter((row) => row[col] > 0) : WALK_KIT;
+}
+
+// Bozales propios según el inventario; null si el usuario no tiene columna (no se muestra cantidad).
+function myMuzzles() {
+  const col = equipColumn();
+  if (!col) return null;
+  return EQUIPMENT.filter((row) => /^bozal/i.test(row.item)).reduce((sum, row) => sum + row[col], 0);
+}
+
+// Lo que no está en el equipo propio y tiene Juan (a Juan no se le muestra).
+function otherEquipment() {
+  if (equipColumn() === "juan") return [];
+  const mine = myEquipment();
+  return EQUIPMENT.filter((row) => !mine.includes(row) && row.juan > 0);
+}
+
+// Faltan bozales: solo si se sabe cuántos tiene el usuario.
+function muzzleShort(muzzled) {
+  const own = myMuzzles();
+  return !isHelper() && own !== null && muzzled.length > own ? own : null;
 }
 
 function isMe(usuario) {
@@ -570,7 +602,7 @@ function routeTotals(stops, progress) {
 
 // Ítems del checklist según el rol: corto para el ayudante, el inventario para el paseador.
 function checklistItems() {
-  return isHelper() ? HELPER_ITEMS.map((row) => row.item) : MY_EQUIPMENT.map((row) => row.item);
+  return isHelper() ? HELPER_ITEMS.map((row) => row.item) : myEquipment().map((row) => row.item);
 }
 
 function checklistFor(iso, shift) {
@@ -865,15 +897,16 @@ function PhotoInput(dog, label, extraClass = "") {
   `;
 }
 
-// La foto (o la inicial) de la tarjeta: con foto abre el detalle; sin foto abre la cámara.
+// La foto (o la inicial) de la tarjeta: con foto abre el detalle; sin foto abre la cámara para la
+// foto de PERFIL (solo un ícono chico, sin la palabra "Foto": "Foto paseo" es el que marca el paseo).
 function AvatarControl(dog, size, where) {
   if (dog.id && !photoOf(dog)) {
     const busy = Boolean(view.photoBusy[dog.id]);
     return `
       <label class="pw-ava-btn pw-ava-btn--${size} ${busy ? "is-busy" : ""}">
-        <input class="pw-file" type="file" accept="image/*" capture="environment" data-pw-photo="${esc(dog.id)}" data-pw-where="${where}" ${busy ? "disabled" : ""} aria-label="${esc(`Sacar foto: ${dog.name}`)}" />
+        <input class="pw-file" type="file" accept="image/*" capture="environment" data-pw-photo="${esc(dog.id)}" data-pw-where="${where}" ${busy ? "disabled" : ""} aria-label="${esc(`Foto de perfil de ${dog.name}`)}" />
         ${Avatar(dog, size)}
-        <span class="pw-ava-cam">${ic("camera", "pw-icon pw-icon--xs")}<span>${busy ? "…" : "Foto"}</span></span>
+        <span class="pw-ava-cam" aria-hidden="true">${ic("camera", "pw-icon pw-icon--xs")}</span>
       </label>
     `;
   }
@@ -955,17 +988,31 @@ function routeContext(sel = selection(), plan = routePlan(sel)) {
   return { sel, plan, stops, progress, names: teamNames(sel.now.iso) };
 }
 
+// Ruta con la que va el ayudante: donde figura como ayudante o la que eligió ("¿Con qué ruta vas?").
+function helperRoute(plan) {
+  if (plan.helping) return plan.helping;
+  return isHelper() && plan.shown.length === 1 ? plan.shown[0] : null;
+}
+
+function firstWord(name) {
+  return String(name || "").trim().split(/\s+/)[0] || "";
+}
+
+// Encabezado: el nombre (o "Con <paseador>") en una línea y la ruta en un chip aparte.
 function headerFor({ sel, plan, names }) {
-  const route = plan.mine[0] || (plan.shown.length === 1 ? plan.shown[0] : null);
-  let title = walkerName();
-  if (plan.helping) {
-    title = `Con ${personName(plan.helping.paseador, names) || "paseador sin asignar"} · ${plan.helping.ruta}`;
-  } else if (route && plan.assigned) {
-    title = `${walkerName()} · ${plan.mine.map((item) => item.ruta).join(" + ")}`;
-  } else if (route) {
-    title = `${walkerName()} · ${route.ruta}`;
+  const helping = helperRoute(plan);
+  let title = firstWord(walkerName()) || walkerName();
+  let route = "";
+  if (helping) {
+    const partner = firstWord(personName(helping.paseador, names));
+    title = partner ? `Con ${partner}` : title;
+    route = helping.ruta;
+  } else if (plan.assigned) {
+    route = plan.mine.map((item) => item.ruta).join(" + ");
+  } else if (plan.shown.length === 1) {
+    route = plan.shown[0].ruta;
   }
-  return { title, shift: sel.isToday ? sel.shift : `${sel.day.slice(0, 3)} · ${sel.shift}` };
+  return { title, route, shift: sel.isToday ? sel.shift : `${sel.day.slice(0, 3)} · ${sel.shift}` };
 }
 
 function WalkerHeader() {
@@ -978,9 +1025,13 @@ function WalkerHeader() {
           <img class="pw-logo-dark" src="/paseos-juan-logo-white.svg" alt="" />
         </span>
       </a>
-      <p class="pw-head-title"><strong>${esc(headerInfo.title)}</strong></p>
+      <p class="pw-head-title">
+        <strong>${esc(headerInfo.title)}</strong>
+        ${headerInfo.route ? `<span class="pw-head-route">${ic("route", "pw-icon pw-icon--xs")}${esc(headerInfo.route)}</span>` : ""}
+      </p>
       ${pending ? `<span class="pw-head-sync" role="img" aria-label="${pending} ${pending === 1 ? "cambio espera" : "cambios esperan"} señal">${ic("uploadCloud", "pw-icon pw-icon--sm")}${pending}</span>` : ""}
-      <span class="pw-head-chip">${esc(headerInfo.shift)}</span>
+      <button class="pw-head-chip" type="button" data-pw-shift-menu aria-label="${esc(`Turno: ${headerInfo.shift}. Cambiar día o turno`)}">${esc(headerInfo.shift)}<span aria-hidden="true">▾</span></button>
+      <button class="pw-head-out" type="button" data-pw-logout>${ic("logOut", "pw-icon pw-icon--sm")}<span>Salir</span></button>
     </header>
   `;
 }
@@ -1070,6 +1121,9 @@ function updateToast() {
 
 function RouteScreen(ctx) {
   const { sel, plan, stops, progress } = ctx;
+  // Ayudante que no figura en ninguna ruta del turno: primero "¿Con qué ruta vas?" (así no se
+  // mezclan perros ni "No juntar" de rutas distintas); después, su pantalla filtrada a esa ruta.
+  if (isHelper() && sel.isToday && helperNeedsPick(plan)) return HelperRoutePick(ctx);
   if (isHelper() && sel.isToday && plan.shown.length) return HelperScreen(ctx);
   const queue = buildQueue(stops, progress, sel);
   const totals = routeTotals(stops, progress);
@@ -1149,14 +1203,14 @@ function RoutePicker(sel, plan) {
   if (!plan.assigned && plan.ofShift.length > 1) {
     parts.push(`
       <div class="pw-route-pick" role="group" aria-labelledby="pw-route-pick-label">
-        <p id="pw-route-pick-label"><strong>¿Qué ruta hacés?</strong></p>
+        <p id="pw-route-pick-label"><strong>${isHelper() ? "¿Con qué ruta vas?" : "¿Qué ruta hacés?"}</strong></p>
         <div class="pw-chip-row">
           ${plan.ofShift.map((route) => `
             <button type="button" class="pw-chip ${plan.picked === route.ruta ? "is-active" : ""}" data-pw-route="${esc(route.ruta)}" aria-pressed="${plan.picked === route.ruta}">
               ${esc(route.ruta)}<small>${route.stops.length} ${route.stops.length === 1 ? "perro" : "perros"}</small>
             </button>
           `).join("")}
-          <button type="button" class="pw-chip ${plan.picked ? "" : "is-active"}" data-pw-route="" aria-pressed="${!plan.picked}">Todas<small>${plan.ofShift.length}</small></button>
+          ${isHelper() ? "" : `<button type="button" class="pw-chip ${plan.picked ? "" : "is-active"}" data-pw-route="" aria-pressed="${!plan.picked}">Todas<small>${plan.ofShift.length}</small></button>`}
         </div>
       </div>
     `);
@@ -1165,7 +1219,7 @@ function RoutePicker(sel, plan) {
 }
 
 // Lo primero (máximo 3): seguridad del grupo, bozales, perros a confirmar y equipo.
-function AlertStrip({ sel, plan, stops }) {
+function AlertStrip({ sel, plan, stops }, { skipEquip = false } = {}) {
   const items = [];
   const dogs = stops.map((stop) => stop.dog);
   const conflicts = conflictsFor(dogs);
@@ -1174,14 +1228,14 @@ function AlertStrip({ sel, plan, stops }) {
   }
   const muzzled = dogs.filter(usesMuzzle);
   if (muzzled.length) {
-    const short = !isHelper() && muzzled.length > MY_MUZZLES;
-    items.push(`<p class="pw-strip pw-strip--warn">${ic("shieldCheck", "pw-icon")}<span><b>Bozal:</b> ${esc(listNames(muzzled.map((dog) => dog.name)))}${short ? ` · tenés ${MY_MUZZLES}, avisá a Juan` : ""}</span></p>`);
+    const own = muzzleShort(muzzled);
+    items.push(`<p class="pw-strip pw-strip--warn">${ic("shieldCheck", "pw-icon")}<span><b>Bozal:</b> ${esc(listNames(muzzled.map((dog) => dog.name)))}${own !== null ? ` · tenés ${own}, avisá a Juan` : ""}</span></p>`);
   }
   const flagged = stops.filter((stop) => stop.dog.status !== "Activo");
   if (flagged.length) {
     items.push(`<p class="pw-strip pw-strip--warn">${ic("alertCircle", "pw-icon")}<span><b>Confirmar antes de retirar:</b> ${esc(listNames(flagged.map((stop) => stop.dog.name)))}</span></p>`);
   }
-  if (sel.isToday && stops.length) {
+  if (sel.isToday && stops.length && !skipEquip) {
     const checked = checklistFor(sel.now.iso, sel.shift).checked.length;
     const total = checklistItems().length;
     if (checked < total) {
@@ -1349,7 +1403,7 @@ function WalkPhotoButton(stop, where, size = "xl", { ghost = false, label = "" }
   const id = stop.dog.id;
   const busy = Boolean(view.walkBusy[id]);
   const off = busy || !loaded.ready;
-  const text = busy ? "Guardando…" : label || (size === "row" ? "Foto" : "Foto del paseo");
+  const text = busy ? "Guardando…" : label || (size === "row" ? "Foto paseo" : "Foto del paseo");
   return `
     <label class="pw-btn ${ghost ? "pw-btn--ghost" : "pw-btn--go"} pw-btn--${size} pw-walk-btn ${busy ? "is-busy" : ""}" ${off ? 'aria-disabled="true"' : ""}>
       <input class="pw-file" type="file" accept="image/*" capture="environment" data-pw-walkphoto="${esc(id)}" data-pw-where="${where}" ${off ? "disabled" : ""} aria-label="${esc(`Foto del paseo: ${stop.dog.name}`)}" />
@@ -1475,7 +1529,7 @@ function stopNote(stop) {
 }
 
 // ---------- pantalla: Ruta del ayudante ----------
-// Sus tareas (definidas por Juan): integrar, devolver de a 2, agua, botiquín y otra manada.
+// Sus tareas (definidas por Juan): integrar, devolver de a 2, agua, botiquín y cruce o perro suelto.
 // Fotos de los perros, botones grandes y casi sin texto. Levantar caca no se registra.
 
 // Paseador: última agua del grupo (la marca el ayudante de su ruta).
@@ -1490,26 +1544,105 @@ function groupWater(sel, plan) {
   return `<p class="pw-strip pw-strip--info">${ic("droplets", "pw-icon")}<span><b>Última agua ${esc(last.hora)}</b> · ${esc(last.who)}</span></p>`;
 }
 
+// El ayudante tiene que elegir ruta si no figura en ninguna del turno y hay más de una.
+function helperNeedsPick(plan) {
+  return !plan.assigned && !plan.picked && plan.ofShift.length > 1;
+}
+
+// "¿Con qué ruta vas?": una tarjeta grande por ruta (paseador, perros y primer retiro).
+function HelperRoutePick({ sel, plan, names }) {
+  const other = plan.elsewhere[0];
+  return `
+    <section class="pw-screen pw-helper" aria-labelledby="pw-tab-title">
+      <div class="pw-title-row">
+        <h1 id="pw-tab-title" tabindex="-1">¿Con qué ruta vas?</h1>
+      </div>
+      ${RouteChangeBanner()}
+      ${PlanningBar(sel)}
+      ${other ? `
+        <button class="pw-strip pw-strip--info" type="button" data-pw-shift="${other.turno}">
+          ${ic("route", "pw-icon")}<span>Tu ruta: <b>${esc(other.ruta)}</b> (${other.turno.toLowerCase()})</span>${ic("arrowRight", "pw-icon pw-icon--sm")}
+        </button>
+      ` : ""}
+      <div class="pw-route-cards" role="group" aria-labelledby="pw-tab-title">
+        ${plan.ofShift.map((route) => {
+          const walker = firstWord(personName(route.paseador, names));
+          const first = route.stops.find((stop) => stop.hora)?.hora || "";
+          return `
+            <button type="button" class="pw-route-card" data-pw-route="${esc(route.ruta)}">
+              <span class="pw-route-card-name">${ic("route", "pw-icon")}${esc(route.ruta)}</span>
+              <span class="pw-route-card-meta">${walker ? `Con <b>${esc(walker)}</b>` : "Paseador: Pendiente de confirmar"}</span>
+              <span class="pw-route-card-meta">${ic("pawPrint", "pw-icon pw-icon--sm")}${route.stops.length} ${route.stops.length === 1 ? "perro" : "perros"}${first ? ` · desde ${esc(first)}` : ""}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+      <p class="pw-source">${ic("alertCircle", "pw-icon pw-icon--sm")}Queda guardada en este celular. Si no sabés, preguntale al coordinador.</p>
+    </section>
+  `;
+}
+
 function HelperScreen(ctx) {
   if (view.helper.herd) return HerdScreen(ctx);
   if (view.helper.cure) return CureScreen(ctx);
-  const { sel } = ctx;
+  const { sel, plan } = ctx;
   const groups = helperGroups(ctx);
+  const empty = groups.active.length === 0;
+  const checklist = empty ? HelperChecklist(sel) : "";
+  // Eligió la ruta en este celular (no figura asignado): puede cambiarla.
+  const canChange = !plan.assigned && plan.picked && plan.ofShift.length > 1;
   return `
     <section class="pw-screen pw-helper" aria-labelledby="pw-tab-title">
       <div class="pw-title-row">
         <h1 id="pw-tab-title" tabindex="-1">Manada</h1>
         <span class="pw-title-count" aria-label="${groups.active.length} ${groups.active.length === 1 ? "perro" : "perros"} en la manada">${ic("pawPrint", "pw-icon pw-icon--sm")}${groups.active.length}</span>
+        ${canChange ? `<button class="pw-btn pw-btn--ghost pw-btn--sm pw-title-end" type="button" data-pw-route="">${ic("route", "pw-icon pw-icon--sm")}Cambiar ruta</button>` : ""}
       </div>
       ${RouteChangeBanner()}
       ${PlanningBar(sel)}
+      ${empty ? PickupCard(groups, ctx) : ""}
+      ${checklist}
       ${IntegrateList(groups, ctx)}
       ${DeliveringList(groups, ctx)}
       ${HelperActions(groups, sel)}
       ${ReturnPicker(groups)}
       ${NoPhotoList(groups)}
-      ${AlertStrip(ctx)}
-      ${NextPickup(groups)}
+      ${AlertStrip(ctx, { skipEquip: Boolean(checklist) })}
+      ${empty ? "" : NextPickup(groups)}
+    </section>
+  `;
+}
+
+// Manada vacía: el próximo perro que retira el paseador, con sus alertas (bozal, no juntar).
+function PickupCard(groups, ctx) {
+  const next = groups.next[0];
+  if (!next) return "";
+  const { stop } = next;
+  const more = groups.next.length - 1;
+  return `
+    <article class="pw-hcard pw-hcard--next" aria-labelledby="pw-next-pickup">
+      <div class="pw-hcard-top">
+        ${Avatar(stop.dog, "lg")}
+        <div class="pw-hcard-info">
+          <p class="pw-hero-kicker">Por retirar</p>
+          <h2 class="pw-hcard-name" id="pw-next-pickup">${esc(stop.dog.name)} <span class="pw-hcard-time">${esc(stop.hora || "Sin hora")}</span></h2>
+          <div class="pw-chips">${SafetyChips(stop.dog, routePartners(stop, ctx.stops), { compact: true })}</div>
+          ${more > 0 ? `<p class="pw-hcard-meta">Después: ${more} más</p>` : ""}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+// Checklist corto del ayudante arriba de la Manada (4 interruptores + "Listo"), mientras falte.
+function HelperChecklist(sel) {
+  const { checked } = checklistFor(sel.now.iso, sel.shift);
+  if (checked.length >= HELPER_ITEMS.length) return "";
+  return `
+    <section class="pw-hsec pw-hcheck" aria-labelledby="pw-hcheck-title">
+      <h2 class="pw-list-title" id="pw-hcheck-title">Antes de salir <span class="pw-count">${checked.length}/${HELPER_ITEMS.length}</span></h2>
+      <div class="pw-switch-grid">${HELPER_ITEMS.map((row) => EquipSwitch(row, checked)).join("")}</div>
+      <button class="pw-btn pw-btn--go pw-btn--xl" type="button" data-pw-equip-all>${ic("check", "pw-icon")}Listo</button>
     </section>
   `;
 }
@@ -1571,7 +1704,7 @@ function DeliveringList(groups) {
   `;
 }
 
-// 3 a 5. Agua, botiquín y otra manada: tres botones grandes, siempre a mano.
+// 3 a 5. Agua, botiquín y cruce o perro suelto: tres botones grandes, siempre a mano.
 function HelperActions(groups, sel) {
   const record = waterRecord(sel.now.iso, sel.shift);
   const aguas = watersOf(record);
@@ -1591,7 +1724,7 @@ function HelperActions(groups, sel) {
         ${ic("briefcaseMedical", "pw-icon")}<span>Curación</span>
       </button>
       <button class="pw-hact-btn pw-hact-btn--herd" type="button" data-pw-herd-open>
-        ${ic("alertTriangle", "pw-icon")}<span>Otra manada</span>
+        ${ic("alertTriangle", "pw-icon")}<span>Cruce o perro suelto</span>
       </button>
     </div>
     <div class="pw-water-row">
@@ -1707,19 +1840,20 @@ function CureScreen(ctx) {
   `;
 }
 
-// 5. Se cruza otra manada: dos líneas grandes y, si hace falta, aviso al paseador (sin datos de tutores).
+// 5. Se cruza otra manada o un perro suelto: dos líneas grandes y, si hace falta, aviso por WhatsApp.
+// No hay teléfonos del equipo cargados (Pendiente de confirmar): el enlace abre WhatsApp y se elige el chat.
 function HerdScreen(ctx) {
-  const route = ctx.plan.helping || ctx.plan.shown[0];
-  const text = `Paseos Juan: se cruza otra manada${route ? ` (ruta ${route.ruta})` : ""}. Dividamos los perros y pasemos de a grupos.`;
+  const route = helperRoute(ctx.plan) || ctx.plan.shown[0];
+  const text = `Paseos Juan: cruce con otra manada o un perro suelto${route ? ` (ruta ${route.ruta})` : ""}. Dividamos los perros y pasemos de a grupos.`;
   return `
     <section class="pw-screen pw-herd" aria-labelledby="pw-tab-title">
       <div class="pw-title-row">
-        <h1 id="pw-tab-title" tabindex="-1">${ic("alertTriangle", "pw-icon")}Otra manada</h1>
+        <h1 id="pw-tab-title" tabindex="-1">${ic("alertTriangle", "pw-icon")}Cruce o perro suelto</h1>
       </div>
       <ol class="pw-herd-lines">
         ${HERD_LINES.map((line) => `<li>${esc(line)}</li>`).join("")}
       </ol>
-      <a class="pw-btn pw-btn--ghost pw-btn--lg" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener noreferrer">${ic("message", "pw-icon")}Avisar al paseador</a>
+      <a class="pw-btn pw-btn--ghost pw-btn--lg" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener noreferrer">${ic("message", "pw-icon")}Avisar por WhatsApp (elegí el chat)</a>
       <button class="pw-btn pw-btn--primary pw-btn--xl" type="button" data-pw-herd-close>${ic("check", "pw-icon")}Listo</button>
     </section>
   `;
@@ -1813,6 +1947,18 @@ function DogSheet(ctx) {
 
 // ---------- pantalla: Equipo ----------
 
+// Un interruptor del checklist (pantalla Equipo y Manada del ayudante).
+function EquipSwitch({ item, label, icon: iconName, qty, sub }, checked) {
+  const on = checked.includes(item);
+  return `
+    <button class="pw-switch ${on ? "is-on" : ""}" type="button" data-pw-equip="${esc(item)}" aria-pressed="${on}">
+      <span class="pw-switch-icon">${ic(iconName, "pw-icon")}</span>
+      <span class="pw-switch-label">${esc(label)}${qty ? ` <small>×${qty}</small>` : ""}${sub ? `<small class="pw-switch-sub">${esc(sub)}</small>` : ""}</span>
+      <span class="pw-switch-mark" aria-hidden="true">${on ? ic("check", "pw-icon") : ""}</span>
+    </button>
+  `;
+}
+
 function EquipScreen({ sel, plan, stops, names }) {
   const items = checklistItems();
   const { checked, record } = checklistFor(sel.now.iso, sel.shift);
@@ -1820,30 +1966,23 @@ function EquipScreen({ sel, plan, stops, names }) {
   const change = lastChange(record, names);
   const partner = plan.helping ? personName(plan.helping.paseador, names) : "";
   const muzzled = stops.map((stop) => stop.dog).filter(usesMuzzle);
-  const short = !isHelper() && muzzled.length > MY_MUZZLES;
+  const own = muzzleShort(muzzled);
+  const col = equipColumn();
+  const extra = isHelper() ? [] : otherEquipment();
 
-  const toggle = ({ item, label, icon: iconName, qty, sub }) => {
-    const on = checked.includes(item);
-    return `
-      <button class="pw-switch ${on ? "is-on" : ""}" type="button" data-pw-equip="${esc(item)}" aria-pressed="${on}">
-        <span class="pw-switch-icon">${ic(iconName, "pw-icon")}</span>
-        <span class="pw-switch-label">${esc(label)}${qty ? ` <small>×${qty}</small>` : ""}${sub ? `<small class="pw-switch-sub">${esc(sub)}</small>` : ""}</span>
-        <span class="pw-switch-mark" aria-hidden="true">${on ? ic("check", "pw-icon") : ""}</span>
-      </button>
-    `;
-  };
+  const toggle = (row) => EquipSwitch(row, checked);
 
   let body;
   if (isHelper()) {
     body = `<div class="pw-switch-grid">${HELPER_ITEMS.map((row) => toggle(row)).join("")}</div>`;
   } else {
     const groups = [...WALKER_GROUPS, { title: "Otros", test: /.*/, icon: "packageCheck" }].map((group) => ({ ...group, rows: [] }));
-    MY_EQUIPMENT.forEach((row) => groups.find((group) => group.test.test(row.item)).rows.push(row));
+    myEquipment().forEach((row) => groups.find((group) => group.test.test(row.item)).rows.push(row));
     body = groups.filter((group) => group.rows.length).map((group) => `
       <fieldset class="pw-equip-group">
         <legend>${esc(group.title)}</legend>
         <div class="pw-switch-list">
-          ${group.rows.map((row) => toggle({ item: row.item, label: row.item, icon: group.icon, qty: row.sebastian })).join("")}
+          ${group.rows.map((row) => toggle({ item: row.item, label: row.item, icon: group.icon, qty: col ? row[col] : 0 })).join("")}
         </div>
       </fieldset>
     `).join("");
@@ -1856,7 +1995,7 @@ function EquipScreen({ sel, plan, stops, names }) {
         <span class="pw-title-count ${complete ? "is-ok" : ""}" aria-label="${checked.length} de ${items.length} listo">${checked.length}/${items.length}</span>
       </div>
       <p class="pw-sub">${isHelper() ? `Antes de salir${partner ? ` con ${esc(partner)}` : ""}` : "Antes de salir"} · ${esc(sel.shift.toLowerCase())}${sel.isToday ? "" : " de hoy"}</p>
-      ${short ? `<p class="pw-strip pw-strip--warn">${ic("shieldCheck", "pw-icon")}<span>${muzzled.length} con bozal y tenés ${MY_MUZZLES}: avisá a Juan.</span></p>` : ""}
+      ${own !== null ? `<p class="pw-strip pw-strip--warn">${ic("shieldCheck", "pw-icon")}<span>${muzzled.length} con bozal y tenés ${own}: avisá a Juan.</span></p>` : ""}
       ${body}
       <div class="pw-equip-foot">
         ${complete ? `
@@ -1867,7 +2006,7 @@ function EquipScreen({ sel, plan, stops, names }) {
         `}
       </div>
       ${change ? `<p class="pw-change-line ${record?.pendiente ? "is-pending" : ""}">${esc(change)}</p>` : ""}
-      ${!isHelper() && OTHER_EQUIPMENT.length ? `<p class="pw-source">${ic("users", "pw-icon pw-icon--sm")}Lo tiene Juan: ${OTHER_EQUIPMENT.map((row) => `${esc(row.item.toLowerCase())} (${row.juan})`).join(", ")}.</p>` : ""}
+      ${extra.length ? `<p class="pw-source">${ic("users", "pw-icon pw-icon--sm")}Lo tiene Juan: ${extra.map((row) => `${esc(row.item.toLowerCase())} (${row.juan})`).join(", ")}.</p>` : ""}
     </section>
   `;
 }
@@ -2364,7 +2503,7 @@ function rerender(focusSelector) {
 }
 
 function goTab(tab) {
-  // Curación y "otra manada" se cierran al tocar cualquier botón de la barra (también "Ruta").
+  // Curación y "cruce o perro suelto" se cierran al tocar cualquier botón de la barra (también "Ruta").
   view.helper.cure = null;
   view.helper.herd = false;
   view.tab = tab;
@@ -2375,7 +2514,7 @@ function goTab(tab) {
   document.getElementById("pw-tab-title")?.focus({ preventScroll: true });
 }
 
-// Curación u "otra manada" del ayudante: ocupan la pantalla Ruta (se vuelve con "Volver"/"Listo").
+// Curación o "cruce o perro suelto" del ayudante: ocupan la pantalla Ruta (se vuelve con "Volver"/"Listo").
 function openHelperPanel({ cure = null, herd = false }) {
   view.tab = "ruta";
   view.detailId = "";
@@ -2650,8 +2789,9 @@ function helperGroups({ sel, stops, progress }) {
   const mine = (item) => isMe(item.state.record?.devuelvePor);
   const byOther = (item) => Boolean(item.state.record?.devuelvePor) && !mine(item);
   const delivering = active.filter(mine);
-  // Para devolver: los que ya están integrados (los recién retirados tienen su tarjeta arriba).
-  const returnable = active.filter((item) => item.state.record?.horaIntegrado && !mine(item) && !byOther(item));
+  // Para devolver: cualquiera de la manada que no esté llevando nadie. Integrar se recomienda pero
+  // no es obligatorio (un perro recién retirado también se puede devolver).
+  const returnable = active.filter((item) => !mine(item) && !byOther(item));
   const picks = view.helper.picks.filter((dogId) => returnable.some((item) => item.stop.dog.id === dogId));
   view.helper.picks = picks;
   return {
@@ -2826,6 +2966,15 @@ function handlePaseadorClick(event) {
     return true;
   }
 
+  // Pastilla del turno ("Mañana ▾"): abre el cambio de día y turno (en Más).
+  if (target.closest("[data-pw-shift-menu]")) {
+    goTab("mas");
+    const active = document.querySelector("[data-pw-day].is-active");
+    active?.scrollIntoView({ block: "center", behavior: "auto" });
+    active?.focus({ preventScroll: true });
+    return true;
+  }
+
   if (target.closest("[data-pw-a11y]")) {
     // Después de este clic (si no, el panel se cierra con el mismo toque).
     setTimeout(() => document.querySelector("[data-a11y-toggle]")?.click(), 0);
@@ -2953,7 +3102,7 @@ function handlePaseadorClick(event) {
     const ruta = routeButton.dataset.pwRoute;
     savePickedRoute(sel(), ruta);
     rerender(`[data-pw-route="${CSS.escape(ruta)}"]`);
-    announce(ruta ? `Ruta ${ruta}. Queda recordada en este celular.` : "Todas las rutas del turno.");
+    announce(ruta ? `Ruta ${ruta}. Queda recordada en este celular.` : isHelper() ? "Elegí con qué ruta vas." : "Todas las rutas del turno.");
     return true;
   }
 

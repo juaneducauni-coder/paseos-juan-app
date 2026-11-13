@@ -209,17 +209,44 @@ html[data-theme="dark"] .pw-logo-dark {
   display: block;
 }
 
+/* Nombre (o "Con <paseador>") en una línea; la ruta en un chip debajo. */
 .pw-head-title {
+  display: flex;
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.pw-head-title strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-head-route {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid var(--pw-line);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--pw-muted);
+  font-size: 0.8rem;
+  font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .pw-head-chip,
-.pw-head-sync {
+.pw-head-sync,
+.pw-head-out {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -227,13 +254,33 @@ html[data-theme="dark"] .pw-logo-dark {
   min-height: 32px;
   border-radius: 999px;
   padding: 2px 12px;
+  font: inherit;
   font-size: 0.9rem;
   font-weight: 800;
 }
 
+/* Pastilla del turno: tocable (abre el cambio de día y turno). */
 .pw-head-chip {
+  min-height: 44px;
+  border: 0;
   background: var(--pw-accent-soft);
   color: var(--pw-ink);
+  cursor: pointer;
+}
+
+.pw-head-out {
+  min-height: 44px;
+  border: 1px solid var(--pw-line);
+  background: transparent;
+  color: var(--pw-ink);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.pw-head-chip:focus-visible,
+.pw-head-out:focus-visible {
+  outline: 3px solid var(--pw-focus);
+  outline-offset: 2px;
 }
 
 .pw-head-sync {
@@ -786,33 +833,30 @@ button.pw-strip {
   outline-offset: 3px;
 }
 
+/* Foto de perfil sin cargar: solo un ícono de cámara chico en la esquina (sin texto, para no
+   confundirlo con "Foto paseo", que es el botón que marca el paseo). */
 .pw-ava-cam {
   position: absolute;
-  left: 50%;
-  bottom: -6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  transform: translateX(-50%);
+  right: -4px;
+  bottom: -4px;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
   border: 2px solid var(--pw-card);
   border-radius: 999px;
-  padding: 2px 8px;
   background: var(--pw-ink);
   color: var(--pw-card);
-  font-size: 0.78rem;
-  font-weight: 800;
-  white-space: nowrap;
 }
 
 .pw-ava-btn--xl .pw-ava-cam {
-  bottom: -8px;
-  padding: 4px 12px;
-  font-size: 0.95rem;
+  width: 30px;
+  height: 30px;
 }
 
 .pw-ava-btn--xl .pw-ava-cam .pw-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .pw-ava-btn.is-busy .pw-ava {
@@ -2100,7 +2144,7 @@ div.pw-row-body--static {
   align-content: center;
 }
 
-/* 3 a 5. Agua, curación y otra manada: tres botones grandes en fila. */
+/* 3 a 5. Agua, curación y cruce o perro suelto: tres botones grandes en fila. */
 .pw-hact {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2323,8 +2367,85 @@ html[data-motion="calm"] .pw-shell *::after {
   transition: none !important;
 }
 
-html[data-motion="calm"] .pw-btn:active {
+html[data-motion="calm"] .pw-btn:active,
+html[data-motion="calm"] .pw-route-card:active,
+html[data-motion="calm"] .pw-hact-btn:active {
   transform: none;
+}
+
+/* ---------- ayudante: "¿Con qué ruta vas?", "Por retirar" y checklist arriba ---------- */
+.pw-route-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.pw-route-card {
+  display: grid;
+  gap: 4px;
+  min-height: 88px;
+  border: 3px solid var(--pw-accent);
+  border-radius: 20px;
+  padding: 14px 16px;
+  background: var(--pw-card);
+  color: var(--pw-ink);
+  box-shadow: var(--pw-shadow);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pw-route-card:focus-visible {
+  outline: 3px solid var(--pw-focus);
+  outline-offset: 3px;
+}
+
+.pw-route-card:active {
+  transform: scale(0.99);
+}
+
+.pw-route-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.4rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.pw-route-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pw-muted);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pw-route-card-meta b {
+  color: var(--pw-ink);
+}
+
+.pw-title-end {
+  margin-left: auto;
+}
+
+.pw-hcard--next {
+  border-color: var(--pw-line);
+}
+
+.pw-hcard--next .pw-hcard-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pw-hcard-time {
+  color: var(--pw-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-hcheck {
+  display: grid;
+  gap: 10px;
 }
 
 @media (prefers-reduced-motion: reduce) {
