@@ -1365,6 +1365,248 @@ html[data-theme="dark"] .coord-logo-dark {
   padding: 4px 8px;
 }
 
+/* ---------- Datos compartidos: botones como enlace, saludo y estado ---------- */
+
+a.coord-btn {
+  text-decoration: none;
+}
+
+.coord-greeting {
+  margin-top: 6px !important;
+  color: var(--c-ink);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.coord-sync-list {
+  display: grid;
+  gap: 8px;
+}
+
+.coord-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 14px;
+  background: var(--c-card);
+  color: var(--c-ink);
+  line-height: 1.45;
+  padding: 10px 14px;
+}
+
+.coord-sync > span {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.coord-sync.is-warn {
+  border-color: var(--c-warn-line);
+  background: var(--c-warn-bg);
+  color: var(--c-warn-ink);
+}
+
+.coord-sync.is-error {
+  border-color: var(--c-alert-line);
+  background: var(--c-alert-bg);
+  color: var(--c-alert-ink);
+}
+
+.coord-sync.is-ok {
+  border-color: var(--c-green);
+  background: var(--c-ok-bg);
+  color: var(--c-ok-ink);
+}
+
+.coord-sync .coord-btn {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+/* Pedido nuevo de la web dentro de "Lo urgente de hoy". */
+.coord-web-alert {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--c-alert-line);
+  border-left: 6px solid #c2412d;
+  border-radius: 18px;
+  background: var(--c-alert-bg);
+  color: var(--c-ink);
+  padding: 14px 16px;
+}
+
+.coord-web-alert h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-alert-ink);
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.coord-web-alert ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-web-alert li {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-card);
+  padding: 12px;
+}
+
+.coord-web-alert li > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coord-web-alert li strong {
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.coord-web-alert li > div > span:not(.coord-inline-alert) {
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+
+.coord-web-alert li .coord-inline-alert {
+  justify-self: start;
+}
+
+.coord-web-alert p {
+  color: var(--c-alert-ink);
+  font-weight: 700;
+}
+
+/* Datos de un pedido o de un registro: etiqueta y valor. */
+.coord-data {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.coord-data > div {
+  display: grid;
+  gap: 1px;
+  border-radius: 10px;
+  padding: 4px 0;
+}
+
+.coord-data > div.is-alert,
+.coord-data > div.is-warn {
+  padding: 6px 10px;
+}
+
+.coord-data > div.is-alert {
+  background: var(--c-alert-bg);
+  color: var(--c-alert-ink);
+}
+
+.coord-data > div.is-warn {
+  background: var(--c-warn-bg);
+  color: var(--c-warn-ink);
+}
+
+.coord-data dt {
+  color: var(--c-text);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.coord-data > div.is-alert dt,
+.coord-data > div.is-warn dt {
+  color: inherit;
+}
+
+.coord-data dd {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.coord-shell .coord-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--c-text);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.coord-shell .coord-meta.is-pending {
+  color: var(--c-warn-ink);
+  font-weight: 800;
+}
+
+.coord-meta .coord-icon {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+
+.coord-card,
+.coord-review {
+  scroll-margin-top: 84px;
+}
+
+.coord-card.is-web {
+  border-color: var(--c-warn-line);
+}
+
+.coord-card-more {
+  border: 0;
+  padding: 0;
+}
+
+.coord-card-more[open] > summary {
+  margin-bottom: 6px;
+}
+
+.coord-card-more > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink);
+  cursor: pointer;
+  font-weight: 800;
+  list-style: none;
+}
+
+.coord-card-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.coord-card-more[open] > summary .coord-icon {
+  transform: rotate(180deg);
+}
+
+/* Observaciones e incidentes (solo lectura). */
+.coord-feed {
+  display: grid;
+  gap: 16px;
+}
+
+.coord-feed-item {
+  background: var(--c-card-2);
+}
+
+.coord-feed-item.is-incident {
+  border-left: 5px solid #c2412d;
+}
+
 /* ---------- Celular angosto ---------- */
 
 @media (max-width: 479px) {
@@ -1478,6 +1720,16 @@ html[data-theme="dark"] .coord-logo-dark {
 
   .coord-pay .coord-actions {
     grid-column: 1 / -1;
+  }
+
+  .coord-web-alert li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .coord-feed {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
   }
 }
 
