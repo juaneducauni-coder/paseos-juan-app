@@ -128,3 +128,18 @@ html[data-theme="dark"] .acc-status {
 html[data-theme="dark"] .acc-status.is-error {
   color: #f2b8b5;
 }
+
+.acc-alert {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 4px solid #8a5a00;
+  border-radius: 10px;
+  background: #fff4d6;
+  color: #3d2a00;
+}
+
+html[data-theme="dark"] .acc-alert {
+  border-left-color: #e6b84f;
+  background: #2e2513;
+  color: #f6e4b8;
+}

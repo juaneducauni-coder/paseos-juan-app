@@ -105,9 +105,21 @@ test("bloqueo después de 5 intentos fallidos", async () => {
   assert.equal(locked.status, 429);
 });
 
+test("alta con usuario existente devuelve 409 y el PIN inicial pide cambio", async () => {
+  const dup = await call("usuarios", { method: "POST", token: admin, body: { usuario: "sebastian", nombre: "Otro", rol: "admin", pin: "730265", crear: true } });
+  assert.equal(dup.status, 409);
+  const nuevo = await call("usuarios", { method: "POST", token: admin, body: { usuario: "nicolas", nombre: "Nicolás", rol: "supervisor", pin: "561839", crear: true } });
+  assert.equal(nuevo.status, 201);
+  const login = await call("login", { method: "POST", body: { usuario: "nicolas", pin: "561839" } });
+  assert.equal(login.body.user.debeCambiarPin, true);
+  const cambio = await call("pin", { method: "POST", token: login.body.token, body: { actual: "561839", nuevo: "804512" } });
+  assert.equal(cambio.body.user.debeCambiarPin, false);
+});
+
 test("desactivar usuario invalida su sesión", async () => {
   await call("usuarios", { method: "DELETE", url: "/?usuario=sebastian", token: admin });
   const me = await call("me", { token: paseador });
   assert.equal(me.status, 401);
   rmSync(dir, { recursive: true, force: true });
 });
+

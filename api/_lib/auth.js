@@ -80,8 +80,8 @@ function readToken(token) {
 
 export function publicUser(user) {
   if (!user) return null;
-  const { usuario, nombre, rol, activo, creadoEn, ultimoIngreso } = user;
-  return { usuario, nombre, rol, activo, creadoEn, ultimoIngreso };
+  const { usuario, nombre, rol, activo, creadoEn, ultimoIngreso, debeCambiarPin } = user;
+  return { usuario, nombre, rol, activo, creadoEn, ultimoIngreso, debeCambiarPin: Boolean(debeCambiarPin) };
 }
 
 // Devuelve el usuario de la sesión o corta con 401/403.
