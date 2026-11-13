@@ -194,8 +194,11 @@ export const registros = {
       return result.registro;
     } catch (error) {
       if (error.status !== 0) throw error;
-      const outbox = readJson(OUTBOX_KEY, []).filter((p) => !(p.col === col && p.data.id === record.id));
-      outbox.push({ op: "save", col, data: record, at: Date.now() });
+      // Si ya había un cambio pendiente del mismo registro, se combinan (no se pierde el anterior).
+      const all = readJson(OUTBOX_KEY, []);
+      const prev = all.find((p) => p.col === col && p.data.id === record.id);
+      const outbox = all.filter((p) => p !== prev && !(p.col === col && p.data.id === record.id));
+      outbox.push({ op: "save", col, data: { ...(prev?.data || {}), ...record }, usuario: session.user()?.usuario, at: Date.now() });
       writeJson(OUTBOX_KEY, outbox);
       emit(col);
       return { ...record, pendiente: true };
@@ -249,24 +252,42 @@ function updateCaches(col, record) {
 }
 
 // Envía lo que quedó pendiente por falta de señal.
+let flushing = false;
+
 export async function flushPending() {
+  if (flushing || !session.token()) return 0;
+  const me = session.user()?.usuario;
   const outbox = readJson(OUTBOX_KEY, []);
-  if (!outbox.length || !session.token()) return 0;
-  const left = [];
-  for (const item of outbox) {
-    try {
-      if (item.op === "save") {
-        const result = await request("/api/registros", { method: "POST", body: { col: item.col, ...item.data } });
-        updateCaches(item.col, result.registro);
-        emit(item.col);
+  if (!outbox.length) return 0;
+  flushing = true;
+  const done = new Set();
+  const touched = new Set();
+  try {
+    for (const item of outbox) {
+      // Lo que dejó pendiente otra persona en este mismo celular no se envía con mi usuario.
+      if (item.usuario && item.usuario !== me) {
+        done.add(item.at);
+        continue;
       }
-    } catch (error) {
-      if (error.status === 0) left.push(item);
-      // Otros errores (permiso, datos inválidos) no se reintentan para no trabar la cola.
+      try {
+        if (item.op === "save") {
+          const result = await request("/api/registros", { method: "POST", body: { col: item.col, ...item.data } });
+          updateCaches(item.col, result.registro);
+          touched.add(item.col);
+        }
+        done.add(item.at);
+      } catch (error) {
+        // Sin señal: queda para después. Otros errores (permiso, datos inválidos) no se reintentan.
+        if (error.status !== 0) done.add(item.at);
+      }
     }
+  } finally {
+    // Se saca solo lo procesado: lo que se encoló mientras tanto queda en la cola.
+    writeJson(OUTBOX_KEY, readJson(OUTBOX_KEY, []).filter((i) => !done.has(i.at)));
+    flushing = false;
+    touched.forEach((col) => emit(col));
   }
-  writeJson(OUTBOX_KEY, left);
-  return outbox.length - left.length;
+  return done.size;
 }
 
 window.addEventListener("online", () => flushPending());
