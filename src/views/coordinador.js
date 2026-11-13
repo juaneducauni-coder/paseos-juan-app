@@ -473,7 +473,7 @@ const busy = new Set();
 async function guardar(col, data, { ok, undo = null }) {
   try {
     const result = await registros.save(col, data);
-    showToast(result.pendiente ? `${ok} Se envía con señal.` : ok, { undo });
+    showToast(result.pendiente ? "Guardado en el celular. Se envía solo con señal." : ok, { undo });
     return result;
   } catch (error) {
     showToast(`No se pudo guardar: ${error.message}`, { tone: "error" });
@@ -1433,11 +1433,11 @@ function FotoBtn(dog, { compact = false } = {}) {
 }
 
 // Seguridad siempre a la vista: bozal (rojo) y «no juntar» (amarillo).
-function safetyChips(dog) {
+function safetyChips(dog, { choca = false } = {}) {
   if (!dog) return "";
   const out = [];
   if (hasMuzzle(dog)) out.push(chip("Bozal", "alert", "alertTriangle"));
-  if (dog.incompatibleWith?.length) out.push(chip(`No juntar: ${esc(shortList(dog.incompatibleWith))}`, "warn"));
+  if (dog.incompatibleWith?.length) out.push(chip(`No juntar: ${esc(shortList(dog.incompatibleWith))}`, choca ? "alert" : "warn", choca ? "alertTriangle" : ""));
   return out.join("");
 }
 
@@ -1689,6 +1689,9 @@ function CoordinatorHeader() {
 }
 
 export function coordinatorDashboard() {
+  // Las regiones aria-live tienen que existir antes del primer aviso para que el lector las lea.
+  liveRegion("coord-live", "status", "polite");
+  liveRegion("coord-alerta", "alert", "assertive");
   wireData();
   ensureSync();
   carnetIdx = buildCarnetIndex();
@@ -1979,7 +1982,7 @@ function WeekView() {
   const today = dayNameISO(hoyAR());
   const days = plantillas.some((p) => p.dia === "Domingo") ? WEEK_DAYS : SERVICE_DAYS;
   return `
-    <p class="cd-muted">Se repite cada semana. Tocá una ruta para editarla.</p>
+    <p class="cd-muted">Se repite cada semana.</p>
     <div class="cd-week">
       ${days.map((dia) => {
         const del = plantillasDe(dia);
@@ -2032,19 +2035,23 @@ function StopCard(stop, index, warnings) {
   const name = stop.perroNombre || dog?.name || PENDIENTE;
   const memKey = `stop-${editor.id}-${index}`;
   const end = validHora(stop.hora) ? sumarMinutos(padHora(stop.hora), stop.minutos || 45) : "";
+  // «No juntar» una sola vez: si choca en esta ruta, el chip de seguridad pasa a rojo.
+  const cortos = [...new Set(msgs.map(shortWarn).filter(Boolean))];
+  const choca = cortos.includes("No juntar") && dog?.incompatibleWith?.length;
+  const chipsHtml = `${cortos.filter((w) => !(choca && w === "No juntar")).map((w) => chip(w, "alert", "alertTriangle")).join("")}${safetyChips(dog, { choca })}${!dog ? chip("Sin ficha", "warn") : dog.status !== "Activo" ? chip(esc(dog.status), "alert") : ""}`;
   return `
     <li class="cd-stop ${msgs.length ? "is-alert" : ""}" id="coord-stop-${index}">
       <div class="cd-stop-row">
         <span class="cd-stop-ava">${Ava(dog, name, "md")}<b class="cd-stop-num" aria-hidden="true">${index + 1}</b></span>
         <div class="cd-stop-main">
           <strong>${esc(name)}</strong>
-          <span class="cd-chips">${[...new Set(msgs.map(shortWarn).filter(Boolean))].map((w) => chip(w, "alert", "alertTriangle")).join("")}${safetyChips(dog)}${!dog ? chip("Sin ficha", "warn") : dog.status !== "Activo" ? chip(esc(dog.status), "alert") : ""}</span>
         </div>
         <label class="cd-hora-wrap" for="coord-ed-hora-${index}">
           <span class="coord-sr-only">Hora de retiro de ${esc(name)}</span>
           <input class="cd-hora" id="coord-ed-hora-${index}" type="time" step="300" value="${esc(padHora(stop.hora))}" data-coord-stop="${index}" data-k="hora" ${!validHora(stop.hora) ? 'aria-invalid="true"' : ""} />
         </label>
       </div>
+      ${chipsHtml ? `<p class="cd-chips cd-stop-chips">${chipsHtml}</p>` : ""}
       ${msgs.length ? `<p class="coord-sr-only">${esc(msgs.join(" "))}</p>` : ""}
       <div class="cd-stop-tools">
         <button type="button" class="cd-icon-btn" id="coord-ed-up-${index}" data-coord-stop-up="${index}" ${index === 0 ? "disabled" : ""} aria-label="Subir a ${esc(name)}">${ic("arrowUp")}</button>
@@ -2230,7 +2237,13 @@ function DogPicker() {
       </div>
       <div id="coord-picker-grid">${pickerGrid()}</div>
       <div class="cd-savebar">
-        <button type="button" class="coord-btn is-primary is-block is-big" id="coord-picker-done" data-coord-ed-picker-close>${ic("check")}<span>Listo${e.agregados ? ` (${e.agregados})` : ""}</span></button>
+        ${e.agregados ? `
+          <p class="cd-savebar-hint">${e.destino === "semana" ? `Todos los ${esc(e.dia.toLowerCase())}` : esc(destinoLabel(e))}</p>
+          <div class="cd-savebar-row">
+            <button type="button" class="coord-btn is-ghost" id="coord-picker-done" data-coord-ed-picker-close>${ic("arrowLeft")}<span>Ruta</span></button>
+            <button type="button" class="coord-btn is-primary is-big" id="coord-picker-save" data-coord-ed-save>${ic("checkCircle")}<span>Guardar (${e.agregados})</span></button>
+          </div>` : `
+          <button type="button" class="coord-btn is-primary is-block is-big" id="coord-picker-done" data-coord-ed-picker-close>${ic("check")}<span>Listo</span></button>`}
       </div>
     </section>
   `;
@@ -2254,14 +2267,14 @@ function SolicitudCard(s) {
   const nombre = s.perroNombre || dog?.name || "";
   const que = s.titulo || [s.tipo, nombre].filter(Boolean).join(": ") || "Pedido de cambio";
   const rechazo = rechazoAbierto === s.id;
-  const estadoChip = estado === "aplicado" ? chip("Aplicado", "ok") : estado === "rechazado" ? chip("Rechazado", "neutral") : chip("Pendiente", "warn");
+  const estadoChip = estado === "aplicado" ? chip("Aplicado", "ok") : estado === "rechazado" ? chip("Rechazado", "neutral") : "";
   return `
     <li class="cd-card cd-sol ${s.urgente && estado === "pendiente" ? "is-urgent" : ""}" id="coord-sol-${id}" tabindex="-1">
       <div class="cd-row">
         ${Ava(dog, nombre || s.tipo, "md")}
         <div class="cd-row-main">
           <strong>${esc(que)}</strong>
-          <small>${esc([s.fecha ? shortDay(s.fecha) : "", s.turno, s.ruta].filter(Boolean).join(" · ") || PENDIENTE)}</small>
+          <small>${esc([s.fecha ? (s.fecha === hoyAR() ? "Hoy" : shortDay(s.fecha)) : "", s.turno, s.ruta].filter(Boolean).join(" · ") || PENDIENTE)}</small>
         </div>
       </div>
       <p class="cd-chips">${s.urgente ? chip("Urgente", "alert", "alertTriangle") : ""}${estadoChip}${safetyChips(dog)}</p>
@@ -2300,7 +2313,7 @@ function CambiosView() {
   const done = getSolicitudes().filter((s) => (s.estado || "pendiente") !== "pendiente");
   return `
     ${SubHead("Pedidos de cambio", pend.length)}
-    <p class="cd-muted">Del supervisor. «Aplicar» abre la ruta con el cambio listo.</p>
+    <p class="cd-muted">Del supervisor.</p>
     ${pend.length ? `<ul class="cd-list">${pend.map((s) => SolicitudCard(s)).join("")}</ul>` : emptyState(loaded.has("solicitudes") ? "No hay pedidos pendientes." : "Cargando…", loaded.has("solicitudes") ? "checkCircle" : "clock")}
     ${done.length ? fold("solHist", `Respondidos (${done.length})`, `<ul class="cd-list">${done.map((s) => SolicitudCard(s)).join("")}</ul>`) : ""}
   `;
@@ -2499,7 +2512,7 @@ function MasView() {
           ${ic(iconName)}<span>${label}</span>${n ? `<b class="cd-menu-n is-${tone}">${n}</b>` : ""}
         </button>`).join("")}
     </div>
-    <p class="cd-foot">Rutas: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Carnets y documentos: privados. Pagos: solo Juan.</p>
+    ${fold("mas-fuentes", `${ic("help")}<b>Fuentes</b>`, `<p class="cd-foot">Rutas: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Carnets y documentos: privados.</p>`)}
   `;
 }
 
@@ -2730,7 +2743,7 @@ function ReviewCard(dog, record) {
           <strong>${esc(dog.name)}</strong>
           <small>${esc(dog.plan)} · ${esc(dog.size)}</small>
         </div>
-        ${dog.status !== "Activo" ? chip(esc(dog.status), "alert") : chip("Activo", "ok")}
+        ${dog.status !== "Activo" ? chip(esc(dog.status), "alert") : ""}
       </div>
       <p class="cd-line">${ic("help")}<span>${esc(dog.review || `Estado "${dog.status}".`)}</span></p>
       <p class="cd-chips">${safetyChips(dog)}${carnetChip(dog)}</p>
@@ -2751,7 +2764,7 @@ function DatosView() {
   const done = REVIEW_DOGS.filter((dog) => resolved[dog.id]);
   return `
     ${SubHead("Datos a confirmar", pending.length)}
-    <p class="cd-muted">Confirmalo en la planilla y tocá «Resuelto».</p>
+    <p class="cd-muted">Confirmalo en la planilla.</p>
     ${pending.length ? `<ul class="cd-list is-grid">${pending.map((dog) => ReviewCard(dog)).join("")}</ul>` : emptyState("No quedan datos por confirmar.")}
     ${done.length ? fold("datosResueltos", `Resueltos (${done.length})`, `<ul class="cd-list is-grid">${done.map((dog) => ReviewCard(dog, resolved[dog.id])).join("")}</ul>`) : ""}
   `;
@@ -2772,7 +2785,7 @@ function DocsView() {
     ${SubHead("Documentos")}
     <div class="cd-card cd-stat">
       <p class="cd-big">${ic("fileCheck")}<span><b>${activos.length - faltan.length} de ${activos.length}</b> con carnet</span></p>
-      <p class="cd-muted">El carnet se sube desde la ficha del cliente.</p>
+      <p class="cd-muted">Se sube en Clientes.</p>
     </div>
     ${!listo ? emptyState("Cargando…", "clock") : faltan.length ? `
       <h2 class="cd-h2">Sin carnet <span class="cd-count">${faltan.length}</span></h2>
@@ -3028,7 +3041,7 @@ function IncidentesView() {
   const observaciones = cached("observaciones").filter((r) => !r.fecha || r.fecha >= desde).sort(byMoment);
   return `
     ${SubHead("Incidentes", incidentes.length)}
-    <p class="cd-muted">Últimos 7 días. Solo lectura.</p>
+    <p class="cd-muted">Últimos 7 días.</p>
     ${incidentes.length ? `<ul class="cd-list is-grid">${incidentes.map((r) => ActivityItem(r, "incidente")).join("")}</ul>` : emptyState(loaded.has("incidentes") ? "Sin incidentes." : "Cargando…", loaded.has("incidentes") ? "checkCircle" : "clock")}
     ${fold("observaciones", `Observaciones (${observaciones.length})`, observaciones.length ? `<ul class="cd-list is-grid">${observaciones.map((r) => ActivityItem(r, "observacion")).join("")}</ul>` : `<p class="cd-muted">${loaded.has("observaciones") ? "Sin observaciones." : "Cargando…"}</p>`)}
   `;
@@ -3583,6 +3596,12 @@ function handleCoordinadorClick(event) {
       return true;
     }
     if (t.closest("[data-coord-ed-save]")) {
+      // Desde la grilla de fotos también se guarda (un toque menos); si falta algo, vuelve a la ruta.
+      if (editor.picker) {
+        editor.picker = false;
+        editorQuery = "";
+        editorHora = "";
+      }
       run("editor-save", () => saveEditor());
       return true;
     }

@@ -26,9 +26,10 @@
   --c-alert-line: rgba(160, 45, 30, 0.34);
   --c-alert-ink: #8a2416;
   --c-alert-solid: #b3261e;
+  --c-on-alert: #ffffff;
   --c-ok-bg: #dff0e6;
   --c-ok-ink: #025f40;
-  --c-wa: #1f8f4e;
+  --c-wa: #1a7f45;
   --c-focus: #025f40;
   --c-shadow: 0 6px 20px rgba(15, 31, 19, 0.07);
   --c-bar-shadow: 0 -6px 24px rgba(15, 31, 19, 0.1);
@@ -68,6 +69,7 @@ html[data-theme="dark"] .coord-shell {
   --c-alert-line: rgba(245, 169, 158, 0.36);
   --c-alert-ink: #f6b1a6;
   --c-alert-solid: #e46a5c;
+  --c-on-alert: #1a0705;
   --c-ok-bg: #173126;
   --c-ok-ink: #7fd6ae;
   --c-wa: #3fbf78;
@@ -185,6 +187,7 @@ body:has(.coord-shell) #a11y-root {
 .coord-brand {
   display: flex;
   min-width: 0;
+  min-height: 48px;
   align-items: center;
   gap: 10px;
   color: var(--c-ink);
@@ -309,7 +312,8 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 }
 
 .coord-btn.is-compact {
-  min-height: 44px;
+  min-width: 48px;
+  min-height: 48px;
   border-color: transparent;
   padding: 8px 10px;
 }
@@ -438,7 +442,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-pill {
   position: relative;
   display: inline-flex;
-  min-height: 46px;
+  min-height: 48px;
   align-items: center;
   gap: 6px;
   border: 2px solid var(--c-line-strong);
@@ -478,12 +482,12 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 }
 
 .cd-pill.is-date {
-  padding: 4px 6px 4px 12px;
+  padding: 0 6px 0 12px;
 }
 
 .cd-pill.is-date input {
   width: 9.5em;
-  min-height: 0;
+  min-height: 48px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -548,7 +552,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 .cd-foto-btn {
   position: relative;
   display: inline-flex;
-  min-height: 46px;
+  min-height: 48px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -563,7 +567,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 }
 
 .cd-foto-btn.is-compact {
-  min-height: 44px;
+  min-height: 48px;
   padding: 4px 12px;
 }
 
@@ -824,7 +828,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
   place-items: center;
   border-radius: 999px;
   background: var(--c-alert-solid);
-  color: #ffffff;
+  color: var(--c-on-alert);
   font-size: 0.78rem;
   padding: 0 5px;
 }
@@ -856,7 +860,7 @@ html[data-theme="dark"] .coord-btn.is-whatsapp {
 }
 
 .coord-shell .cd-savebar-select {
-  min-height: 46px;
+  min-height: 48px;
   font-weight: 800;
 }
 
@@ -919,7 +923,7 @@ html[data-theme="dark"] .cd-toast {
 
 .cd-toast.is-error {
   background: var(--c-alert-solid);
-  color: #ffffff;
+  color: var(--c-on-alert);
 }
 
 .cd-toast > span {
@@ -928,7 +932,8 @@ html[data-theme="dark"] .cd-toast {
 
 .cd-toast-undo,
 .cd-toast-x {
-  min-height: 44px;
+  min-width: 48px;
+  min-height: 48px;
   border: 0;
   border-radius: 12px;
   background: transparent;
@@ -1068,7 +1073,7 @@ html[data-theme="dark"] .cd-toast-undo {
 }
 
 .cd-h2-row .coord-btn {
-  min-height: 44px;
+  min-height: 48px;
 }
 
 .cd-foot {
@@ -1486,6 +1491,16 @@ html[data-theme="dark"] .cd-toast-undo {
   gap: 6px;
 }
 
+.cd-stop-chips {
+  margin-top: -2px;
+}
+
+.cd-savebar-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+}
+
 .cd-stop-tools {
   display: flex;
   flex-wrap: wrap;
@@ -1504,7 +1519,7 @@ html[data-theme="dark"] .cd-toast-undo {
 }
 
 .coord-shell input.cd-team-other {
-  min-height: 44px;
+  min-height: 48px;
 }
 
 /* Grilla de fotos para agregar perros */
@@ -1543,7 +1558,7 @@ html[data-theme="dark"] .cd-toast-undo {
 }
 
 .coord-shell .cd-search.is-small input {
-  min-height: 46px;
+  min-height: 48px;
 }
 
 .cd-dog-grid {
@@ -1554,9 +1569,14 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-dog-tile {
   display: grid;
-  align-content: start;
+  grid-template-rows: 1fr auto;
   justify-items: center;
   gap: 6px;
+}
+
+.cd-dog-tile .cd-foto-btn {
+  width: 100%;
+  padding: 4px 6px;
 }
 
 .cd-dog-add {
@@ -1645,11 +1665,26 @@ html[data-theme="dark"] .cd-toast-undo {
   gap: 8px;
 }
 
+/* Perro del cliente: foto | nombre y chips | «Foto» a la derecha (sin saltar de línea). */
 .cd-cli-dogs li {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px 10px;
+  gap: 4px 10px;
+}
+
+.cd-cli-dogs li > .cd-ava {
+  grid-row: 1 / span 2;
+}
+
+.cd-cli-dogs li > .cd-cli-dog,
+.cd-cli-dogs li > .cd-chips {
+  grid-column: 2;
+}
+
+.cd-cli-dogs li > .cd-foto-btn {
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 
 .cd-cli-dog {
@@ -1785,7 +1820,7 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-menu-n.is-alert {
   background: var(--c-alert-solid);
-  color: #ffffff;
+  color: var(--c-on-alert);
 }
 
 .cd-menu-n.is-warn {
@@ -2184,4 +2219,8 @@ html[data-motion="calm"] .coord-shell *::after {
     margin: 0;
     padding: 6px 0 8px;
   }
+}
+
+.cd-chips:empty {
+  display: none;
 }
