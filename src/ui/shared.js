@@ -591,7 +591,6 @@ function handleSharedActionClick(event) {
     }
     if (action.dataset.modalAction === 'confirm-pay') {
       const store = getStore();
-      const clientId = 'sol'; // Demo forced to 'Sol' or just add to alerts
       store.alerts = [{ id: 'alert-'+Date.now(), dog: 'Pago cliente', type: 'Pago por confirmar', level: 'Medio', description: 'Cliente subió comprobante.' }, ...(store.alerts || [])];
       saveStore(store);
       showToast('Comprobante enviado. Estado: Pago por confirmar.');

@@ -4014,3 +4014,15 @@ html[data-theme="dark"] textarea:focus,
 html[data-theme="dark"] select:focus {
   background: var(--field);
 }
+
+/* En celular, espacio al final para que los botones flotantes no tapen lo último */
+@media (max-width: 760px) {
+  #app {
+    padding-bottom: 76px;
+  }
+
+  .a11y-toggle {
+    width: 44px;
+    height: 44px;
+  }
+}
