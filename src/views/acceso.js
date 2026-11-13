@@ -38,6 +38,7 @@ export function loginPage() {
           ${setup ? `<label>Tu nombre <input name="nombre" autocomplete="name" required value="Juan Buitrago" /></label>` : ""}
           <label>Usuario <input name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required placeholder="Ej. juan" ${setup ? 'value="juan"' : ""} /></label>
           <label>PIN <input name="pin" type="password" inputmode="numeric" autocomplete="${setup ? "new-password" : "current-password"}" pattern="[0-9]*" minlength="6" maxlength="8" required placeholder="6 a 8 números" /></label>
+          ${setup ? `<label>Código de configuración <input name="codigo" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Te lo pasó JUAN 3.0" /></label>` : ""}
           ${setup ? `<label>Repetí el PIN <input name="pin2" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" maxlength="8" required /></label>
           <p class="acc-help">Elegí 6 a 8 números que no sean fáciles de adivinar (nada de 123456 ni tu fecha de nacimiento).</p>` : ""}
           <button class="acc-button" type="submit">${setup ? "Crear y entrar" : "Entrar"}</button>
@@ -141,7 +142,7 @@ async function onSubmit(event) {
       return;
     }
     const user = tipo === "setup"
-      ? await session.setup({ nombre: data.nombre, usuario: data.usuario, pin: data.pin })
+      ? await session.setup({ nombre: data.nombre, usuario: data.usuario, pin: data.pin, codigo: data.codigo })
       : await session.login(data.usuario, data.pin);
     estado = { necesitaConfiguracion: false, cargando: false, mensaje: "", error: false };
     if (user.debeCambiarPin) {
