@@ -168,7 +168,12 @@ export function homeFor(rol) {
 // ---------- Usuarios (solo admin) ----------
 export const usuarios = {
   list: async () => (await request("/api/usuarios")).usuarios,
-  save: async (datos) => (await request("/api/usuarios", { method: "POST", body: datos })).usuario,
+  save: async (datos) => {
+    const data = await request("/api/usuarios", { method: "POST", body: datos });
+    // El servidor manda un token nuevo si el admin se cambió su propio Gmail o PIN (cierra sesiones).
+    if (data.token) session.set(data.token, data.usuario);
+    return data.usuario;
+  },
   deactivate: (usuario) => request(`/api/usuarios?usuario=${encodeURIComponent(usuario)}`, { method: "DELETE" }),
 };
 

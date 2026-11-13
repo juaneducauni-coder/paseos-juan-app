@@ -728,7 +728,8 @@ function normalizeStop(stop) {
   const dog = (stop.perroId && dogById(stop.perroId)) || (stop.perroNombre && dogByName(stop.perroNombre)) || null;
   const minutos = Number(stop.minutos) || dog?.minutes || null;
   return {
-    perroId: dog?.id || stop.perroId || "",
+    // Solo ids con formato seguro: el valor se usa en atributos del HTML.
+    perroId: dog?.id || (/^[A-Za-z0-9_.-]{1,40}$/.test(String(stop.perroId || "")) ? String(stop.perroId) : ""),
     perroNombre: stop.perroNombre || dog?.name || PENDIENTE,
     hora: toMinutes(stop.hora) === null ? "" : String(stop.hora).slice(0, 5),
     minutos,

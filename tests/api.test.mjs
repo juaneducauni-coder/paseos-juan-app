@@ -1,6 +1,6 @@
 // Pruebas del servidor con almacenamiento en archivos temporales.
 // Correr: npm run test:api
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,12 +24,20 @@ const routes = {
   archivos: (await import("../api/archivos.js")).default,
   google: (await import("../api/auth/google.js")).default,
 };
+const { store } = await import("../api/_lib/store.js");
 
-async function call(route, { method = "GET", url = "/", body, token } = {}) {
+after(() => rmSync(dir, { recursive: true, force: true }));
+
+// Cada pedido usa su propia IP (salvo que se pase una) para no chocar con los límites por conexión.
+let ipN = 0;
+const nuevaIp = () => { ipN += 1; return `10.0.${Math.floor(ipN / 250)}.${ipN % 250}`; };
+
+async function call(route, { method = "GET", url = "/", body, token, ip } = {}) {
   const req = Readable.from(body ? [JSON.stringify(body)] : []);
   req.method = method;
   req.url = url;
   req.headers = token ? { authorization: `Bearer ${token}` } : {};
+  req.headers["x-forwarded-for"] = ip || nuevaIp();
   req.socket = { remoteAddress: "127.0.0.1" };
   return new Promise((resolve) => {
     const res = {
@@ -134,6 +142,7 @@ test("archivos: subir carnet, abrirlo y bloquear lo que no corresponde", async (
   assert.equal(listaCoord.body.registros.some((r) => r.tipo === "carnet de vacunas"), true);
   const paseadorVe = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: paseador });
   assert.equal(paseadorVe.status, 403);
+  // El tutor puede mandar el carnet desde la web aunque no use Google (lo pidió Juan).
   const web = await call("evaluacion", { method: "POST", body: { perro: "Toby", responsable: "Ana", telefono: "1100000001", carnet: { nombre: "c.png", mime: "image/png", base64: PNG } } });
   assert.equal(web.status, 201);
   assert.equal(web.body.carnet, true);
@@ -181,10 +190,15 @@ test("entrar con Google: solo cuentas vinculadas y del ID de cliente correcto", 
   }
 });
 
-test("bloqueo después de 5 intentos fallidos", async () => {
+test("bloqueo después de 5 intentos fallidos (mismo 401 genérico, no revela la cuenta)", async () => {
   for (let i = 0; i < 5; i += 1) await call("login", { method: "POST", body: { usuario: "sebastian", pin: "999990" } });
   const locked = await call("login", { method: "POST", body: { usuario: "sebastian", pin: "730264" } });
-  assert.equal(locked.status, 429);
+  assert.equal(locked.status, 401);
+  const inexistente = await call("login", { method: "POST", body: { usuario: "noexiste", pin: "730264" } });
+  assert.equal(inexistente.status, 401);
+  assert.equal(locked.body.error, inexistente.body.error);
+  // Desbloqueo para las pruebas que siguen.
+  await store.patchUser("sebastian", { bloqueadoHasta: null, fallos: 0 });
 });
 
 test("alta con usuario existente devuelve 409 y el PIN inicial pide cambio", async () => {
@@ -202,6 +216,182 @@ test("desactivar usuario invalida su sesión", async () => {
   await call("usuarios", { method: "DELETE", url: "/?usuario=sebastian", token: admin });
   const me = await call("me", { token: paseador });
   assert.equal(me.status, 401);
-  rmSync(dir, { recursive: true, force: true });
 });
 
+// ---------- Seguridad ----------
+
+async function crearUsuario(usuario, pin, extra = {}) {
+  const r = await call("usuarios", { method: "POST", token: admin, body: { usuario, nombre: usuario, rol: "paseador", pin, crear: true, ...extra } });
+  assert.equal(r.status, 201);
+}
+
+// Hace que la próxima lectura del usuario dispare `accion` (un cambio del admin) antes de volver.
+function interceptarLectura(usuario, accion) {
+  const realGet = store.getUser;
+  let paso = false;
+  store.getUser = async (u) => {
+    const leido = await realGet(u);
+    if (u === usuario && !paso) {
+      paso = true;
+      await accion();
+    }
+    return leido;
+  };
+  return () => { store.getUser = realGet; };
+}
+
+test("un ingreso en curso no deshace la desactivación ni el cambio de PIN del admin", async () => {
+  await crearUsuario("despedido", "730281");
+  let restaurar = interceptarLectura("despedido", async () => {
+    const d = await call("usuarios", { method: "DELETE", url: "/?usuario=despedido", token: admin });
+    assert.equal(d.status, 200);
+  });
+  try {
+    const login = await call("login", { method: "POST", body: { usuario: "despedido", pin: "730281" } });
+    assert.equal(login.status, 401);
+  } finally {
+    restaurar();
+  }
+  assert.equal((await store.getUser("despedido")).activo, false);
+
+  // Lo mismo con un cambio de PIN del admin: el PIN viejo no vuelve a servir.
+  await crearUsuario("cambiado", "730282");
+  restaurar = interceptarLectura("cambiado", async () => {
+    await call("usuarios", { method: "POST", token: admin, body: { usuario: "cambiado", pin: "591736" } });
+  });
+  try {
+    const login = await call("login", { method: "POST", body: { usuario: "cambiado", pin: "730282" } });
+    assert.equal(login.status, 401);
+  } finally {
+    restaurar();
+  }
+  assert.equal((await call("login", { method: "POST", body: { usuario: "cambiado", pin: "730282" } })).status, 401);
+  assert.equal((await call("login", { method: "POST", body: { usuario: "cambiado", pin: "591736" } })).status, 200);
+});
+
+test("entrar con Google en curso no deshace la desactivación", async () => {
+  await crearUsuario("gdespedido", "730287", { google: "gdespedido@gmail.com" });
+  process.env.GOOGLE_CLIENT_ID = "cliente-prueba.apps.googleusercontent.com";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ iss: "accounts.google.com", aud: process.env.GOOGLE_CLIENT_ID, exp: String(Math.floor(Date.now() / 1000) + 600), email_verified: "true", email: "gdespedido@gmail.com" }) });
+  const realList = store.listUsers;
+  store.listUsers = async () => {
+    const lista = await realList();
+    await call("usuarios", { method: "DELETE", url: "/?usuario=gdespedido", token: admin });
+    return lista;
+  };
+  try {
+    const r = await call("google", { method: "POST", body: { credential: "tok" } });
+    assert.equal(r.status, 403);
+  } finally {
+    store.listUsers = realList;
+    globalThis.fetch = realFetch;
+    delete process.env.GOOGLE_CLIENT_ID;
+  }
+  assert.equal((await store.getUser("gdespedido")).activo, false);
+});
+
+test("pedidos de ingreso en paralelo no saltean el bloqueo", async () => {
+  await crearUsuario("paralelo", "730283");
+  const pins = Array.from({ length: 30 }, (_, i) => String(400000 + i * 7));
+  const r = await Promise.all(pins.map((pin) => call("login", { method: "POST", body: { usuario: "paralelo", pin } })));
+  assert.ok(r.every((x) => x.status === 401));
+  const u = await store.getUser("paralelo");
+  assert.ok(Date.parse(u.bloqueadoHasta) > Date.now(), "la cuenta quedó bloqueada");
+  // Bloqueada: ni el PIN correcto entra.
+  assert.equal((await call("login", { method: "POST", body: { usuario: "paralelo", pin: "730283" } })).status, 401);
+});
+
+test("límite por IP en el ingreso (los ingresos correctos no cuentan)", async () => {
+  await crearUsuario("porip", "730284");
+  const ip = "203.0.113.7";
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal((await call("login", { method: "POST", ip, body: { usuario: "porip", pin: "730284" } })).status, 200);
+  }
+  const codigos = [];
+  for (let i = 0; i < 11; i += 1) {
+    codigos.push((await call("login", { method: "POST", ip, body: { usuario: `nadie${i}`, pin: "123987" } })).status);
+  }
+  assert.deepEqual(codigos.slice(0, 10), Array(10).fill(401));
+  assert.equal(codigos[10], 429);
+  // IPv6: todo el /64 cuenta como una sola conexión.
+  for (let i = 0; i < 10; i += 1) await call("login", { method: "POST", ip: `2001:db8:1:2::${i + 1}`, body: { usuario: "nadie", pin: "123987" } });
+  assert.equal((await call("login", { method: "POST", ip: "2001:db8:1:2:ffff::9", body: { usuario: "porip", pin: "730284" } })).status, 429);
+  assert.equal((await call("login", { method: "POST", ip: "2001:db8:1:3::1", body: { usuario: "porip", pin: "730284" } })).status, 200);
+});
+
+test("cambio de PIN: el PIN actual tiene límite de intentos", async () => {
+  await crearUsuario("robado", "730285");
+  const token = (await call("login", { method: "POST", body: { usuario: "robado", pin: "730285" } })).body.token;
+  for (let i = 0; i < 5; i += 1) {
+    const r = await call("pin", { method: "POST", token, body: { actual: String(100000 + i * 13), nuevo: "804519" } });
+    assert.equal(r.status, 400);
+  }
+  const bloqueado = await call("pin", { method: "POST", token, body: { actual: "730285", nuevo: "804519" } });
+  assert.equal(bloqueado.status, 429);
+  // Desbloqueado, el PIN correcto funciona y vuelve el contador a 0.
+  await store.patchUser("robado", { bloqueadoHasta: null });
+  const ok = await call("pin", { method: "POST", token, body: { actual: "730285", nuevo: "804519" } });
+  assert.equal(ok.status, 200);
+  assert.equal((await store.getUser("robado")).fallos, 0);
+});
+
+test("cambiar o desvincular el Gmail cierra las sesiones abiertas", async () => {
+  await crearUsuario("congmail", "730286", { google: "uno@gmail.com" });
+  const token = (await call("login", { method: "POST", body: { usuario: "congmail", pin: "730286" } })).body.token;
+  assert.equal((await call("me", { token })).status, 200);
+  // Editar sin tocar el Gmail no cierra la sesión.
+  await call("usuarios", { method: "POST", token: admin, body: { usuario: "congmail", nombre: "Con Gmail" } });
+  assert.equal((await call("me", { token })).status, 200);
+  await call("usuarios", { method: "POST", token: admin, body: { usuario: "congmail", google: "" } });
+  assert.equal((await call("me", { token })).status, 401);
+});
+
+test("rutas y plantillas rechazan paradas con perroId no válido", async () => {
+  const malo = { col: "rutas", fecha: "2026-11-13", ruta: "PJ_1M", turno: "Mañana", paradas: [{ perroId: "x\" autofocus onfocus=\"alert(1)", perroNombre: "Zzz", hora: "09:00" }] };
+  assert.equal((await call("registros", { method: "POST", token: admin, body: malo })).status, 400);
+  assert.equal((await call("registros", { method: "POST", token: admin, body: { ...malo, col: "plantillas", paradas: "no" } })).status, 400);
+  const bueno = { ...malo, paradas: [{ perroId: "PJ-001", perroNombre: "Pistacho", hora: "09:00" }, { perroNombre: "Sin ficha" }] };
+  assert.equal((await call("registros", { method: "POST", token: admin, body: bueno })).status, 201);
+});
+
+test("formulario público: carnet con Google, límite por /64 y tope global por hora", async () => {
+  process.env.GOOGLE_CLIENT_ID = "cliente-prueba.apps.googleusercontent.com";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ iss: "accounts.google.com", aud: process.env.GOOGLE_CLIENT_ID, exp: String(Math.floor(Date.now() / 1000) + 600), email_verified: "true", email: "tutora@gmail.com", name: "Tutora" }) });
+  try {
+    const conGoogle = await call("evaluacion", { method: "POST", body: { perro: "Moro", responsable: "Ana", telefono: "1100000002", googleCredential: "tok", carnet: { nombre: "c.png", mime: "image/png", base64: PNG } } });
+    assert.equal(conGoogle.status, 201);
+    assert.equal(conGoogle.body.carnet, true);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.GOOGLE_CLIENT_ID;
+  }
+  // Mismo /64 de IPv6: a partir del sexto pedido en la hora, 429.
+  for (let i = 0; i < 5; i += 1) await call("evaluacion", { method: "POST", ip: `2001:db8:9:9::${i + 1}`, body: { perro: "P", responsable: "R", telefono: "1" } });
+  assert.equal((await call("evaluacion", { method: "POST", ip: "2001:db8:9:9::aa", body: { perro: "P", responsable: "R", telefono: "1" } })).status, 429);
+  // Tope global (compartido entre instancias): se completa con pedidos web de la última hora.
+  const ahora = new Date().toISOString();
+  const dia = ahora.slice(0, 10);
+  const web = (await store.list("pedidos", dia)).filter((p) => p.origen === "web").length;
+  const relleno = [];
+  for (let i = web; i < 30; i += 1) {
+    const id = `${dia}_relleno_${i}`;
+    relleno.push(id);
+    await store.put("pedidos", { id, col: "pedidos", fecha: dia, origen: "web", creadoEn: ahora });
+  }
+  const tope = await call("evaluacion", { method: "POST", body: { perro: "Luna", responsable: "Ana", telefono: "1100000003" } });
+  assert.equal(tope.status, 429);
+  for (const id of relleno) await store.remove("pedidos", id);
+});
+
+
+
+test("rutas: no acepta paradas con código de perro o hora inválidos", async () => {
+  const mala = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: '"><img src=x onerror=alert(1)>', hora: "09:00" }] } });
+  assert.equal(mala.status, 400);
+  const hora = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: "PJ-001", hora: "nueve" }] } });
+  assert.equal(hora.status, 400);
+  const ok = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: "PJ-001", perroNombre: "Pistacho", hora: "09:00", minutos: 45 }] } });
+  assert.ok(ok.status === 201 || ok.status === 200);
+});

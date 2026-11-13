@@ -10,6 +10,7 @@ import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/per
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const PERRO_ID = /^[A-Za-z0-9_.-]{0,40}$/;
 const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre"];
 const MAX_RECORD = 20 * 1024;
 
@@ -56,9 +57,24 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
     // Los archivos solo se crean subiéndolos por /api/archivos (así nadie inventa a qué archivo apunta).
     if (col === "archivos") throw new HttpError(400, "Los archivos se suben desde /api/archivos.");
+    // Rutas y plantillas: cada parada con id de perro de formato seguro (o vacío) y textos acotados.
+    if ((col === "rutas" || col === "plantillas") && body.paradas !== undefined) {
+      if (!Array.isArray(body.paradas) || body.paradas.length > 60) throw new HttpError(400, "Las paradas de la ruta no son válidas.");
+      for (const parada of body.paradas) {
+        if (!parada || typeof parada !== "object") throw new HttpError(400, "Las paradas de la ruta no son válidas.");
+        if (parada.perroId && !/^[A-Za-z0-9_.-]{1,40}$/.test(String(parada.perroId))) throw new HttpError(400, "Hay un perro con un código no válido en la ruta.");
+        if (parada.hora && !/^\d{1,2}:\d{2}$/.test(String(parada.hora))) throw new HttpError(400, "Hay una hora no válida en la ruta.");
+      }
+    }
     // Miniatura de la foto del perro: solo una imagen embebida, nada más.
     if (col === "fotos" && body.miniatura && !/^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/.test(String(body.miniatura))) {
       throw new HttpError(400, "La miniatura no es una imagen válida.");
+    }
+    // Paradas de rutas y plantillas: el perroId se usa como identificador en las páginas.
+    if ((col === "rutas" || col === "plantillas") && body.paradas !== undefined) {
+      const paradas = body.paradas;
+      const valida = (p) => p && typeof p === "object" && (p.perroId == null || PERRO_ID.test(String(p.perroId)));
+      if (!Array.isArray(paradas) || !paradas.every(valida)) throw new HttpError(400, "Las paradas tienen un perro no válido.");
     }
     if (!puedeEscribir(user.rol, col)) throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
     if (body.fecha && !FECHA.test(body.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
