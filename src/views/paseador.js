@@ -1,16 +1,20 @@
-// Vista del rol Paseador (Sebastián).
+// Vista del rol Paseador y del Ayudante de paseador (página /paseador).
 // Pensada para usar en la calle: celular en una mano, correas en la otra, al sol.
 // Lo urgente primero, botones grandes, textos cortos.
 //
-// Datos fijos: src/data/realData.js (planilla RPJ, BASE RUTAS e Inventario de equipamiento).
-// Lo que se marca se guarda en los datos compartidos (src/api/client.js, ver
-// docs/datos-compartidos.md): avance de cada perro en `paseos`, equipo en `checklists`
-// e incidentes en `incidentes`. El supervisor lee y escribe los mismos registros de `paseos`.
-// En este celular solo queda el borrador del incidente mientras se escribe.
-// No hay datos de tutores en esta página.
+// Ruta del día (docs/datos-compartidos.md, "Rutas y horarios"): la arma el coordinador.
+// Ruta efectiva = registro de `rutas` de la fecha si existe; si no, la `plantillas` del día de la
+// semana; si el servidor todavía no tiene plantillas, la planilla RPJ (plantillasDesdePlanilla())
+// con el aviso de que falta que el coordinador la confirme.
+// Lo que se marca se guarda en los datos compartidos (src/api/client.js): avance de cada perro en
+// `paseos` (el mismo registro que ve y toca el supervisor), equipo en `checklists` (uno por usuario)
+// e incidentes en `incidentes`. Los avisos por barrio vienen de `avisos`.
+// En este celular solo quedan el borrador del incidente y la ruta elegida cuando el usuario no
+// figura en ninguna.
+// No hay datos de tutores en esta página (tampoco para el ayudante).
 import {
   REAL_DOGS,
-  dogsForShift,
+  TEAM,
   todayName,
   EQUIPMENT,
   INCIDENT_PROTOCOL,
@@ -18,7 +22,9 @@ import {
   WEEK_DAYS,
   CATEGORIES,
   BUSINESS_INFO,
-  DATA_UPDATED,
+  PENDIENTE,
+  plantillasDesdePlanilla,
+  sumarMinutos,
 } from "../data/realData.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
@@ -30,8 +36,10 @@ const LEGACY_PROGRESS_KEY = "paseosJuan_paseador_progreso";
 const LEGACY_EQUIP_KEY = "paseosJuan_paseador_equipo";
 // Borrador del incidente mientras se escribe (no es un dato compartido).
 const INCIDENT_KEY = "paseosJuan_paseador_incidente";
+// Ruta elegida en este dispositivo cuando el usuario no figura en ninguna ("¿En qué ruta estás hoy?").
+const ROUTE_PICK_KEY = "paseosJuan_paseador_ruta";
 
-// Cada paso guarda su hora y deja el estado del contrato de `paseos`.
+// Cada paso guarda su hora, quién lo marcó y deja el estado del contrato de `paseos`.
 const STEPS = [
   { label: "Retiro", action: "Marcar retirado", done: "Retirado", field: "horaRetiro", estado: "retirado" },
   { label: "Paseo", action: "Marcar en paseo", done: "En paseo", field: "horaPaseo", estado: "paseando" },
@@ -40,6 +48,7 @@ const STEPS = [
 const ESTADO_STEP = { pendiente: 0, retirado: 1, paseando: 2, entregado: 3 };
 const NO_SALE = "no-sale";
 const TURNO_ID = { Mañana: "manana", Tarde: "tarde" };
+const SAFE_ID = /^[a-z0-9][a-z0-9_.-]{0,60}$/i;
 
 const SHIFT_BY_LABEL = { Mañana: SHIFTS.manana, Tarde: SHIFTS.tarde };
 
@@ -47,6 +56,9 @@ const RISK_LEVELS = ["Bajo", "Medio", "Alto"];
 const INJURY_OPTIONS = ["No se ven", "Sí", "No sé"];
 const EXTERNAL_DOG = "Perro externo";
 const FORBIDDEN_WORDS = /\b(agresiv\w*|mal[oa]s?|dominantes?)\b/i;
+
+// Punto de partida si el servidor todavía no tiene plantillas (horarios reales de BASE RUTAS).
+const PLANILLA = plantillasDesdePlanilla();
 
 // Estado de la pantalla (no se guarda: al recargar vuelve a hoy y al turno actual).
 const view = {
@@ -59,6 +71,7 @@ const view = {
   incidentSavedText: "",
   equipStatus: "",
   syncError: "",
+  routeChange: null,
 };
 
 // ---------- utilidades ----------
@@ -88,6 +101,10 @@ function writeJSON(key, value) {
   }
 }
 
+function plain(text) {
+  return String(text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+}
+
 // Fecha y hora de Argentina, sin importar la zona horaria del dispositivo.
 function nowAR() {
   const parts = Object.fromEntries(
@@ -113,6 +130,18 @@ function nowAR() {
   };
 }
 
+function isoToLabel(iso) {
+  const [y, m, d] = String(iso).split("-");
+  return d ? `${d}/${m}/${y}` : iso;
+}
+
+// Próxima fecha (desde hoy) de un día de la semana: para planificar otro día.
+function isoForDay(day, now) {
+  const offset = (WEEK_DAYS.indexOf(day) - WEEK_DAYS.indexOf(now.day) + 7) % 7;
+  const [y, m, d] = now.iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + offset)).toISOString().slice(0, 10);
+}
+
 // Turno según la hora: mañana hasta las 13:30, después tarde.
 function shiftByClock(now) {
   return now.minutes < 13 * 60 + 30 ? "Mañana" : "Tarde";
@@ -122,7 +151,9 @@ function selection() {
   const now = nowAR();
   const day = view.day || now.day;
   const shift = view.shift || shiftByClock(now);
-  return { now, day, shift, isToday: day === now.day };
+  const isToday = day === now.day;
+  const iso = isToday ? now.iso : isoForDay(day, now);
+  return { now, day, shift, isToday, iso };
 }
 
 function listNames(names) {
@@ -135,10 +166,32 @@ function shiftHours(shift) {
   return `${data.from} a ${data.to}`;
 }
 
-function shiftRoutes(shift) {
-  const data = SHIFT_BY_LABEL[shift];
-  const routes = data.routes || [data.route];
-  return routes.length > 1 ? `Rutas ${listNames(routes)}` : `Ruta ${routes[0]}`;
+function minutesOf(hora) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(hora || "").trim());
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function durationText(total) {
+  if (total < 60) return `${total} min`;
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+}
+
+// Cuenta regresiva o atraso contra la hora prevista. mode: "retiro" o "entrega".
+function countdown(hora, nowMinutes, mode = "retiro") {
+  const target = minutesOf(hora);
+  if (target === null) return { text: `Hora: ${PENDIENTE.toLowerCase()}`, kind: "info" };
+  const diff = target - nowMinutes;
+  const prefix = mode === "entrega" ? "Entrega " : "";
+  if (diff > 0) return { text: `${prefix}${mode === "entrega" ? "en" : "En"} ${durationText(diff)}`, kind: diff <= 10 ? "soon" : "ok" };
+  if (diff === 0) return { text: mode === "entrega" ? "Entrega ahora" : "Ahora", kind: "soon" };
+  return { text: mode === "entrega" ? `Entrega con ${durationText(-diff)} de atraso` : `${durationText(-diff)} de atraso`, kind: "late" };
+}
+
+function Countdown(hora, nowMinutes, mode = "retiro") {
+  const cd = countdown(hora, nowMinutes, mode);
+  return `<span class="pw-cd pw-cd--${cd.kind}" data-pw-countdown="${esc(hora)}" data-pw-mode="${mode}">${esc(cd.text)}</span>`;
 }
 
 function safetyKind(text) {
@@ -190,7 +243,7 @@ const MY_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian > 0);
 const OTHER_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian === 0 && row.juan > 0);
 const MY_MUZZLES = EQUIPMENT.filter((row) => /^bozal/i.test(row.item)).reduce((sum, row) => sum + row.sebastian, 0);
 
-// ---------- datos compartidos (src/api/client.js) ----------
+// ---------- usuario ----------
 
 function currentUser() {
   return session.user() || {};
@@ -199,6 +252,215 @@ function currentUser() {
 function walkerName() {
   return currentUser().nombre || "equipo";
 }
+
+function isHelper() {
+  return currentUser().rol === "ayudante";
+}
+
+function isMe(usuario) {
+  const user = currentUser();
+  if (!usuario || !user.usuario) return false;
+  const value = plain(usuario);
+  return value === plain(user.usuario) || (user.nombre && value === plain(user.nombre));
+}
+
+// Nombre para mostrar de un usuario (las rutas guardan el usuario, no el nombre).
+function personName(usuario, names = new Map()) {
+  if (!usuario) return "";
+  if (isMe(usuario)) return currentUser().nombre || String(usuario);
+  const key = String(usuario);
+  return names.get(key) || names.get(plain(key)) || TEAM.find((member) => member.id === plain(key))?.name || key;
+}
+
+// ---------- rutas y horarios ----------
+
+function sameDay(a, b) {
+  return plain(a) === plain(b);
+}
+
+function turnoLabel(value) {
+  return plain(value).startsWith("tarde") ? "Tarde" : "Mañana";
+}
+
+function dogForStop(parada) {
+  const known = REAL_DOGS.find((dog) => dog.id === parada.perroId) || REAL_DOGS.find((dog) => plain(dog.name) === plain(parada.perroNombre));
+  if (known) return known;
+  // Perro que sumó el coordinador y todavía no está en el registro maestro de esta página.
+  return {
+    id: SAFE_ID.test(String(parada.perroId || "")) ? String(parada.perroId) : "",
+    name: String(parada.perroNombre || "Perro sin nombre"),
+    size: PENDIENTE,
+    minutes: null,
+    safety: [],
+    status: "Activo",
+    unknown: true,
+  };
+}
+
+function normalizeRoute(raw, fuente) {
+  const paradas = (Array.isArray(raw.paradas) ? raw.paradas : []).filter((p) => p && (p.perroId || p.perroNombre));
+  const stops = paradas
+    .map((parada, index) => {
+      const dog = dogForStop(parada);
+      const minutos = Number(parada.minutos) || dog.minutes || null;
+      const hora = minutesOf(parada.hora) === null ? "" : String(parada.hora).trim().padStart(5, "0");
+      return {
+        index,
+        dog,
+        hora,
+        minutos,
+        salida: hora && minutos ? sumarMinutos(hora, minutos) : "",
+        nota: String(parada.nota || "").trim(),
+        canSave: Boolean(dog.id),
+      };
+    })
+    // En orden de retiro. Sin hora van al final; a igual hora se respeta el orden del coordinador.
+    .sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999) || a.index - b.index);
+  return {
+    ruta: String(raw.ruta || PENDIENTE),
+    turno: turnoLabel(raw.turno),
+    dia: raw.dia || "",
+    paseador: String(raw.paseador || ""),
+    ayudante: String(raw.ayudante || ""),
+    supervisor: String(raw.supervisor || ""),
+    notas: String(raw.notas || ""),
+    fuente,
+    record: raw,
+    stops,
+  };
+}
+
+// Ruta efectiva de una fecha: cambio del día > plantilla semanal > planilla (si no hay nada en el servidor).
+function effectiveRoutes(iso, day, todayIso) {
+  const daily = new Map();
+  registros
+    .cached("rutas", { desde: todayIso })
+    .filter((record) => record.fecha === iso && record.ruta && Array.isArray(record.paradas))
+    .sort((a, b) => String(a.actualizadoEn || "").localeCompare(String(b.actualizadoEn || "")))
+    .forEach((record) => daily.set(record.ruta, record));
+
+  const plantillas = registros.cached("plantillas").filter((record) => record.ruta && Array.isArray(record.paradas));
+  const fromPlanilla = plantillas.length === 0;
+  const byRuta = new Map();
+  (fromPlanilla ? PLANILLA : plantillas)
+    .filter((record) => sameDay(record.dia, day))
+    .forEach((record) => byRuta.set(record.ruta, normalizeRoute(record, fromPlanilla ? "planilla" : "plantilla")));
+  daily.forEach((record, ruta) => byRuta.set(ruta, normalizeRoute(record, "dia")));
+
+  return [...byRuta.values()].sort((a, b) => (a.turno === b.turno ? a.ruta.localeCompare(b.ruta) : a.turno === "Mañana" ? -1 : 1));
+}
+
+function pickedRoute(sel) {
+  const saved = readJSON(ROUTE_PICK_KEY, {});
+  const mine = saved?.[currentUser().usuario || ""];
+  return mine && mine.iso === sel.iso && mine.turno === sel.shift ? mine.ruta : "";
+}
+
+function savePickedRoute(sel, ruta) {
+  const saved = readJSON(ROUTE_PICK_KEY, {});
+  const all = saved && typeof saved === "object" ? saved : {};
+  all[currentUser().usuario || ""] = ruta ? { iso: sel.iso, turno: sel.shift, ruta } : null;
+  writeJSON(ROUTE_PICK_KEY, all);
+}
+
+// Qué rutas se muestran: donde figura el usuario (paseador o ayudante); si no figura, todas las
+// del turno o la que eligió en este dispositivo.
+function routePlan(sel) {
+  const all = effectiveRoutes(sel.iso, sel.day, sel.now.iso);
+  const ofShift = all.filter((route) => route.turno === sel.shift);
+  const mine = ofShift.filter((route) => isMe(route.paseador) || isMe(route.ayudante));
+  const elsewhere = all.filter((route) => route.turno !== sel.shift && (isMe(route.paseador) || isMe(route.ayudante)));
+  const picked = mine.length ? "" : ofShift.some((route) => route.ruta === pickedRoute(sel)) ? pickedRoute(sel) : "";
+  const shown = mine.length ? mine : picked ? ofShift.filter((route) => route.ruta === picked) : ofShift;
+  return {
+    all,
+    ofShift,
+    mine,
+    elsewhere,
+    picked,
+    shown,
+    assigned: mine.length > 0,
+    helping: mine.find((route) => isMe(route.ayudante) && !isMe(route.paseador)) || null,
+    fromPlanilla: shown.some((route) => route.fuente === "planilla"),
+  };
+}
+
+function stopsOf(routes) {
+  return routes.flatMap((route) => route.stops.map((stop) => ({ ...stop, route })));
+}
+
+function findStop(sel, dogId) {
+  return stopsOf(routePlan(sel).shown).find((stop) => stop.dog.id === dogId) || null;
+}
+
+// "La ruta cambió": se compara lo que se ve con lo que se vio antes (mismo día, turno y ruta).
+const routeMemory = new Map();
+
+function detectRouteChanges(sel, routes) {
+  if (!sel.isToday || !loaded.ready) return;
+  const changes = [];
+  routes.forEach((route) => {
+    const key = `${sel.iso}|${route.turno}|${route.ruta}`;
+    const current = new Map(route.stops.map((stop) => [stop.dog.id || plain(stop.dog.name), stop]));
+    const before = routeMemory.get(key);
+    routeMemory.set(key, current);
+    if (!before) return;
+    const added = [...current.entries()].filter(([id]) => !before.has(id)).map(([, stop]) => `${stop.dog.name}${stop.hora ? ` (${stop.hora})` : ""}`);
+    const removed = [...before.entries()].filter(([id]) => !current.has(id)).map(([, stop]) => stop.dog.name);
+    const moved = [...current.entries()]
+      .filter(([id, stop]) => before.has(id) && before.get(id).hora !== stop.hora)
+      .map(([id, stop]) => `${stop.dog.name} pasa de ${before.get(id).hora || "sin hora"} a ${stop.hora || "sin hora"}`);
+    const parts = [];
+    if (added.length) parts.push(`se ${added.length === 1 ? "sumó" : "sumaron"} ${listNames(added)}`);
+    if (removed.length) parts.push(`se ${removed.length === 1 ? "quitó" : "quitaron"} ${listNames(removed)}`);
+    if (moved.length) parts.push(`cambió el horario: ${listNames(moved)}`);
+    if (parts.length) changes.push(`${routes.length > 1 ? `${route.ruta}: ` : ""}${parts.join(" / ")}`);
+  });
+  if (!changes.length) return;
+  view.routeChange = { text: `La ruta cambió: ${changes.join(". ")}.`, time: sel.now.time };
+  announce(view.routeChange.text);
+}
+
+// ---------- avisos por barrio ----------
+
+function activeNotices(iso) {
+  return registros
+    .cached("avisos")
+    .filter((aviso) => {
+      const desde = String(aviso.fecha || "");
+      const hasta = String(aviso.vigenteHasta || "");
+      if (desde && desde > iso) return false;
+      return hasta ? hasta >= iso : desde === iso;
+    })
+    .sort((a, b) => String(b.actualizadoEn || b.fecha || "").localeCompare(String(a.actualizadoEn || a.fecha || "")));
+}
+
+function NoticesSection(sel) {
+  const notices = activeNotices(sel.now.iso);
+  if (!notices.length) return "";
+  return `
+    <section class="pw-notices" aria-labelledby="pw-avisos-title">
+      <h2 class="pw-section-label" id="pw-avisos-title">${icon("bell", "pw-icon pw-icon--sm")} Avisos por barrio (${notices.length})</h2>
+      <ul class="pw-notice-list" role="list">
+        ${notices.map((aviso) => {
+          const urgent = /seguridad|perro suelto/i.test(aviso.tipo || "");
+          return `
+            <li class="pw-notice ${urgent ? "pw-notice--danger" : ""}">
+              ${icon(urgent ? "alertTriangle" : "mapPin", "pw-icon")}
+              <div>
+                <p class="pw-notice-head"><strong>${esc(aviso.barrio || "Barrio sin cargar")}</strong>${aviso.tipo ? ` · ${esc(aviso.tipo)}` : ""}</p>
+                <p>${esc(aviso.mensaje || aviso.titulo || "")}</p>
+                <p class="pw-notice-meta">${aviso.vigenteHasta ? `Vigente hasta el ${esc(isoToLabel(aviso.vigenteHasta))}` : "Vigente hoy"}${aviso.creadoPorNombre ? ` · Avisó ${esc(aviso.creadoPorNombre)}` : ""}</p>
+              </div>
+            </li>
+          `;
+        }).join("")}
+      </ul>
+    </section>
+  `;
+}
+
+// ---------- datos compartidos (src/api/client.js) ----------
 
 // Ids del contrato (docs/datos-compartidos.md): un registro por perro, día y turno.
 function paseoId(iso, dogId, shift) {
@@ -221,7 +483,7 @@ function recordsFor(col, iso) {
   return byId;
 }
 
-// Paso alcanzado según el estado y las horas guardadas (lo marque el paseador o el supervisor).
+// Paso alcanzado según el estado y las horas guardadas (lo marque el paseador, el ayudante o el supervisor).
 function paseoState(record) {
   const times = STEPS.map((step) => (record?.[step.field] ? String(record[step.field]) : ""));
   if (!record) return { step: 0, noSale: false, times, record: null };
@@ -233,13 +495,17 @@ function paseoState(record) {
 
 function progressFor(iso, shift, dogs) {
   const records = recordsFor("paseos", iso);
-  return Object.fromEntries(dogs.map((dog) => [dog.id, paseoState(records.get(paseoId(iso, dog.id, shift)))]));
+  return Object.fromEntries(dogs.filter((dog) => dog.id).map((dog) => [dog.id, paseoState(records.get(paseoId(iso, dog.id, shift)))]));
 }
 
-function shiftTotals(active, progress) {
-  const noSale = active.filter((dog) => progress[dog.id]?.noSale).length;
-  const delivered = active.filter((dog) => !progress[dog.id]?.noSale && progress[dog.id]?.step >= STEPS.length).length;
-  return { noSale, delivered, toWalk: active.length - noSale, closed: delivered + noSale === active.length };
+function stateOf(progress, stop) {
+  return (stop.dog.id && progress[stop.dog.id]) || paseoState(null);
+}
+
+function routeTotals(stops, progress) {
+  const noSale = stops.filter((stop) => stateOf(progress, stop).noSale).length;
+  const delivered = stops.filter((stop) => !stateOf(progress, stop).noSale && stateOf(progress, stop).step >= STEPS.length).length;
+  return { noSale, delivered, toWalk: stops.length - noSale, closed: delivered + noSale === stops.length };
 }
 
 function checklistFor(iso, shift) {
@@ -248,21 +514,26 @@ function checklistFor(iso, shift) {
   return { record, checked: MY_EQUIPMENT.filter((row) => items[row.item] === true).map((row) => row.item) };
 }
 
-// Nombres para "Último cambio": el servidor guarda el usuario de quien cambió y el nombre de quien creó.
+// Nombres para "Marcó …" y "Último cambio": el servidor guarda usuario y nombre de quien carga.
 function teamNames(iso) {
   const names = new Map();
-  ["paseos", "checklists"].forEach((col) => {
-    registros.cached(col, { desde: iso }).forEach((record) => {
-      if (record.creadoPor && record.creadoPorNombre) names.set(record.creadoPor, record.creadoPorNombre);
+  const add = (usuario, nombre) => {
+    if (usuario && nombre) names.set(String(usuario), String(nombre));
+  };
+  [["paseos", { desde: iso }], ["checklists", { desde: iso }], ["rutas", { desde: iso }], ["plantillas", {}], ["avisos", {}]].forEach(([col, opts]) => {
+    registros.cached(col, opts).forEach((record) => {
+      add(record.creadoPor, record.creadoPorNombre);
+      add(record.actualizadoPor, record.actualizadoPorNombre);
+      STEPS.forEach((step) => add(record[`${step.field}Por`], record[`${step.field}PorNombre`]));
     });
   });
   return names;
 }
 
 function whoName(usuario, names) {
-  if (!usuario) return "Pendiente de confirmar";
-  if (usuario === currentUser().usuario) return "vos";
-  return names.get(usuario) || usuario;
+  if (!usuario) return PENDIENTE;
+  if (isMe(usuario)) return "vos";
+  return personName(usuario, names);
 }
 
 function timeAR(isoString) {
@@ -278,6 +549,14 @@ function lastChange(record, names) {
   if (!record.actualizadoEn) return "";
   const time = timeAR(record.actualizadoEn);
   return `Último cambio: ${whoName(record.actualizadoPor, names)}${time ? `, ${time} hs` : ""}.`;
+}
+
+// Quién marcó un paso (solo si fue otra persona: el ayudante, el paseador o el supervisor).
+function markerOf(record, index, names) {
+  const field = STEPS[index].field;
+  const usuario = record?.[`${field}Por`];
+  if (!usuario || isMe(usuario)) return "";
+  return record[`${field}PorNombre`] || personName(usuario, names);
 }
 
 // Guarda de a uno, en orden, para que dos toques seguidos no se pisen.
@@ -305,9 +584,17 @@ function saveShared(col, build, { optimisticRecord } = {}) {
   return job;
 }
 
-function savePaseo(dog, sel, changes, message) {
+function savePaseo(stop, sel, changes, message) {
   const iso = sel.now.iso;
-  const record = { id: paseoId(iso, dog.id, sel.shift), fecha: iso, perroId: dog.id, perroNombre: dog.name, turno: sel.shift, ...changes };
+  const record = {
+    id: paseoId(iso, stop.dog.id, sel.shift),
+    fecha: iso,
+    perroId: stop.dog.id,
+    perroNombre: stop.dog.name,
+    turno: sel.shift,
+    ruta: stop.route.ruta,
+    ...changes,
+  };
   announce(message);
   return saveShared("paseos", record, { optimisticRecord: record }).then((saved) => {
     if (saved?.pendiente) announce(`${message} Sin señal: se enviará cuando haya señal.`);
@@ -323,7 +610,7 @@ function saveChecklist(sel, checked) {
 
 // Trae los datos de hoy una vez por usuario y día, y después los refresca cada minuto.
 // Hasta que llega la primera respuesta (o se confirma que no hay señal), los botones de avance
-// quedan en espera: así un toque apurado no pisa lo que ya marcó el supervisor.
+// quedan en espera: así un toque apurado no pisa lo que ya marcó el supervisor o el ayudante.
 const loaded = { key: "", stops: [], ready: false };
 
 function ensureShared(iso) {
@@ -333,18 +620,28 @@ function ensureShared(iso) {
   loaded.key = key;
   loaded.stops = [];
   loaded.ready = false;
-  Promise.all([registros.list("paseos", { desde: iso }), registros.list("checklists", { desde: iso })])
-    .then(() => migrateLegacy(iso))
-    .catch((error) => {
-      view.syncError = `No se pudieron traer los datos del equipo: ${error?.message || "error del servidor"}`;
-      announceError(view.syncError);
-      scheduleRender();
+  const sources = [
+    ["paseos", { desde: iso }],
+    ["checklists", { desde: iso }],
+    ["rutas", { desde: iso }],
+    ["plantillas", {}],
+    ["avisos", {}],
+  ];
+  Promise.allSettled(sources.map(([col, opts]) => registros.list(col, opts)))
+    .then((results) => {
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) {
+        view.syncError = `No se pudieron traer los datos del equipo: ${failed.reason?.message || "error del servidor"}`;
+        announceError(view.syncError);
+      }
+      return migrateLegacy(iso);
     })
+    .catch(() => null)
     .finally(() => {
       if (loaded.key !== key) return;
       loaded.ready = true;
       scheduleRender();
-      loaded.stops = [registros.watch("paseos", { desde: iso }), registros.watch("checklists", { desde: iso })];
+      loaded.stops = sources.map(([col, opts]) => registros.watch(col, opts));
     });
 }
 
@@ -431,25 +728,39 @@ export function walkerShell(content) {
 
 export function walkerDashboard() {
   const sel = selection();
-  const all = dogsForShift(sel.day, sel.shift);
-  const active = all.filter((dog) => dog.status === "Activo");
-  const flagged = all.filter((dog) => dog.status !== "Activo");
-  const conflicts = conflictsFor(all);
   ensureShared(sel.now.iso);
-  const progress = sel.isToday ? progressFor(sel.now.iso, sel.shift, active) : {};
+  const plan = routePlan(sel);
+  detectRouteChanges(sel, plan.shown);
+  clockState.iso = sel.now.iso;
+  clockState.shift = shiftByClock(sel.now);
+  clockState.minute = sel.now.minutes;
+  const stops = stopsOf(plan.shown);
+  const progress = sel.isToday ? progressFor(sel.iso, sel.shift, stops.map((stop) => stop.dog)) : {};
+  const names = teamNames(sel.now.iso);
 
   return `
     <main class="pw-main" id="pw-inicio">
       ${SyncBar()}
-      ${TodayCard(sel, active, flagged, conflicts, progress)}
-      ${DogsSection(sel, active, flagged, conflicts, progress)}
+      ${RouteChangeBanner()}
+      ${NoticesSection(sel)}
+      ${TodayCard(sel, plan, stops, progress, names)}
+      <div class="pw-routes" id="pw-perros" tabindex="-1" aria-label="Perros de la ruta">
+        ${plan.shown.length
+          ? plan.shown.map((route) => RouteSection(route, sel, plan, progress, names)).join("")
+          : `
+            <div class="pw-empty">
+              <p><strong>No hay rutas cargadas para ${sel.day.toLowerCase()} a la ${sel.shift.toLowerCase()}.</strong></p>
+              <p>Si te pidieron un paseo, confirmalo con el coordinador o con Juan.</p>
+            </div>
+          `}
+      </div>
       <div class="pw-columns">
-        ${EquipmentSection(sel)}
-        ${IncidentSection(sel, all)}
+        ${EquipmentSection(sel, plan, names)}
+        ${IncidentSection(sel, stops.map((stop) => stop.dog))}
       </div>
       <footer class="pw-footer">
-        <p>Datos: ${esc(BUSINESS_INFO.officialSources.routes)} e Inventario de equipamiento, actualizados el ${DATA_UPDATED}.</p>
-        <p>Lo que marcás acá lo ven Juan y quien supervisa el turno. Sin señal, se guarda y se envía solo.</p>
+        <p>Rutas y horarios: los arma el coordinador. Punto de partida: ${esc(BUSINESS_INFO.officialSources.routes)} (12/11/2026).</p>
+        <p>Lo que marcás acá lo ven ${isHelper() ? "el paseador, " : "tu ayudante, "}Juan y quien supervisa el turno. Sin señal, se guarda y se envía solo.</p>
       </footer>
     </main>
   `;
@@ -458,14 +769,14 @@ export function walkerDashboard() {
 function WalkerHeader() {
   return `
     <header class="pw-header">
-      <a class="pw-brand" href="/paseador" data-link aria-label="Paseos Juan, panel del paseador">
+      <a class="pw-brand" href="/paseador" data-link aria-label="Paseos Juan, panel ${isHelper() ? "del ayudante de paseador" : "del paseador"}">
         <span class="pw-logo" aria-hidden="true">
           <img class="pw-logo-light" src="/paseos-juan-logo-green.svg" alt="" />
           <img class="pw-logo-dark" src="/paseos-juan-logo-white.svg" alt="" />
         </span>
         <span class="pw-brand-text">
           <strong>Paseos Juan</strong>
-          <small>Paseador · ${esc(walkerName())}</small>
+          <small>${isHelper() ? "Ayudante" : "Paseador"} · ${esc(walkerName())}</small>
         </span>
       </a>
       <div class="pw-header-actions">
@@ -509,25 +820,65 @@ function SyncBar() {
   return `<div class="pw-sync" aria-live="polite" data-pw-sync>${parts.join("")}</div>`;
 }
 
-function TodayCard(sel, active, flagged, conflicts, progress) {
-  const shiftData = SHIFT_BY_LABEL[sel.shift];
-  const title = sel.isToday
-    ? `Hoy, ${sel.day.toLowerCase()} · turno ${sel.shift.toLowerCase()}`
-    : `${sel.day} · turno ${sel.shift.toLowerCase()}`;
+function RouteChangeBanner() {
+  if (!view.routeChange) return "";
+  return `
+    <div class="pw-change" data-pw-change>
+      ${icon("route", "pw-icon pw-icon--lg")}
+      <div>
+        <strong>${esc(view.routeChange.text)}</strong>
+        <p>Lo cambió el coordinador. Aviso recibido a las ${esc(view.routeChange.time)}.</p>
+      </div>
+      <button class="pw-btn pw-btn--ghost pw-btn--compact" type="button" data-pw-change-ok>Entendido</button>
+    </div>
+  `;
+}
+
+function routeHours(routes) {
+  const horas = routes.flatMap((route) => route.stops.map((stop) => stop.hora)).filter(Boolean).sort();
+  const salidas = routes.flatMap((route) => route.stops.map((stop) => stop.salida)).filter(Boolean).sort();
+  if (!horas.length) return "";
+  return `${horas[0]} a ${salidas[salidas.length - 1] || horas[horas.length - 1]}`;
+}
+
+function TodayCard(sel, plan, stops, progress, names) {
+  const helping = plan.helping;
+  const mainRoute = plan.mine[0] || null;
+  const when = sel.isToday ? `hoy, ${sel.day.toLowerCase()}` : `${sel.day.toLowerCase()} ${isoToLabel(sel.iso)}`;
+  let title;
+  if (helping) {
+    title = `Acompañás a ${esc(personName(helping.paseador, names) || "un paseador sin asignar")} en ${esc(helping.ruta)}`;
+  } else if (mainRoute) {
+    title = plan.mine.length > 1 ? `Tus rutas de ${when}: ${esc(listNames(plan.mine.map((route) => route.ruta)))}` : `Tu ruta de ${when}: ${esc(mainRoute.ruta)}`;
+  } else {
+    title = `Rutas de ${when} · turno ${sel.shift.toLowerCase()}`;
+  }
   const hello = `Hola, ${esc(walkerName())}`;
-  const kicker = sel.isToday ? `${hello} · ${sel.now.date}` : `${hello} · Planificación: no es hoy`;
+  const kicker = sel.isToday ? `${hello} · ${sel.now.date} · turno ${sel.shift.toLowerCase()}` : `${hello} · Planificación: no es hoy`;
+  const supervisors = [...new Set(plan.shown.map((route) => route.supervisor).filter(Boolean))];
+  const supervisor = supervisors.length ? listNames(supervisors) : SHIFT_BY_LABEL[sel.shift].supervisor;
+  const hours = routeHours(plan.shown) || shiftHours(sel.shift);
+  const flagged = stops.filter((stop) => stop.dog.status !== "Activo");
+  const conflicts = conflictsFor(stops.map((stop) => stop.dog));
+
+  const people = [];
+  if (plan.assigned && plan.shown.length === 1) {
+    const route = plan.shown[0];
+    if (helping) people.push(`<li>Paseador: <b>${esc(personName(route.paseador, names) || PENDIENTE)}</b></li>`);
+    else people.push(`<li>Ayudante: ${route.ayudante ? `<b>${esc(personName(route.ayudante, names))}</b>` : "sin ayudante"}</li>`);
+  }
 
   return `
     <section class="pw-card pw-today" aria-labelledby="pw-today-title">
       <div class="pw-today-head">
         <div>
           <p class="pw-kicker">${kicker}</p>
-          <h1 id="pw-today-title">${title}</h1>
+          <h1 id="pw-today-title" tabindex="-1">${title}</h1>
           <ul class="pw-meta" aria-label="Datos del turno">
-            <li><b>${active.length}</b> ${active.length === 1 ? "perro" : "perros"}</li>
-            <li>${shiftHours(sel.shift)}</li>
-            <li>Supervisa: ${esc(shiftData.supervisor)}</li>
-            <li>${shiftRoutes(sel.shift)}</li>
+            <li><b>${stops.length}</b> ${stops.length === 1 ? "perro" : "perros"}</li>
+            <li>${esc(hours)}</li>
+            <li>Supervisa: ${esc(supervisor)}</li>
+            ${people.join("")}
           </ul>
         </div>
         <div class="pw-today-actions">
@@ -544,9 +895,50 @@ function TodayCard(sel, active, flagged, conflicts, progress) {
         </div>
       </div>
       ${view.pickerOpen ? Picker(sel) : ""}
-      ${Priorities(sel, active, flagged, conflicts, progress)}
+      ${plan.fromPlanilla ? `
+        <p class="pw-source pw-source--warn">${icon("alertCircle", "pw-icon")}<span><b>Ruta tomada de la planilla, falta que el coordinador la confirme.</b> Horarios de BASE RUTAS (12/11/2026).</span></p>
+      ` : ""}
+      ${RoutePicker(sel, plan)}
+      ${Priorities(sel, stops, flagged, conflicts, progress)}
     </section>
   `;
+}
+
+// "¿En qué ruta estás hoy?": solo si el usuario no figura en ninguna ruta del turno.
+function RoutePicker(sel, plan) {
+  const parts = [];
+  if (!plan.assigned && plan.elsewhere.length) {
+    const other = plan.elsewhere[0];
+    parts.push(`
+      <p class="pw-source">
+        ${icon("route", "pw-icon")}
+        <span>${sel.isToday ? "Hoy" : "Ese día"} figurás en la ruta <b>${esc(other.ruta)}</b> (turno ${other.turno.toLowerCase()}).</span>
+        <button class="pw-btn pw-btn--ghost pw-btn--compact" type="button" data-pw-shift="${other.turno}">Ver turno ${other.turno.toLowerCase()}</button>
+      </p>
+    `);
+  }
+  if (!plan.assigned && plan.ofShift.length) {
+    parts.push(`
+      <div class="pw-route-pick" role="group" aria-labelledby="pw-route-pick-label">
+        <p id="pw-route-pick-label"><strong>¿En qué ruta estás ${sel.isToday ? "hoy" : "ese día"}?</strong>
+          <span>No figurás como paseador ni ayudante en este turno. Si es un error, avisale al coordinador.</span></p>
+        ${plan.ofShift.length > 1 ? `
+          <div class="pw-route-chips">
+            ${plan.ofShift.map((route) => `
+              <button type="button" class="pw-chip pw-chip--wide ${plan.picked === route.ruta ? "is-active" : ""}" data-pw-route="${esc(route.ruta)}" aria-pressed="${plan.picked === route.ruta}">
+                ${esc(route.ruta)}<small>${route.stops.length} ${route.stops.length === 1 ? "perro" : "perros"}${route.paseador ? ` · ${esc(personName(route.paseador))}` : ""}</small>
+              </button>
+            `).join("")}
+            <button type="button" class="pw-chip pw-chip--wide ${plan.picked ? "" : "is-active"}" data-pw-route="" aria-pressed="${!plan.picked}">
+              Todas<small>${plan.ofShift.length} rutas</small>
+            </button>
+          </div>
+          <p class="pw-muted pw-small">Lo que elijas queda recordado en este celular.</p>
+        ` : ""}
+      </div>
+    `);
+  }
+  return parts.join("");
 }
 
 function Picker(sel) {
@@ -578,8 +970,9 @@ function Picker(sel) {
 }
 
 // Máximo 3 prioridades, de la más urgente a la menos urgente.
-function Priorities(sel, active, flagged, conflicts, progress) {
+function Priorities(sel, stops, flagged, conflicts, progress) {
   const items = [];
+  const dogs = stops.map((stop) => stop.dog);
 
   if (conflicts.length) {
     items.push({
@@ -592,9 +985,9 @@ function Priorities(sel, active, flagged, conflicts, progress) {
     });
   }
 
-  const muzzled = active.filter(usesMuzzle);
+  const muzzled = dogs.filter(usesMuzzle);
   if (muzzled.length) {
-    const short = muzzled.length > MY_MUZZLES;
+    const short = !isHelper() && muzzled.length > MY_MUZZLES;
     items.push({
       kind: "warn",
       icon: "shieldCheck",
@@ -611,18 +1004,18 @@ function Priorities(sel, active, flagged, conflicts, progress) {
     items.push({
       kind: "warn",
       icon: "alertCircle",
-      title: `Confirmar antes de retirar: ${listNames(flagged.map((dog) => dog.name))}`,
+      title: `Confirmar antes de retirar: ${listNames(flagged.map((stop) => stop.dog.name))}`,
       text: flagged.length === 1
-        ? `Figura en la ruta con estado "${esc(flagged[0].status)}". No lo retires sin confirmarlo con Juan.`
-        : "Figuran en la ruta pero su estado no es Activo. No los retires sin confirmarlo con Juan.",
+        ? `Figura en la ruta con estado "${esc(flagged[0].dog.status)}". No lo retires sin confirmarlo con el coordinador o con Juan.`
+        : "Figuran en la ruta pero su estado no es Activo. No los retires sin confirmarlo con el coordinador o con Juan.",
       goto: "pw-perros",
       button: "Ver perros",
     });
   }
 
-  if (sel.isToday && active.length) {
+  if (sel.isToday && stops.length) {
     const checked = checklistFor(sel.now.iso, sel.shift).checked.length;
-    const totals = shiftTotals(active, progress);
+    const totals = routeTotals(stops, progress);
     if (checked < MY_EQUIPMENT.length) {
       items.push({
         kind: "info",
@@ -642,15 +1035,6 @@ function Priorities(sel, active, flagged, conflicts, progress) {
         button: "Ver perros",
       });
     }
-  }
-
-  if (!active.length) {
-    return `
-      <div class="pw-empty">
-        <p><strong>No hay perros cargados para este día y turno.</strong></p>
-        <p>Si te pidieron un paseo, confirmalo con Juan.</p>
-      </div>
-    `;
   }
 
   if (!items.length) return "";
@@ -676,71 +1060,150 @@ function Priorities(sel, active, flagged, conflicts, progress) {
   `;
 }
 
-function DogsSection(sel, active, flagged, conflicts, progress) {
-  const totals = shiftTotals(active, progress);
+function sourceText(route, names) {
+  if (route.fuente === "dia") {
+    const who = route.record.actualizadoPor ? whoName(route.record.actualizadoPor, names) : "";
+    const time = route.record.actualizadoEn ? timeAR(route.record.actualizadoEn) : "";
+    return `Cambio del día${who ? ` cargado por ${who}` : ""}${time ? ` a las ${time}` : ""}.`;
+  }
+  if (route.fuente === "plantilla") return "Plantilla semanal del coordinador.";
+  return "Planilla RPJ (sin confirmar).";
+}
+
+// El próximo paso de la ruta, bien grande: primero los retiros pendientes, después las entregas.
+function NextUp(route, sel, progress) {
+  const ready = route.stops.filter((stop) => stop.canSave);
+  if (!route.stops.length) return "";
+  if (!sel.isToday) {
+    const first = route.stops[0];
+    return `
+      <div class="pw-next" data-pw-next="${esc(route.ruta)}">
+        <p class="pw-next-label">Primer retiro</p>
+        <p class="pw-next-main">${esc(first.dog.name)}${first.hora ? ` · ${esc(first.hora)}` : ""}</p>
+      </div>
+    `;
+  }
+  const pending = ready.filter((stop) => !stateOf(progress, stop).noSale && stateOf(progress, stop).step === 0);
+  const walking = ready.filter((stop) => {
+    const state = stateOf(progress, stop);
+    return !state.noSale && state.step > 0 && state.step < STEPS.length;
+  });
+  let group;
+  let label;
+  let hora;
+  let mode;
+  if (pending.length) {
+    hora = pending[0].hora;
+    group = pending.filter((stop) => stop.hora === hora);
+    label = "Próximo";
+    mode = "retiro";
+  } else if (walking.length) {
+    const sorted = [...walking].sort((a, b) => String(a.salida || "99:99").localeCompare(String(b.salida || "99:99")));
+    hora = sorted[0].salida;
+    group = sorted.filter((stop) => stop.salida === hora);
+    label = "Próxima entrega";
+    mode = "entrega";
+  } else {
+    return `
+      <div class="pw-next pw-next--done" data-pw-next="${esc(route.ruta)}">
+        <p class="pw-next-label">${esc(route.ruta)}</p>
+        <p class="pw-next-main">${icon("checkCircle", "pw-icon pw-icon--lg")} Ruta completa</p>
+      </div>
+    `;
+  }
+  const late = countdown(hora, sel.now.minutes, mode).kind === "late";
+  return `
+    <div class="pw-next ${late ? "is-late" : ""}" data-pw-next="${esc(route.ruta)}">
+      <p class="pw-next-label">${mode === "entrega" ? "Todos retirados · próxima entrega prevista" : "Retiro que sigue"}</p>
+      <p class="pw-next-main">${label === "Próximo" ? "Próximo: " : ""}${esc(listNames(group.map((stop) => stop.dog.name)))}${hora ? ` · ${esc(hora)}` : ""}</p>
+      <p class="pw-next-time">${Countdown(hora, sel.now.minutes, mode)}</p>
+      <div class="pw-next-actions">
+        ${group.map((stop) => {
+          const state = stateOf(progress, stop);
+          return `
+            <button class="pw-btn pw-btn--primary pw-btn--block" type="button" data-pw-from-next="${esc(route.ruta)}" data-pw-step="${esc(stop.dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'}>
+              ${loaded.ready ? `${STEPS[state.step].action}${group.length > 1 ? `: ${esc(stop.dog.name)}` : ""}` : "Cargando lo marcado…"}
+            </button>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function RouteSection(route, sel, plan, progress, names) {
+  const dogs = route.stops.map((stop) => stop.dog);
+  const conflicts = conflictsFor(dogs);
+  const totals = routeTotals(route.stops, progress);
   const percent = totals.toWalk ? Math.round((totals.delivered / totals.toWalk) * 100) : 100;
-  const names = sel.isToday ? teamNames(sel.now.iso) : new Map();
+  const headingId = `pw-ruta-${route.ruta.replace(/[^a-z0-9]+/gi, "-")}`;
+  const others = [];
+  if (!plan.helping && route.paseador && !isMe(route.paseador)) others.push(`Paseador: ${personName(route.paseador, names)}`);
+  if (plan.helping && route.ayudante && !isMe(route.ayudante)) others.push(`Ayudante: ${personName(route.ayudante, names)}`);
+  if (!plan.assigned && route.ayudante) others.push(`Ayudante: ${personName(route.ayudante, names)}`);
 
   return `
-    <section class="pw-section" id="pw-perros" aria-labelledby="pw-perros-title" tabindex="-1">
+    <section class="pw-section pw-route" aria-labelledby="${headingId}">
       <div class="pw-section-head">
         <div>
-          <h2 id="pw-perros-title">Perros del turno <span class="pw-count">${active.length}</span></h2>
-          <p class="pw-muted">Orden de la planilla RPJ. Horario de retiro por perro: Pendiente de confirmar.</p>
+          <h2 id="${headingId}">Ruta ${esc(route.ruta)} <span class="pw-count">${route.stops.length}</span></h2>
+          <p class="pw-muted">${esc(sourceText(route, names))} En orden, con la hora de retiro.${others.length ? ` ${esc(others.join(" · "))}.` : ""}</p>
+          ${route.notas ? `<p class="pw-dog-nota"><b>Nota de la ruta:</b> ${esc(route.notas)}</p>` : ""}
         </div>
-        ${sel.isToday && active.length ? `
-          <div class="pw-progress" aria-label="Avance del turno">
+        ${sel.isToday && route.stops.length ? `
+          <div class="pw-progress" aria-label="Avance de la ruta ${esc(route.ruta)}">
             <strong>${totals.delivered} de ${totals.toWalk} entregados${totals.noSale ? ` · ${totals.noSale} no ${totals.noSale === 1 ? "sale" : "salen"}` : ""}</strong>
             <span class="pw-progress-bar" aria-hidden="true"><span style="width:${percent}%"></span></span>
           </div>
         ` : ""}
       </div>
 
+      ${NextUp(route, sel, progress)}
+
       ${conflicts.length ? `
         <div class="pw-banner pw-banner--danger" role="alert">
           ${icon("alertTriangle", "pw-icon pw-icon--lg")}
           <div>
-            <strong>Hay perros que no se pueden juntar en este turno</strong>
+            <strong>Hay perros que no se pueden juntar en esta ruta</strong>
             <ul>${groupConflicts(conflicts).map((group) => `<li>${group}</li>`).join("")}</ul>
             <p>Van en grupos distintos, nunca juntos.</p>
-            <p>Si no sabés cómo armar los grupos, consultá con ${esc(SHIFT_BY_LABEL[sel.shift].supervisor)} antes de salir.</p>
+            <p>Si no sabés cómo armar los grupos, consultá con ${esc(route.supervisor || SHIFT_BY_LABEL[sel.shift].supervisor)} antes de salir.</p>
           </div>
         </div>
       ` : ""}
 
-      ${flagged.map((dog) => `
-        <div class="pw-banner pw-banner--warn">
-          ${icon("alertCircle", "pw-icon pw-icon--lg")}
-          <div>
-            <strong>${esc(dog.name)}: ${esc(dog.status)}</strong>
-            <p>${esc(dog.review || "Figura en la ruta, pero su estado no es Activo.")} No lo retires sin confirmarlo con Juan.</p>
-          </div>
-        </div>
-      `).join("")}
-
-      ${!sel.isToday && active.length ? `
+      ${!sel.isToday && route.stops.length ? `
         <p class="pw-note">Estás viendo otro día: el avance (retiro, paseo y entrega) se marca solo el día del paseo.</p>
       ` : ""}
 
-      ${active.length ? `
-        <ul class="pw-dogs" role="list">
-          ${active.map((dog) => DogCard(dog, sel, progress[dog.id] || paseoState(null), partnersInList(dog, conflicts), names)).join("")}
-        </ul>
-        <p class="pw-muted pw-legend">
-          Categoría operativa de todos los perros: <b>SIN EVALUAR</b>. ${esc(CATEGORIES["SIN EVALUAR"])}
-          Fuente: Registro maestro, 14/08/2026.
-        </p>
+      ${route.stops.length ? `
+        <ol class="pw-dogs" role="list">
+          ${route.stops.map((stop, index) => DogCard({ ...stop, route }, index, sel, stateOf(progress, stop), partnersInList(stop.dog, conflicts), names)).join("")}
+        </ol>
       ` : `
         <div class="pw-empty">
-          <p><strong>Sin perros para ${sel.day.toLowerCase()} a la ${sel.shift.toLowerCase()}.</strong></p>
-          <p>Probá otro día o turno con “Cambiar día o turno”.</p>
+          <p><strong>Sin perros en ${esc(route.ruta)} para este turno.</strong></p>
+          <p>Si te pidieron un paseo, confirmalo con el coordinador.</p>
         </div>
       `}
+      <p class="pw-muted pw-legend">
+        Categoría operativa: <b>SIN EVALUAR</b> salvo que se indique otra. ${esc(CATEGORIES["SIN EVALUAR"])}
+        Fuente: Registro maestro, 14/08/2026.
+      </p>
     </section>
   `;
 }
 
-function DogCard(dog, sel, state, partners, names) {
+// Nota de la ruta que no repite lo que ya dicen las alertas del perro.
+function stopNote(stop) {
+  if (!stop.nota) return "";
+  if (/^bozal$/i.test(stop.nota) && usesMuzzle(stop.dog)) return "";
+  if (/^no juntar/i.test(stop.nota) && stop.dog.safety.some((text) => safetyKind(text) === "danger")) return "";
+  return stop.nota;
+}
+
+function DogCard(stop, index, sel, state, partners, names) {
+  const { dog } = stop;
   const { times, noSale, record } = state;
   const step = Math.min(state.step, STEPS.length);
   const done = !noSale && step >= STEPS.length;
@@ -749,48 +1212,77 @@ function DogCard(dog, sel, state, partners, names) {
   const extraPartners = partners.filter((name) => !ownNoJuntar.includes(name));
   const alerts = dog.safety.filter((text) => safetyKind(text) !== "info");
   const notes = dog.safety.filter((text) => safetyKind(text) === "info");
-  const hasAlert = alerts.length || partners.length;
+  const flagged = dog.status !== "Activo";
+  const hasAlert = alerts.length || partners.length || flagged;
+  const note = stopNote(stop);
+  const minutes = stop.minutos || dog.minutes;
+  const canAct = sel.isToday && stop.canSave;
+
+  let timing = "";
+  if (sel.isToday && !noSale && !done && stop.canSave) {
+    timing = step === 0 ? Countdown(stop.hora, sel.now.minutes, "retiro") : stop.salida ? Countdown(stop.salida, sel.now.minutes, "entrega") : "";
+  }
 
   return `
-    <li class="pw-dog ${hasAlert ? "has-alert" : ""} ${done ? "is-done" : ""} ${noSale ? "is-nosale" : ""}" data-pw-dog="${dog.id}">
+    <li class="pw-dog ${hasAlert ? "has-alert" : ""} ${done ? "is-done" : ""} ${noSale ? "is-nosale" : ""}" data-pw-dog="${esc(dog.id)}">
+      <div class="pw-dog-time">
+        <span class="pw-dog-order" aria-label="Orden ${index + 1}">${index + 1}</span>
+        <span class="pw-dog-hora">${stop.hora ? `${icon("clock", "pw-icon pw-icon--sm")} Retiro ${esc(stop.hora)}` : `Hora de retiro: ${PENDIENTE.toLowerCase()}`}</span>
+        ${timing}
+      </div>
       <div class="pw-dog-head">
         <h3>${esc(dog.name)}</h3>
-        <span class="pw-dog-facts">${esc(dog.size)} · ${dog.minutes ? `${dog.minutes} min` : "Duración pendiente de confirmar"}</span>
+        <span class="pw-dog-facts">${esc(dog.size)} · ${minutes ? `${minutes} min` : `Duración: ${PENDIENTE.toLowerCase()}`}${stop.salida ? ` · vuelve ~${esc(stop.salida)}` : ""}</span>
       </div>
 
       ${hasAlert ? `
         <ul class="pw-alerts" aria-label="Alertas de seguridad de ${esc(dog.name)}">
+          ${flagged ? `
+            <li class="pw-alert pw-alert--warn">
+              ${icon("alertCircle", "pw-icon")}
+              <span>${esc(dog.status)}: ${esc(dog.review || "su estado no es Activo.")} Confirmalo con el coordinador o con Juan antes de retirarlo.</span>
+            </li>
+          ` : ""}
           ${alerts.map((text) => `
             <li class="pw-alert pw-alert--${safetyKind(text)}">
               ${icon(safetyKind(text) === "danger" ? "alertTriangle" : "shieldCheck", "pw-icon")}
-              <span>${esc(text)}${safetyKind(text) === "danger" && partners.length ? `<b class="pw-today-tag">En este turno: ${listNames(partners)}</b>` : ""}</span>
+              <span>${esc(text)}${safetyKind(text) === "danger" && partners.length ? `<b class="pw-today-tag">En esta ruta: ${listNames(partners)}</b>` : ""}</span>
             </li>
           `).join("")}
           ${extraPartners.length ? `
             <li class="pw-alert pw-alert--danger">
               ${icon("alertTriangle", "pw-icon")}
-              <span>No juntar con ${listNames(extraPartners)}<b class="pw-today-tag">En este turno</b></span>
+              <span>No juntar con ${listNames(extraPartners)}<b class="pw-today-tag">En esta ruta</b></span>
             </li>
           ` : ""}
         </ul>
       ` : ""}
 
       ${notes.map((text) => `<p class="pw-dog-note">${icon("users", "pw-icon pw-icon--sm")} ${esc(text)}</p>`).join("")}
-      ${dog.review ? `<p class="pw-dog-review"><b>Dato a confirmar:</b> ${esc(dog.review)}</p>` : ""}
-      <p class="pw-dog-category"><span>SIN EVALUAR</span> Registro maestro 14/08/2026</p>
+      ${note ? `<p class="pw-dog-nota"><b>Nota de la ruta:</b> ${esc(note)}</p>` : ""}
+      ${dog.review && !flagged ? `<p class="pw-dog-review"><b>Dato a confirmar:</b> ${esc(dog.review)}</p>` : ""}
+      ${dog.unknown ? `<p class="pw-dog-review"><b>Perro nuevo en la ruta:</b> sin ficha en esta página (tamaño y alertas: ${PENDIENTE.toLowerCase()}). Preguntale al coordinador.</p>` : ""}
+      <p class="pw-dog-category"><span>${esc(dog.category || "SIN EVALUAR")}</span> ${dog.unknown ? PENDIENTE : "Registro maestro 14/08/2026"}</p>
 
-      ${sel.isToday ? `
+      ${sel.isToday && !stop.canSave ? `
+        <p class="pw-note">Este perro no tiene identificador en la ruta: no se puede marcar. Avisale al coordinador.</p>
+      ` : ""}
+
+      ${canAct ? `
         ${noSale ? `
           <p class="pw-nosale-label">${icon("x", "pw-icon")} No sale en este turno</p>
         ` : `
           <ol class="pw-steps" aria-label="Avance de ${esc(dog.name)}">
-            ${STEPS.map((item, index) => `
-              <li class="${index < step ? "is-done" : ""} ${index === step ? "is-next" : ""}">
-                <span class="pw-step-dot" aria-hidden="true">${index < step ? icon("checkCircle", "pw-icon pw-icon--sm") : index + 1}</span>
-                <span>${item.label}${index < step ? `<small>${times[index] ? esc(times[index]) : "Sin hora"}</small>` : ""}</span>
-                <span class="pw-sr">${index < step ? "hecho" : "pendiente"}</span>
-              </li>
-            `).join("")}
+            ${STEPS.map((item, stepIndex) => {
+              const marker = stepIndex < step ? markerOf(record, stepIndex, names) : "";
+              return `
+                <li class="${stepIndex < step ? "is-done" : ""} ${stepIndex === step ? "is-next" : ""}">
+                  <span class="pw-step-dot" aria-hidden="true">${stepIndex < step ? icon("checkCircle", "pw-icon pw-icon--sm") : stepIndex + 1}</span>
+                  <span>${item.label}${stepIndex < step ? `<small>${times[stepIndex] ? esc(times[stepIndex]) : "Sin hora"}</small>` : ""}${marker ? `<small class="pw-marker">Marcó ${esc(marker)}</small>` : ""}</span>
+                  <span class="pw-sr">${stepIndex < step ? "hecho" : "pendiente"}</span>
+                </li>
+              `;
+            }).join("")}
           </ol>
         `}
         ${record?.nota ? `<p class="pw-dog-nota"><b>Nota:</b> ${esc(record.nota)}</p>` : ""}
@@ -799,15 +1291,15 @@ function DogCard(dog, sel, state, partners, names) {
           ${noSale ? "" : done ? `
             <p class="pw-done-label">${icon("checkCircle", "pw-icon")} Entregado ${esc(times[STEPS.length - 1])}</p>
           ` : `
-            <button class="pw-btn pw-btn--primary pw-btn--block" type="button" data-pw-step="${dog.id}" ${loaded.ready ? "" : 'aria-disabled="true"'}>
+            <button class="pw-btn pw-btn--primary pw-btn--block" type="button" data-pw-step="${esc(dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'}>
               ${loaded.ready ? STEPS[step].action : "Cargando lo marcado…"}
             </button>
           `}
           ${!noSale && step === 0 ? `
-            <button class="pw-btn pw-btn--ghost" type="button" data-pw-nosale="${dog.id}" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(dog.name)} no sale en este turno">No sale</button>
+            <button class="pw-btn pw-btn--ghost" type="button" data-pw-nosale="${esc(dog.id)}" ${loaded.ready ? "" : 'aria-disabled="true"'} aria-label="${esc(dog.name)} no sale en este turno">No sale</button>
           ` : ""}
           ${noSale || step > 0 ? `
-            <button class="pw-btn pw-btn--ghost" type="button" data-pw-undo="${dog.id}" aria-label="Deshacer el último paso de ${esc(dog.name)}">Deshacer</button>
+            <button class="pw-btn pw-btn--ghost" type="button" data-pw-undo="${esc(dog.id)}" aria-label="Deshacer el último paso de ${esc(dog.name)}">Deshacer</button>
           ` : ""}
         </div>
       ` : ""}
@@ -815,17 +1307,20 @@ function DogCard(dog, sel, state, partners, names) {
   `;
 }
 
-function EquipmentSection(sel) {
+function EquipmentSection(sel, plan, names) {
   const { checked, record } = checklistFor(sel.now.iso, sel.shift);
   const complete = checked.length >= MY_EQUIPMENT.length;
-  const change = lastChange(record, teamNames(sel.now.iso));
+  const change = lastChange(record, names);
+  const partner = plan.helping ? personName(plan.helping.paseador, names) : "";
 
   return `
     <section class="pw-section pw-card" id="pw-equipo" aria-labelledby="pw-equipo-title" tabindex="-1">
       <div class="pw-section-head pw-section-head--inline">
         <div>
           <h2 id="pw-equipo-title">Antes de salir</h2>
-          <p class="pw-muted">Tu equipo según el inventario. Hoy, turno ${sel.shift.toLowerCase()}.</p>
+          <p class="pw-muted">${isHelper()
+            ? `Tu checklist, hoy turno ${sel.shift.toLowerCase()}. El inventario no asigna equipo al ayudante (${PENDIENTE.toLowerCase()}): revisá${partner ? ` con ${esc(partner)}` : ""} que esté todo lo del paseador.`
+            : `Tu equipo según el inventario. Hoy, turno ${sel.shift.toLowerCase()}.`}</p>
         </div>
         <span class="pw-count ${complete ? "is-ok" : ""}">${checked.length}/${MY_EQUIPMENT.length}</span>
       </div>
@@ -1014,13 +1509,15 @@ function buildMessage(draft, sel) {
   if (missing.length || word) return { ok: false, missing, word };
 
   const shift = shiftByClock(sel.now);
+  const team = incidentTeam();
   const line = (label, value) => `${label}: ${value.trim() ? value.trim() : "Sin dato"}`;
   const protocol = protocolLines(draft).map((text) => `- ${text}`);
 
   const text = [
     "REPORTE DE INCIDENTE - Paseos Juan",
     `Fecha: ${sel.now.date} · Hora: ${draft.hora || sel.now.time} · Turno: ${shift.toLowerCase()}`,
-    `Paseador: ${walkerName()}`,
+    isHelper() ? `Ayudante de paseador: ${walkerName()}${team.paseador ? ` (con ${team.paseador})` : ""}` : `Paseador: ${walkerName()}`,
+    `Ruta: ${team.rutas || PENDIENTE}`,
     `Perros: ${draft.dogs.join(", ")}`,
     `Nivel de riesgo: ${draft.riesgo}`,
     line("Lesiones", draft.lesiones),
@@ -1046,6 +1543,17 @@ function protocolLines(draft) {
 }
 
 // Registro para la colección `incidentes` (mismos datos que el mensaje de WhatsApp).
+// Ruta y paseador del turno actual, para el mensaje y el registro del incidente.
+function incidentTeam() {
+  const sel = selection();
+  const plan = routePlan({ ...sel, day: sel.now.day, iso: sel.now.iso, isToday: true, shift: shiftByClock(sel.now) });
+  const names = teamNames(sel.now.iso);
+  return {
+    rutas: plan.shown.map((route) => route.ruta).join(", "),
+    paseador: plan.helping ? personName(plan.helping.paseador, names) : "",
+  };
+}
+
 function incidentRecord(draft, sel) {
   const ids = draft.dogs.map((name) => REAL_DOGS.find((dog) => dog.name === name)?.id).filter(Boolean);
   const names = draft.dogs.join(", ");
@@ -1063,6 +1571,7 @@ function incidentRecord(draft, sel) {
     riesgo: draft.riesgo,
     lesiones: draft.lesiones,
     protocolo: protocolLines(draft),
+    ruta: incidentTeam().rutas,
     titulo: `Incidente: ${names} · riesgo ${draft.riesgo.toLowerCase()}`,
   };
 }
@@ -1176,13 +1685,13 @@ function announceError(message) {
 }
 
 // Selector para volver a encontrar el control con foco después de redibujar.
-const FOCUS_ATTRS = ["data-pw-step", "data-pw-undo", "data-pw-nosale", "data-pw-equip", "data-pw-day", "data-pw-shift"];
+const FOCUS_ATTRS = ["data-pw-from-next", "data-pw-route", "data-pw-step", "data-pw-undo", "data-pw-nosale", "data-pw-equip", "data-pw-day", "data-pw-shift"];
 
 function focusSelectorFor(element) {
   if (!element || element === document.body || !element.closest?.(".pw-shell")) return "";
   if (element.id) return `#${CSS.escape(element.id)}`;
   const attr = FOCUS_ATTRS.find((name) => element.hasAttribute(name));
-  if (attr) return `[${attr}="${CSS.escape(element.getAttribute(attr))}"]`;
+  if (attr) return `[${attr}="${CSS.escape(element.getAttribute(attr))}"]${attr === "data-pw-step" ? ":not([data-pw-from-next])" : ""}`;
   const field = element.dataset.pwField;
   if (field) {
     return element.type === "checkbox" || element.type === "radio"
@@ -1313,23 +1822,56 @@ function handlePaseadorClick(event) {
     return true;
   }
 
+  if (event.target.closest("[data-pw-change-ok]")) {
+    view.routeChange = null;
+    rerender("#pw-today-title");
+    return true;
+  }
+
+  const routeButton = event.target.closest("[data-pw-route]");
+  if (routeButton) {
+    const sel = selection();
+    const ruta = routeButton.dataset.pwRoute;
+    savePickedRoute(sel, ruta);
+    rerender(`[data-pw-route="${CSS.escape(ruta)}"]`);
+    announce(ruta ? `Mostrando la ruta ${ruta}. Queda recordada en este celular.` : "Mostrando todas las rutas del turno.");
+    return true;
+  }
+
   const stepButton = event.target.closest("[data-pw-step]");
   if (stepButton) {
     const id = stepButton.dataset.pwStep;
+    const fromNext = stepButton.dataset.pwFromNext;
     const sel = selection();
-    const dog = REAL_DOGS.find((item) => item.id === id);
-    if (!sel.isToday || !dog || !loaded.ready) return true;
+    const stop = findStop(sel, id);
+    if (!sel.isToday || !stop?.canSave || !loaded.ready) return true;
+    const dog = stop.dog;
     const state = progressFor(sel.now.iso, sel.shift, [dog])[id];
     if (state.noSale || state.step >= STEPS.length) return true;
     const next = STEPS[state.step];
-    // Se mandan también las horas anteriores: si no hay señal, la cola guarda el registro completo.
+    const user = currentUser();
+    // Se mandan también las horas (y quién las marcó) anteriores: si no hay señal, la cola guarda el registro completo.
     const changes = { estado: next.estado };
     STEPS.forEach((item, index) => {
-      if (index < state.step) changes[item.field] = state.times[index];
+      if (index >= state.step) return;
+      changes[item.field] = state.times[index];
+      if (state.record?.[`${item.field}Por`]) {
+        changes[`${item.field}Por`] = state.record[`${item.field}Por`];
+        changes[`${item.field}PorNombre`] = state.record[`${item.field}PorNombre`] || "";
+      }
     });
     changes[next.field] = sel.now.time;
-    savePaseo(dog, sel, changes, `${dog.name}: ${next.done.toLowerCase()} a las ${sel.now.time}.`);
-    rerender(state.step + 1 >= STEPS.length ? `[data-pw-undo="${id}"]` : `[data-pw-step="${id}"]`);
+    changes[`${next.field}Por`] = user.usuario || "";
+    changes[`${next.field}PorNombre`] = user.nombre || "";
+    savePaseo(stop, sel, changes, `${dog.name}: ${next.done.toLowerCase()} a las ${sel.now.time}.`);
+    if (fromNext) {
+      render();
+      const target = document.querySelector(`[data-pw-from-next="${CSS.escape(fromNext)}"]`) || document.querySelector(`[data-pw-next="${CSS.escape(fromNext)}"]`)?.closest("section")?.querySelector("h2");
+      if (target && !target.hasAttribute("tabindex") && target.tagName === "H2") target.setAttribute("tabindex", "-1");
+      target?.focus({ preventScroll: true });
+    } else {
+      rerender(state.step + 1 >= STEPS.length ? `[data-pw-undo="${CSS.escape(id)}"]` : `[data-pw-step="${CSS.escape(id)}"]:not([data-pw-from-next])`);
+    }
     return true;
   }
 
@@ -1337,10 +1879,10 @@ function handlePaseadorClick(event) {
   if (noSaleButton) {
     const id = noSaleButton.dataset.pwNosale;
     const sel = selection();
-    const dog = REAL_DOGS.find((item) => item.id === id);
-    if (!sel.isToday || !dog || !loaded.ready) return true;
-    savePaseo(dog, sel, { estado: NO_SALE }, `${dog.name}: no sale en este turno.`);
-    rerender(`[data-pw-undo="${id}"]`);
+    const stop = findStop(sel, id);
+    if (!sel.isToday || !stop?.canSave || !loaded.ready) return true;
+    savePaseo(stop, sel, { estado: NO_SALE }, `${stop.dog.name}: no sale en este turno.`);
+    rerender(`[data-pw-undo="${CSS.escape(id)}"]`);
     return true;
   }
 
@@ -1348,13 +1890,14 @@ function handlePaseadorClick(event) {
   if (undoButton) {
     const id = undoButton.dataset.pwUndo;
     const sel = selection();
-    const dog = REAL_DOGS.find((item) => item.id === id);
-    if (!sel.isToday || !dog || !loaded.ready) return true;
+    const stop = findStop(sel, id);
+    if (!sel.isToday || !stop?.canSave || !loaded.ready) return true;
+    const dog = stop.dog;
     const state = progressFor(sel.now.iso, sel.shift, [dog])[id];
     if (state.noSale) {
       const back = state.times.reduce((last, time, index) => (time ? index + 1 : last), 0);
-      savePaseo(dog, sel, { estado: back ? STEPS[back - 1].estado : "pendiente" }, `${dog.name}: se deshizo "no sale".`);
-      rerender(back >= STEPS.length ? `[data-pw-undo="${id}"]` : `[data-pw-step="${id}"]`);
+      savePaseo(stop, sel, { estado: back ? STEPS[back - 1].estado : "pendiente" }, `${dog.name}: se deshizo "no sale".`);
+      rerender(back >= STEPS.length ? `[data-pw-undo="${CSS.escape(id)}"]` : `[data-pw-step="${CSS.escape(id)}"]:not([data-pw-from-next])`);
       return true;
     }
     if (!state.step) return true;
@@ -1362,9 +1905,13 @@ function handlePaseadorClick(event) {
     const changes = { estado: keep ? STEPS[keep - 1].estado : "pendiente" };
     STEPS.forEach((item, index) => {
       changes[item.field] = index < keep ? state.times[index] : "";
+      if (index >= keep) {
+        changes[`${item.field}Por`] = "";
+        changes[`${item.field}PorNombre`] = "";
+      }
     });
-    savePaseo(dog, sel, changes, `${dog.name}: se deshizo "${STEPS[keep].done.toLowerCase()}".`);
-    rerender(`[data-pw-step="${id}"]`);
+    savePaseo(stop, sel, changes, `${dog.name}: se deshizo "${STEPS[keep].done.toLowerCase()}".`);
+    rerender(`[data-pw-step="${CSS.escape(id)}"]:not([data-pw-from-next])`);
     return true;
   }
 
@@ -1501,8 +2048,30 @@ export function registerPaseadorEvents() {
   document.addEventListener("input", handlePaseadorInput);
   // Una sola vez: cuando llegan datos nuevos (por ejemplo, lo que marcó el supervisor) se redibuja.
   onDataChange((col) => {
-    if (col === "paseos" || col === "checklists" || col === "incidentes") scheduleRender();
+    if (["paseos", "checklists", "incidentes", "rutas", "plantillas", "avisos"].includes(col)) scheduleRender();
   });
   window.addEventListener("online", scheduleRender);
   window.addEventListener("offline", scheduleRender);
+  // Cuenta regresiva: cada 15 segundos se actualizan los textos en su lugar (sin redibujar);
+  // si cambia el día o el turno según la hora, se redibuja la página.
+  setInterval(tickClock, 15 * 1000);
+}
+
+const clockState = { iso: "", shift: "", minute: -1 };
+
+function tickClock() {
+  if (!document.querySelector(".pw-shell")) return;
+  const now = nowAR();
+  if (now.iso !== clockState.iso || shiftByClock(now) !== clockState.shift) {
+    scheduleRender();
+    return;
+  }
+  if (now.minutes === clockState.minute) return;
+  clockState.minute = now.minutes;
+  document.querySelectorAll("[data-pw-countdown]").forEach((node) => {
+    const cd = countdown(node.dataset.pwCountdown, now.minutes, node.dataset.pwMode);
+    node.textContent = cd.text;
+    node.className = `pw-cd pw-cd--${cd.kind}`;
+    node.closest(".pw-next")?.classList.toggle("is-late", cd.kind === "late");
+  });
 }

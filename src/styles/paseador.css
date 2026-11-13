@@ -1294,6 +1294,279 @@ html[data-theme="dark"] .pw-field textarea::placeholder {
   resize: vertical;
 }
 
+/* ---------- avisos por barrio ---------- */
+.pw-notices {
+  display: grid;
+  gap: 10px;
+}
+
+.pw-section-label .pw-icon {
+  display: inline-block;
+  vertical-align: -3px;
+}
+
+.pw-notice-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pw-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 2px solid var(--pw-warn-line);
+  border-radius: 16px;
+  background: var(--pw-warn-bg);
+  color: var(--pw-warn-ink);
+  padding: 14px;
+}
+
+.pw-notice--danger {
+  border-color: var(--pw-danger);
+  background: var(--pw-danger-bg);
+  color: var(--pw-danger-ink);
+}
+
+.pw-notice > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pw-notice-head strong {
+  font-size: 1.1rem;
+}
+
+.pw-notice-meta {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+/* ---------- la ruta cambió ---------- */
+.pw-change {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: start;
+  border: 3px solid var(--pw-focus);
+  border-radius: 16px;
+  background: var(--pw-card);
+  box-shadow: var(--pw-shadow);
+  color: var(--pw-ink);
+  padding: 14px;
+}
+
+.pw-change strong {
+  display: block;
+  font-size: 1.1rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.pw-change p {
+  color: var(--pw-muted);
+  font-size: 0.92rem;
+  font-weight: 650;
+}
+
+.pw-change .pw-btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+/* ---------- origen de la ruta y selector de ruta ---------- */
+.pw-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  border: 2px solid var(--pw-line-soft);
+  border-radius: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+  padding: 10px 14px;
+}
+
+.pw-source > span {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.pw-source--warn {
+  border-color: var(--pw-warn-line);
+  background: var(--pw-warn-bg);
+  color: var(--pw-warn-ink);
+}
+
+.pw-route-pick {
+  display: grid;
+  gap: 10px;
+  border: 2px solid var(--pw-accent);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.pw-route-pick > p {
+  display: grid;
+  gap: 2px;
+}
+
+.pw-route-pick > p strong {
+  font-size: 1.15rem;
+}
+
+.pw-route-pick > p span {
+  color: var(--pw-muted);
+  font-size: 0.95rem;
+}
+
+.pw-route-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+/* ---------- rutas ---------- */
+.pw-routes {
+  display: grid;
+  gap: 28px;
+  scroll-margin-top: 84px;
+}
+
+.pw-routes:focus {
+  outline: none;
+}
+
+/* próximo perro: lo más grande de la página */
+.pw-next {
+  display: grid;
+  gap: 8px;
+  border: 3px solid var(--pw-accent);
+  border-radius: 20px;
+  background: var(--pw-accent-soft);
+  box-shadow: var(--pw-shadow);
+  padding: 16px;
+}
+
+.pw-next.is-late {
+  border-color: var(--pw-danger);
+  background: var(--pw-danger-bg);
+}
+
+.pw-next--done {
+  border-color: var(--pw-ok-line);
+  background: var(--pw-ok-bg);
+  color: var(--pw-ok-ink);
+}
+
+.pw-next-label {
+  font-size: 0.9rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pw-next-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: clamp(1.8rem, 8vw, 2.6rem);
+  font-weight: 900;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.pw-next-time {
+  font-size: 1.15rem;
+}
+
+.pw-next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pw-next-actions .pw-btn {
+  min-height: 64px;
+  font-size: 1.15rem;
+}
+
+/* cuenta regresiva o atraso */
+.pw-cd {
+  display: inline-block;
+  border: 2px solid var(--pw-line);
+  border-radius: 999px;
+  font-weight: 850;
+  line-height: 1.2;
+  padding: 3px 10px;
+}
+
+.pw-cd--soon {
+  border-color: var(--pw-warn-line);
+  background: var(--pw-warn-bg);
+  color: var(--pw-warn-ink);
+}
+
+.pw-cd--late {
+  border-color: var(--pw-danger);
+  background: var(--pw-danger);
+  color: var(--pw-on-danger);
+}
+
+.pw-cd--ok {
+  border-color: var(--pw-ok-line);
+  background: var(--pw-ok-bg);
+  color: var(--pw-ok-ink);
+}
+
+/* hora de retiro en cada perro */
+.pw-dog-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-weight: 850;
+}
+
+.pw-dog-order {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--pw-ink);
+  color: var(--pw-card);
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.pw-dog-hora {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 1.1rem;
+}
+
+.pw-dog-time .pw-cd {
+  font-size: 0.9rem;
+}
+
+.pw-steps small.pw-marker {
+  color: var(--pw-accent);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.pw-steps li.is-done small.pw-marker {
+  color: var(--pw-ok-ink);
+}
+
 /* ---------- pie ---------- */
 .pw-footer {
   display: grid;
