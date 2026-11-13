@@ -233,9 +233,12 @@ function canDelete(record) {
   return user.rol === "admin" || (record.creadoPor && record.creadoPor === user.usuario);
 }
 
-// Nombre para mostrar de un usuario del servidor (el servidor guarda el nombre solo de quien lo creó).
+// Nombre para mostrar de un usuario del servidor. El servidor guarda el nombre de quien lo creó
+// (creadoPorNombre) y de quien hizo el último cambio (actualizadoPorNombre); los registros
+// anteriores a ese campo usan el equipo autorizado o el usuario tal cual.
 function personName(usuario, record) {
   if (!usuario) return "";
+  if (record?.actualizadoPor === usuario && record.actualizadoPorNombre) return record.actualizadoPorNombre;
   if (record?.creadoPor === usuario && record.creadoPorNombre) return record.creadoPorNombre;
   const user = currentUser();
   if (user.usuario === usuario && user.nombre) return user.nombre;
@@ -341,7 +344,21 @@ function liveRerender() {
   renderKeepingFocus();
 }
 
+// Las secciones que se acaban de abrir o cerrar se respetan aunque el evento toggle no haya llegado.
+function syncFolds() {
+  const folds = readJSON(KEYS.folds, {});
+  let foldsChanged = false;
+  document.querySelectorAll(".sv-shell [data-sv-fold]").forEach((details) => {
+    if (folds[details.dataset.svFold] !== details.open) {
+      folds[details.dataset.svFold] = details.open;
+      foldsChanged = true;
+    }
+  });
+  if (foldsChanged) writeJSON(KEYS.folds, folds);
+}
+
 function renderKeepingFocus() {
+  syncFolds();
   const active = document.activeElement;
   const id = active?.id || "";
   let selection = null;
@@ -1650,6 +1667,7 @@ function ReferencePanel() {
 
 function rerender(focusId) {
   if (!focusId) return renderKeepingFocus();
+  syncFolds();
   render();
   if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
 }
@@ -1842,7 +1860,7 @@ async function saveClosure(view, changes, text, focusId) {
   const notas = closureNotes(view);
   const user = currentUser();
   // El resumen se guarda con el estado ya actualizado (cerrado o no, con las notas nuevas).
-  const next = { ...(getClosure(view) || {}), ...changes, notas, actualizadoPor: user.usuario, actualizadoEn: new Date().toISOString(), pendiente: false };
+  const next = { ...(getClosure(view) || {}), ...changes, notas, actualizadoPor: user.usuario, actualizadoPorNombre: user.nombre, actualizadoEn: new Date().toISOString(), pendiente: false };
   const resumen = closureSummary(view, shiftDogs(view.day, view.shift), next);
   const result = await persist(
     "cierres",
