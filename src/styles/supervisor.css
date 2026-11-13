@@ -99,19 +99,19 @@ body:has(.sv-shell .sv-sheet-wrap) {
    abajo están las pestañas y el pulgar. */
 body:has(.sv-shell) #a11y-root {
   top: 10px;
-  right: calc(max(16px, (100vw - 1120px) / 2) + 52px);
+  right: calc(max(16px, (100vw - 1120px) / 2) + 56px);
   bottom: auto;
   left: auto;
 }
 
 body:has(.sv-shell) #a11y-root .a11y-toggle {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   box-shadow: none;
 }
 
 body:has(.sv-shell) #a11y-root .a11y-panel {
-  top: 52px;
+  top: 56px;
   right: 0;
   bottom: auto;
   left: auto;
@@ -209,7 +209,7 @@ body:has(.sv-shell) #a11y-root .a11y-panel {
   top: 0;
   z-index: 30;
   display: flex;
-  min-height: 64px;
+  min-height: 68px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -221,6 +221,7 @@ body:has(.sv-shell) #a11y-root .a11y-panel {
 .sv-brand {
   display: inline-flex;
   min-width: 0;
+  min-height: 48px;
   align-items: center;
   gap: 10px;
   color: var(--sv-ink);
@@ -285,14 +286,14 @@ html[data-theme="dark"] .sv-logo-dark {
 
 .sv-a11y-slot {
   display: inline-block;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
 }
 
 .sv-icon-btn {
   display: inline-grid;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   flex: 0 0 auto;
   place-items: center;
   border: 1.5px solid var(--sv-line-strong);
@@ -304,7 +305,7 @@ html[data-theme="dark"] .sv-logo-dark {
 
 .sv-sync {
   display: inline-flex;
-  min-height: 44px;
+  min-height: 48px;
   align-items: center;
   gap: 8px;
   border: 1.5px solid var(--tone-line);
@@ -629,7 +630,7 @@ html[data-theme="dark"] .sv-btn-danger {
 
 .sv-help summary {
   display: flex;
-  min-height: 44px;
+  min-height: 48px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -682,56 +683,54 @@ html[data-theme="dark"] .sv-btn-danger {
   min-width: 0;
 }
 
-.sv-alert,
-.sv-aviso-mini {
+/* Alertas del turno: una fila de botones cortos (ícono + 1 o 2 palabras + número). */
+.sv-alerts {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sv-alerts > li {
+  flex: 1 1 auto;
+}
+
+.sv-alert-chip {
+  display: inline-flex;
   width: 100%;
   min-height: 52px;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 8px;
   border: 2px solid var(--tone-line);
   border-radius: 16px;
   background: var(--tone-bg);
   color: var(--tone-ink);
-  padding: 8px 12px;
+  padding: 6px 14px;
   font: inherit;
-  text-align: left;
+  font-size: 1rem;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.sv-alert.is-danger {
+.sv-alert-chip.is-danger {
   border-color: var(--sv-danger-strong);
 }
 
-.sv-alert-text,
-.sv-aviso-mini > span {
-  display: -webkit-box;
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
-  font-size: 0.95rem;
-}
-
-.sv-alert-text b,
-.sv-aviso-mini b {
+.sv-alert-chip b {
   font-weight: 900;
 }
 
-.sv-alert-go {
-  flex: 0 0 auto;
+.sv-alert-n {
+  display: inline-grid;
+  min-width: 26px;
+  height: 26px;
+  place-items: center;
   border-radius: 999px;
   background: var(--sv-card);
-  color: var(--sv-ink);
-  padding: 6px 12px;
+  color: var(--tone-ink);
+  padding: 0 6px;
   font-weight: 900;
-}
-
-.sv-avisos-strip {
-  display: grid;
-  gap: 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 .sv-status {

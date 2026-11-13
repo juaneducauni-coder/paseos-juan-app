@@ -4,9 +4,10 @@
 //
 // Pensada para el celular (una mano, al sol), con 4 pestañas fijas abajo:
 // - Ahora: contador grande (a tiempo · atrasados · entregados) y una tarjeta por perro con foto,
-//   hora prevista, estado y un botón grande para el paso siguiente (Retirado → Entregado), más
+//   hora del próximo paso, estado y un botón grande (Marcar retirado → Marcar entregado), más
 //   "No sale", "Cambio" (pedido al coordinador en una hoja de abajo) y "Opciones" (nota, desmarcar,
-//   foto nueva). Los atrasados van primero; los listos quedan plegados. "Deshacer" dura 5 segundos.
+//   foto nueva). Los atrasados van primero; los listos quedan plegados. "Deshacer" dura 5 segundos
+//   y mientras dura las tarjetas no cambian de lugar. Arriba, una fila de botones cortos de alertas.
 // - Rutas: cada ruta con paseador, ayudante, checklist, WhatsApp y los perros en orden.
 // - Pedidos: mis pedidos de cambio y la respuesta del coordinador.
 // - Más: cerrar turno (resumen armado + Copiar + Cerrar), observaciones, avisos por barrio,
@@ -295,6 +296,7 @@ function personName(usuario, record) {
   if (user.usuario === usuario && user.nombre) return user.nombre;
   const team = TEAM.find((person) => person.id === usuario);
   if (team) return team.name;
+  if (routeNames.has(usuario)) return routeNames.get(usuario);
   for (const col of ["checklists", "paseos", "incidentes"]) {
     for (const item of records(col)) {
       if (item.creadoPor === usuario && item.creadoPorNombre) return item.creadoPorNombre;
@@ -705,6 +707,17 @@ function muzzleNote(dog) {
   return (dog?.safety || []).find((note) => /bozal/i.test(note)) || "";
 }
 
+// Con quién NO puede ir un perro, en los dos sentidos: la planilla a veces lo anota en uno solo
+// (Pistacho dice "no juntar con Cashi", pero la ficha de Cashi no dice nada).
+function noJuntarNames(dog) {
+  if (!dog) return [];
+  const names = new Set(dog.incompatibleWith || []);
+  REAL_DOGS.forEach((other) => {
+    if (other.id !== dog.id && (other.incompatibleWith || []).includes(dog.name)) names.add(other.name);
+  });
+  return [...names];
+}
+
 // ---------- Rutas efectivas (las arma el coordinador; acá solo se leen) ----------
 
 function sameDay(a, b) {
@@ -724,7 +737,12 @@ function normalizeStop(stop) {
   };
 }
 
+// Nombres que el coordinador guardó en la ruta (paseadorNombre / ayudanteNombre), si los guardó.
+const routeNames = new Map();
+
 function normalizeRoute(record, source) {
+  if (record.paseador && record.paseadorNombre) routeNames.set(record.paseador, String(record.paseadorNombre));
+  if (record.ayudante && record.ayudanteNombre) routeNames.set(record.ayudante, String(record.ayudanteNombre));
   // Registros de la versión anterior (lista de perros sin horario).
   const stops = Array.isArray(record.paradas)
     ? record.paradas
@@ -976,6 +994,8 @@ function shiftWarnings(routes) {
       icon: "alertTriangle",
       title: pairs.length === 1 ? "Hay 2 perros que no pueden ir juntos" : `Hay ${pairs.length} parejas que no pueden ir juntas`,
       short: `No juntar: ${plural(pairs.length, "pareja", "parejas")}`,
+      chip: "No juntar",
+      count: pairs.length,
       lines: pairs.map((pair) => `No juntar: ${pair.a} con ${pair.b}${pair.sameRoute ? ` (los dos en ${pair.route})` : ` (${pair.route} y ${pair.otherRoute}: que no se crucen)`}.`),
       action: pairs.some((pair) => pair.sameRoute)
         ? "Que no caminen juntos. Si la ruta los junta, pedile el cambio al coordinador."
@@ -990,6 +1010,8 @@ function shiftWarnings(routes) {
       icon: "shieldCheck",
       title: `Confirmá el bozal de ${plural(muzzle.length, "perro", "perros")}`,
       short: `Bozal: ${muzzle.map((dog) => dog.name).join(", ")}`,
+      chip: "Bozal",
+      count: muzzle.length,
       lines: muzzle.map((dog) => `${dog.name}: ${muzzleNote(dog)}.`),
       action: "Que salga con el bozal puesto y revisado.",
       source: "Fuente: indicaciones de seguridad de la planilla RPJ.",
@@ -1002,6 +1024,8 @@ function shiftWarnings(routes) {
       icon: "alertCircle",
       title: `Confirmá si ${inactive.length === 1 ? `sale ${inactive[0].name}` : `salen ${inactive.length} perros`}`,
       short: `¿Sale? ${inactive.map((dog) => dog.name).join(", ")}`,
+      chip: "¿Sale?",
+      count: inactive.length,
       lines: inactive.map((dog) => `${dog.name} (${dog.status}): ${dog.review || PENDIENTE}`),
       action: "Preguntale a Juan antes de retirarlo.",
       source: "Fuente: Perros paseados (noviembre) y BASE RUTAS.",
@@ -1014,6 +1038,8 @@ function shiftWarnings(routes) {
       icon: "alertCircle",
       title: `${plural(noFile.length, "perro de la ruta no tiene", "perros de la ruta no tienen")} ficha`,
       short: `Sin ficha: ${plural(noFile.length, "perro", "perros")}`,
+      chip: "Sin ficha",
+      count: noFile.length,
       lines: noFile.map((text) => `${text}: ${PENDIENTE}.`),
       action: "No se puede marcar el retiro desde acá. Pedile al coordinador que lo revise.",
       source: "Fuente: rutas del coordinador y registro de perros.",
@@ -1265,6 +1291,23 @@ function activeUndo() {
   return undo;
 }
 
+// Orden de las tarjetas congelado mientras dura "Deshacer" (ver NowTab).
+let orderFreeze = null;
+
+function freezeOrder() {
+  const view = getView();
+  const ids = [...document.querySelectorAll(".sv-shell #sv-dogs-now > .sv-dog")].map((card) => card.id.replace(/^sv-dog-/, ""));
+  orderFreeze = ids.length ? { ids, fecha: view.fecha, shift: view.shift, until: Date.now() + UNDO_MS } : null;
+}
+
+function frozenOrder(view) {
+  if (!orderFreeze || Date.now() >= orderFreeze.until || orderFreeze.fecha !== view.fecha || orderFreeze.shift !== view.shift) {
+    orderFreeze = null;
+    return null;
+  }
+  return new Map(orderFreeze.ids.map((id, index) => [id, index]));
+}
+
 // Respuestas del coordinador que ya vi en este teléfono (para marcar las nuevas).
 function seenSet() {
   return new Set(readJSON(KEYS.seen, []));
@@ -1302,15 +1345,15 @@ function cardDomId(route, stop) {
   return safeId(`${route.code}-${stop.perroId || stop.perroNombre}`);
 }
 
-function requestOpenerId(ruta, perroId) {
-  return safeId(`sv-req-open-${ruta || "turno"}-${perroId || "ruta"}`);
+function requestOpenerId(ruta, perroId, tipo = "") {
+  return safeId(`sv-req-open-${ruta || "turno"}-${perroId || "ruta"}${tipo ? `-${tipo}` : ""}`);
 }
 
 // Avisos cortos de seguridad para listas compactas.
 function shortSafety(dog) {
   if (!dog) return "";
   const chips = [];
-  if ((dog.incompatibleWith || []).length) chips.push(`<span class="sv-mini is-danger">No juntar</span>`);
+  if (noJuntarNames(dog).length) chips.push(`<span class="sv-mini is-danger">No juntar</span>`);
   if (usesMuzzle(dog)) chips.push(`<span class="sv-mini is-warn">Bozal</span>`);
   return chips.join("");
 }
@@ -1467,7 +1510,7 @@ function ShiftBar(view) {
           <button type="button" id="sv-shift-${key}" class="sv-segment-option ${view.shift === key ? "is-active" : ""}" data-sv-shift="${key}" aria-pressed="${view.shift === key}">${SHIFTS[key].label}</button>
         `).join("")}
       </div>
-      <p class="sv-shift-hours"><span>${shift.from}–${shift.to}</span> <span class="sv-moment is-${moment.tone}">${esc(moment.label)}</span></p>
+      <p class="sv-shift-hours"><span>${shift.from}–${shift.to}</span>${moment.tone === "live" ? `<span class="visually-hidden">, en curso</span>` : ` <span class="sv-moment is-${moment.tone}">${esc(moment.label)}</span>`}</p>
     </section>
     ${view.isCurrent ? "" : `<p class="sv-line is-info">${icon("clock", "sv-icon")} <span>Mirás la ${shift.label.toLowerCase()}. Ahora es la ${current.label.toLowerCase()}.</span></p>`}
   `;
@@ -1515,17 +1558,28 @@ function Avatar(stop, domId, small = false) {
 // Bozal y "no juntar" siempre a la vista en la tarjeta del perro.
 function safetyChips(stop) {
   const dog = stop.dog;
-  const chips = (dog?.safety || []).map((note) => {
+  const chips = [];
+  const add = (tone, html) => chips.push({ tone, html: `<li class="sv-chip is-${tone}">${html}</li>` });
+  if (!dog) add("danger", "<b>Sin ficha</b>");
+  if (dog && dog.status !== "Activo") add("danger", `<b>${esc(dog.status)}</b>`);
+  (dog?.safety || []).forEach((note) => {
     const tone = /no juntar/i.test(note) ? "danger" : /bozal/i.test(note) ? "warn" : "neutral";
-    return `<li class="sv-chip is-${tone}">${tone === "neutral" ? esc(note) : `<b>${esc(note)}</b>`}</li>`;
+    // "Sale con Sonia (misma familia)" → "Sale con Sonia": menos letras, mismo dato.
+    const text = note.replace(/^(Sale con .+?)\s*\(misma familia\)\s*$/i, "$1");
+    add(tone, tone === "neutral" ? esc(text) : `<b>${esc(text)}</b>`);
   });
+  // "No juntar" que la ficha de este perro no dice, pero sí la del otro perro.
+  const written = plain((dog?.safety || []).filter((note) => /no juntar/i.test(note)).join(" "));
+  const missing = noJuntarNames(dog).filter((name) => !written.includes(plain(name)));
+  if (missing.length) add("danger", `<b>No juntar con ${esc(listWithAnd(missing, "ni"))}</b>`);
   if (stop.nota && !(dog?.safety || []).some((note) => plain(note).includes(plain(stop.nota)))) {
     const tone = /no juntar/i.test(stop.nota) ? "danger" : /bozal/i.test(stop.nota) ? "warn" : "info";
-    chips.push(`<li class="sv-chip is-${tone}"><b>Ruta:</b> ${esc(stop.nota)}</li>`);
+    add(tone, `<b>Ruta:</b> ${esc(stop.nota)}`);
   }
-  if (dog && dog.status !== "Activo") chips.unshift(`<li class="sv-chip is-danger"><b>${esc(dog.status)}</b></li>`);
-  if (!dog) chips.unshift(`<li class="sv-chip is-danger"><b>Sin ficha</b></li>`);
-  return chips.length ? `<ul class="sv-chips" aria-label="Avisos de ${esc(stop.perroNombre)}">${chips.join("")}</ul>` : "";
+  // Lo más grave primero: no juntar y sin ficha (rojo), después bozal (amarillo).
+  const rank = { danger: 0, warn: 1, info: 2, neutral: 3 };
+  chips.sort((a, b) => rank[a.tone] - rank[b.tone]);
+  return chips.length ? `<ul class="sv-chips" aria-label="Avisos de ${esc(stop.perroNombre)}">${chips.map((chip) => chip.html).join("")}</ul>` : "";
 }
 
 function whatsappText(view, route, items) {
@@ -1547,11 +1601,14 @@ function whatsappText(view, route, items) {
   return lines.join("\n");
 }
 
-function RequestButton(ruta, perroId, label = "Cambio", name = "") {
-  const aria = name ? `Pedir cambio para ${name}` : ruta ? `Pedir cambio en la ruta ${ruta}` : "Pedir cambio al coordinador";
+// tipo: abre la hoja con ese pedido ya elegido (ahorra un toque).
+function RequestButton(ruta, perroId, label = "Cambio", name = "", tipo = "", iconName = "send") {
+  const aria = tipo
+    ? `${label}: pedir al coordinador`
+    : name ? `Cambio: pedir para ${name}` : ruta ? `Cambio: pedir en la ruta ${ruta}` : `${label}: pedir cambio al coordinador`;
   return `
-    <button type="button" class="sv-btn" id="${requestOpenerId(ruta, perroId)}" data-sv-request-open data-ruta="${esc(ruta)}" data-dog="${esc(perroId)}" aria-label="${esc(aria)}">
-      ${icon("send", "sv-icon")} <span>${esc(label)}</span>
+    <button type="button" class="sv-btn" id="${requestOpenerId(ruta, perroId, tipo)}" data-sv-request-open data-ruta="${esc(ruta)}" data-dog="${esc(perroId)}" ${tipo ? `data-tipo="${esc(tipo)}"` : ""} aria-label="${esc(aria)}">
+      ${icon(iconName, "sv-icon")} <span>${esc(label)}</span>
     </button>
   `;
 }
@@ -1582,13 +1639,21 @@ function sortedRequests(list) {
 
 function NowTab(view, routeInfo, items) {
   const counts = countLive(items);
-  const late = items.filter((item) => item.status.live === "atrasado");
-  const done = items.filter((item) => item.status.kind === "entregado" || item.status.kind === "nosale");
-  const active = items.filter((item) => !late.includes(item) && !done.includes(item));
+  // Justo después de marcar, las tarjetas que se veían quedan en su lugar (aunque el perro pase a
+  // "Listos" o deje de estar atrasado): así no aparece otro perro debajo del dedo.
+  const frozen = frozenOrder(view);
+  const keyOf = (item) => cardDomId(item.route, item.stop);
+  const kept = frozen ? items.filter((item) => frozen.has(keyOf(item))).sort((a, b) => frozen.get(keyOf(a)) - frozen.get(keyOf(b))) : [];
+  const rest = items.filter((item) => !kept.includes(item));
+  const late = rest.filter((item) => item.status.live === "atrasado");
+  const done = rest.filter((item) => item.status.kind === "entregado" || item.status.kind === "nosale");
+  const active = rest.filter((item) => !late.includes(item) && !done.includes(item));
   const byTime = (a, b) => (a.status.planned ?? 9999) - (b.status.planned ?? 9999) || String(a.stop.perroNombre).localeCompare(String(b.stop.perroNombre));
   const shiftRequests = requestsFor(view.fecha, view.shift);
+  // Con una sola ruta en el turno, la ruta y el paseador son los mismos en todas las tarjetas: no se repiten.
+  const showRoute = routeInfo.routes.length > 1;
   const card = (item) =>
-    DogCard(view, item, sortedRequests(shiftRequests.filter((req) => req.perroId && req.perroId === item.stop.perroId)));
+    DogCard(view, item, sortedRequests(shiftRequests.filter((req) => req.perroId && req.perroId === item.stop.perroId)), showRoute);
   const closure = getClosure(view);
   const moment = shiftMoment(view.shift, view.now);
 
@@ -1602,9 +1667,9 @@ function NowTab(view, routeInfo, items) {
     `;
   } else {
     list = `
-      ${late.length || active.length ? `
-        <ol class="sv-dogs" aria-label="Perros por atender">
-          ${[...late.sort(byTime), ...active.sort(byTime)].map(card).join("")}
+      ${kept.length || late.length || active.length ? `
+        <ol class="sv-dogs" id="sv-dogs-now" aria-label="Perros por atender">
+          ${[...kept, ...late.sort(byTime), ...active.sort(byTime)].map(card).join("")}
         </ol>
       ` : `<p class="sv-line is-ok">${icon("checkCircle", "sv-icon")} <span>Todo listo en este turno.</span></p>`}
       ${done.length ? `
@@ -1620,9 +1685,7 @@ function NowTab(view, routeInfo, items) {
     ${ShiftBar(view)}
     ${Counter(counts, items.length)}
     ${FallbackLine(view, routeInfo)}
-    ${IncidentBanner(view)}
-    ${SafetyBanner(routeInfo.routes)}
-    ${AvisosStrip(view)}
+    ${AlertChips(view, routeInfo.routes)}
     ${moment.tone === "done" && !closure?.cerrado && routeInfo.routes.length ? `
       <button type="button" class="sv-btn sv-btn-primary sv-btn-main sv-wide" id="sv-close-open-now" data-sv-close-open>${icon("flag", "sv-icon")} Cerrar turno</button>
     ` : ""}
@@ -1641,8 +1704,8 @@ function Counter(counts, total) {
       </div>
       <details class="sv-help" data-sv-fold="ayuda-contador" ${isFoldOpen("ayuda-contador") ? "open" : ""}>
         <summary>
-          <span>${plural(total, "perro", "perros")}${counts.nosale ? ` · ${counts.nosale} no ${counts.nosale === 1 ? "sale" : "salen"}` : ""}</span>
-          <span class="sv-help-q" aria-hidden="true">?</span><span class="visually-hidden">Cómo se cuenta</span>
+          ${counts.nosale ? `<span>${counts.nosale} no ${counts.nosale === 1 ? "sale" : "salen"}</span>` : ""}
+          <span class="sv-help-q" aria-hidden="true">?</span><span class="visually-hidden">${plural(total, "perro", "perros")} en el turno. Cómo se cuenta</span>
         </summary>
         <p>Atrasado: pasó la hora de retiro + ${PICKUP_GRACE} min, o el paseo pasó lo previsto + ${DELIVERY_GRACE} min. Se recalcula cada minuto.</p>
       </details>
@@ -1650,56 +1713,85 @@ function Counter(counts, total) {
   `;
 }
 
-function IncidentBanner(view) {
-  const list = incidentsFor(view.fecha);
-  if (!list.length) return "";
-  const last = list[list.length - 1];
-  return `
-    <button type="button" class="sv-alert is-danger" id="sv-goto-incidentes" data-sv-goto="mas:incidentes">
-      ${icon("alertTriangle", "sv-icon")}
-      <span class="sv-alert-text"><b>${list.length === 1 ? "1 incidente" : `${list.length} incidentes`}</b> <span>· ${esc(last.titulo || incidentDogs(last))}</span></span>
-      <span class="sv-alert-go">Ver</span>
-    </button>
-  `;
-}
-
-function SafetyBanner(routes) {
-  if (!routes.some((route) => route.stops.length)) return "";
-  const warnings = shiftWarnings(routes).filter((warning) => warning.tone !== "info");
-  if (!warnings.length) return "";
-  const top = warnings[0];
-  return `
-    <button type="button" class="sv-alert is-${top.tone}" id="sv-goto-seguridad" data-sv-goto="mas:seguridad">
-      ${icon(top.icon, "sv-icon")}
-      <span class="sv-alert-text"><b>${esc(top.short || top.title)}</b>${warnings.length > 1 ? ` <span>· +${warnings.length - 1}</span>` : ""}</span>
-      <span class="sv-alert-go">Ver</span>
-    </button>
-  `;
-}
-
-function AvisosStrip(view) {
+// Una fila de botones cortos: incidentes, seguridad y avisos por barrio. Cada uno lleva a su sección.
+// El texto largo va en aria-label; en pantalla, ícono + 1 o 2 palabras + número.
+function AlertChips(view, routes) {
+  const chips = [];
+  const incidents = incidentsFor(view.fecha);
+  if (incidents.length) {
+    const last = incidents[incidents.length - 1];
+    chips.push({
+      id: "sv-goto-incidentes",
+      goto: "mas:incidentes",
+      tone: "danger",
+      icon: "alertTriangle",
+      label: incidents.length === 1 ? "Incidente" : "Incidentes",
+      count: incidents.length,
+      aria: `${plural(incidents.length, "incidente", "incidentes")} hoy. Último: ${last.titulo || incidentDogs(last)}. Ver`,
+    });
+  }
+  if (routes.some((route) => route.stops.length)) {
+    shiftWarnings(routes)
+      .filter((warning) => warning.tone !== "info" && warning.chip)
+      .forEach((warning, index) => {
+        chips.push({
+          id: `sv-goto-seguridad${index ? `-${index}` : ""}`,
+          goto: "mas:seguridad",
+          tone: warning.tone,
+          icon: warning.icon,
+          label: warning.chip,
+          count: warning.count,
+          aria: `${warning.short || warning.title}. Ver seguridad`,
+        });
+      });
+  }
   const avisos = activeAvisos(view.fecha);
-  if (!avisos.length) return "";
+  if (avisos.length) {
+    const danger = avisos.some((item) => item.tipo === "seguridad" || item.tipo === "perro suelto");
+    const first = avisos[0];
+    chips.push({
+      id: "sv-goto-avisos",
+      goto: "mas:avisos",
+      tone: danger ? "danger" : "warn",
+      icon: "mapPin",
+      label: avisos.length === 1 ? first.barrio || "Aviso" : "Avisos",
+      count: avisos.length > 1 ? avisos.length : 0,
+      aria: avisos.length === 1
+        ? `Aviso en ${first.barrio || PENDIENTE}: ${first.mensaje || first.tipo || ""}. Ver avisos`
+        : `${avisos.length} avisos por barrio. Ver avisos`,
+    });
+  }
+  if (!chips.length) return "";
   return `
-    <ul class="sv-avisos-strip" aria-label="Avisos por barrio">
-      ${avisos.slice(0, 2).map((item, index) => {
-        const danger = item.tipo === "seguridad" || item.tipo === "perro suelto";
-        return `
-          <li>
-            <button type="button" class="sv-aviso-mini is-${danger ? "danger" : "warn"}" id="sv-aviso-mini-${index}" data-sv-goto="mas:avisos">
-              ${icon("mapPin", "sv-icon")}
-              <span><b>${esc(item.barrio || PENDIENTE)}</b> ${esc(item.mensaje || item.tipo || "")}</span>
-            </button>
-          </li>
-        `;
-      }).join("")}
-      ${avisos.length > 2 ? `<li><button type="button" class="sv-btn sv-btn-small" id="sv-avisos-all" data-sv-goto="mas:avisos">+${avisos.length - 2} avisos</button></li>` : ""}
+    <ul class="sv-alerts" aria-label="Alertas del turno">
+      ${chips.map((chip) => `
+        <li>
+          <button type="button" class="sv-alert-chip is-${chip.tone}" id="${chip.id}" data-sv-goto="${chip.goto}" aria-label="${esc(`${chip.label}${chip.count ? ` ${chip.count}` : ""}. ${chip.aria}`)}">
+            ${icon(chip.icon, "sv-icon")}
+            <b>${esc(chip.label)}</b>
+            ${chip.count ? `<span class="sv-alert-n">${chip.count}</span>` : ""}
+          </button>
+        </li>
+      `).join("")}
     </ul>
   `;
 }
 
-function DogCard(view, item, requests) {
+// La hora grande es el próximo compromiso: el retiro y, ya retirado, la entrega prevista.
+function cardTime(stop, status) {
+  if (status.retirado && status.kind !== "entregado") {
+    const start = toMinutes(status.record?.horaRetiro) ?? status.planned;
+    if (start !== null && status.minutos) {
+      const end = start + status.minutos;
+      return { time: `${String(Math.floor(end / 60) % 24).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`, label: "entrega" };
+    }
+  }
+  return { time: stop.hora || "--:--", label: "" };
+}
+
+function DogCard(view, item, requests, showRoute = true) {
   const { stop, id, status, route } = item;
+  const when = cardTime(stop, status);
   const domId = cardDomId(route, stop);
   const record = status.record;
   const walker = personLabel(route.paseador);
@@ -1716,13 +1808,12 @@ function DogCard(view, item, requests) {
         ${Avatar(stop, domId)}
         <div class="sv-dog-main">
           <h3 class="sv-dog-name" id="sv-dog-name-${domId}">${esc(stop.perroNombre)}</h3>
-          <p class="sv-dog-sub">${esc(route.code)}${walker ? ` · ${esc(walker)}` : ""}</p>
+          ${showRoute ? `<p class="sv-dog-sub">${esc(route.code)}${walker ? ` · ${esc(walker)}` : ""}</p>` : ""}
           <p class="sv-dog-state"><span class="sv-state is-${status.tone}">${esc(status.label)}</span>${extraLate}</p>
         </div>
         <p class="sv-dog-time">
-          <span class="visually-hidden">Hora prevista</span>
-          <strong>${esc(stop.hora || "--:--")}</strong>
-          <small>${stop.minutos ? `${stop.minutos} min` : ""}</small>
+          <strong>${esc(when.time)}</strong>
+          ${when.label ? `<small>${when.label}<span class="visually-hidden"> prevista</span></small>` : `<span class="visually-hidden">Retiro previsto</span>`}
         </p>
       </div>
       ${safetyChips(stop)}
@@ -1750,9 +1841,9 @@ function DogActions(item, domId, optionsOpen) {
   } else if (status.kind === "entregado") {
     main = "";
   } else if (status.retirado) {
-    main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-deliver="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como entregado" ${disabled}>${icon("packageCheck", "sv-icon")} Entregado</button>`;
+    main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-deliver="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como entregado" ${disabled}>${icon("packageCheck", "sv-icon")} Marcar entregado</button>`;
   } else {
-    main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-pickup="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como retirado" ${disabled}>${icon("checkCircle", "sv-icon")} Retirado</button>`;
+    main = `<button type="button" class="sv-btn sv-btn-primary sv-btn-main" id="sv-main-${domId}" data-sv-pickup="${dog}" data-ruta="${ruta}" aria-label="Marcar a ${name} como retirado" ${disabled}>${icon("checkCircle", "sv-icon")} Marcar retirado</button>`;
   }
   const secondary = [
     !status.retirado && status.kind !== "nosale"
@@ -1921,11 +2012,13 @@ function RequestsTab(view) {
   const seen = seenSet();
   const pending = list.filter((item) => !isAnswered(item)).length;
   return `
-    <div class="sv-section-top">
-      <h1 class="sv-h1">Pedidos</h1>
-      ${RequestButton("", "", "Nuevo")}
+    <h1 class="sv-h1">Pedidos</h1>
+    <p class="sv-lead">El coordinador cambia la ruta y te responde.</p>
+    <div class="sv-row cols-3 sv-quick" role="group" aria-label="Nuevo pedido">
+      ${RequestButton("", "", "Sumar perro", "", "agregar perro", "plus")}
+      ${RequestButton("", "", "Paseador", "", "cambiar paseador o ayudante", "users")}
+      ${RequestButton("", "", "Otro", "", "otro", "message")}
     </div>
-    <p class="sv-lead">Al coordinador. Él cambia la ruta y te responde.</p>
     ${list.length ? `
       <p class="sv-route-counts"><span class="sv-state is-warn">${pending} esperando</span><span class="sv-state is-neutral">${list.length} en total</span></p>
       <ul class="sv-requests">${list.map((item) => RequestCard(item, seen)).join("")}</ul>
@@ -2012,7 +2105,18 @@ function SafetySection(routes) {
   if (!routes.some((route) => route.stops.length)) return `<div class="sv-empty-box"><p>Sin perros en este turno.</p></div>`;
   const warnings = shiftWarnings(routes);
   if (!warnings.length) return `<p class="sv-line is-ok">${icon("checkCircle", "sv-icon")} <span>Sin incompatibles, bozales ni datos a revisar.</span></p>`;
-  return `<ol class="sv-warnings">${warnings.map((warning) => WarningCard(warning)).join("")}</ol>`;
+  // Lo que frena o cuida el paseo, a la vista; los datos a revisar (no frenan), plegados.
+  const urgent = warnings.filter((warning) => warning.tone !== "info");
+  const info = warnings.filter((warning) => warning.tone === "info");
+  return `
+    ${urgent.length ? `<ol class="sv-warnings">${urgent.map((warning) => WarningCard(warning)).join("")}</ol>` : `<p class="sv-line is-ok">${icon("checkCircle", "sv-icon")} <span>Sin incompatibles ni bozales.</span></p>`}
+    ${info.length ? `
+      <details class="sv-fold" data-sv-fold="seguridad-info" ${isFoldOpen("seguridad-info") ? "open" : ""}>
+        <summary><span class="sv-fold-title">${icon("fileText", "sv-icon")} A revisar</span><span class="sv-pill">${info.reduce((sum, warning) => sum + warning.lines.length, 0)}</span></summary>
+        <ol class="sv-warnings sv-fold-body">${info.map((warning) => WarningCard(warning)).join("")}</ol>
+      </details>
+    ` : ""}
+  `;
 }
 
 function WarningCard(warning) {
@@ -2074,7 +2178,7 @@ function HelpSection() {
     <section class="sv-card" aria-labelledby="sv-how-title">
       <h2 class="sv-h2" id="sv-how-title">Cómo se usa</h2>
       <ul class="sv-plain-list">
-        <li><b>Retirado / Entregado:</b> un toque. Si te equivocás, «Deshacer» abajo.</li>
+        <li><b>Marcar retirado / entregado:</b> un toque. Si te equivocás, «Deshacer» abajo.</li>
         <li><b>Cambio:</b> se lo pedís al coordinador. Vos no cambiás la ruta.</li>
         <li><b>Sin señal:</b> seguí marcando, se envía solo. Las fotos necesitan señal.</li>
       </ul>
@@ -2162,7 +2266,7 @@ function ObservationSection(view, dogs) {
   const shiftIds = new Set(dogs.map((dog) => dog.id));
   const others = REAL_DOGS.filter((dog) => !shiftIds.has(dog.id));
   return `
-    <p class="sv-lead">Contá lo que se vio y se oyó. Sin etiquetas («agresivo», «malo», «dominante»).</p>
+    <p class="sv-lead">Contá lo que se vio y se oyó, sin etiquetas.</p>
     <form class="sv-form sv-card" data-sv-obs-form novalidate>
       <label class="sv-field" for="sv-obs-dog">Perro
         <select id="sv-obs-dog" data-sv-obs="dogId" required>
@@ -2465,9 +2569,12 @@ async function markWalk(code, dogId, action, focusId) {
   if (!changes) return;
 
   inFlight.add(id);
+  // Se congela el orden antes de guardar: si llegan datos mientras viaja, la lista no se mueve.
+  freezeOrder();
   const result = await persist("paseos", paseoPayload(view, route, stop, changes), "toast", text);
   inFlight.delete(id);
   const mainId = `sv-main-${cardDomId(route, stop)}`;
+  if (!result) orderFreeze = null;
   if (result) {
     flash = null;
     offerUndo(`${text}${result.pendiente ? " Sin señal: se envía solo." : ""}`, () => restoreWalk(code, dogId, prev, name), mainId);
@@ -2724,7 +2831,11 @@ async function uploadPhoto(input) {
     await fotosPerros.subir(perroId, name, file);
     setFlash("toast", `Foto de ${name} lista. La ve el equipo.`);
   } catch (error) {
-    setFlash("toast", error?.message || "No se pudo subir la foto. Probá de nuevo.", "error");
+    // Los errores del servidor vienen en castellano; los del navegador (foto que no se puede leer) no.
+    const text = typeof error?.status === "number" && error.message
+      ? error.message
+      : "No se pudo leer la foto. Probá sacarla de nuevo.";
+    setFlash("toast", text, "error");
   }
   photoBusy.delete(perroId);
   rerender();
@@ -2897,7 +3008,7 @@ function handleSupervisorClick(event) {
     if (from === "turno" && routes.length === 1) ruta = routes[0].code;
     const record = perroId ? paseosById().get(paseoId(view.fecha, perroId, view.shift)) : null;
     const retirado = ["retirado", "paseando", "entregado"].includes(record?.estado);
-    const tipo = perroId ? (retirado ? "otro" : "no sale") : "otro";
+    const tipo = REQUEST_TYPES.includes(requestOpen.dataset.tipo) ? requestOpen.dataset.tipo : perroId ? (retirado ? "otro" : "no sale") : "otro";
     closureSheetOpen = false;
     sheetOpener = requestOpen.id;
     writeJSON(KEYS.requestDraft, emptyRequest(view, ruta, perroId, true, from, tipo));
