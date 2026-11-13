@@ -153,6 +153,7 @@ const LOCAL_ICONS = {
   key: `<circle cx="8" cy="15" r="4" /><path d="m11 12 9-9" /><path d="m16 7 3 3" />`,
   undo: `<path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" />`,
   off: `<circle cx="12" cy="12" r="9" /><path d="m6 6 12 12" />`,
+  wifiOff: `<path d="M3 3l18 18" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M5 12.5a10 10 0 0 1 4.2-2.4" /><path d="M14.8 10.1A10 10 0 0 1 19 12.5" /><path d="M2 8.8a15 15 0 0 1 4.3-2.6" /><path d="M10.7 5.1A15 15 0 0 1 22 8.8" /><path d="M12 20h.01" />`,
 };
 
 function ico(name, className = "adm-icon-sm") {
@@ -346,11 +347,13 @@ function fotoDe(perroId) {
 function FotoButton(perroId, nombre, { compact = false, change = false } = {}) {
   if (!perroId) return "";
   const busy = ui.fotosSubiendo.has(perroId);
-  const label = busy ? "Subiendo…" : change ? "Cambiar" : "Foto";
+  // Sin señal la foto no se puede subir: el botón se apaga en vez de abrir la cámara para nada.
+  const offline = isOffline();
+  const label = busy ? "Subiendo…" : offline ? "Sin señal" : change ? "Cambiar" : "Foto";
   return `
-    <label class="adm-btn ${change ? "adm-btn--ghost" : "adm-btn--soft"} ${compact ? "adm-btn--icon" : "adm-btn--sm"} adm-file-button ${busy ? "is-busy" : ""}" data-adm-foto-label="${esc(perroId)}">
-      ${ico("camera")}<span class="${compact ? "adm-sr-only" : ""}">${label}${compact ? ` de ${esc(nombre)}` : ""}</span>
-      <input class="adm-file-input" type="file" accept="image/*" capture="environment" data-adm-foto="${esc(perroId)}" data-adm-foto-nombre="${esc(nombre)}" ${busy ? "disabled" : ""} aria-label="${change ? "Cambiar la foto" : "Sacar foto"} de ${esc(nombre)}" />
+    <label class="adm-btn ${change ? "adm-btn--ghost" : "adm-btn--soft"} ${compact ? "adm-btn--icon" : "adm-btn--sm"} adm-file-button ${busy ? "is-busy" : ""} ${offline && !busy ? "is-off" : ""}" data-adm-foto-label="${esc(perroId)}">
+      ${ico(offline && !busy ? "wifiOff" : "camera")}<span class="${compact ? "adm-sr-only" : ""}">${label}${compact ? ` de ${esc(nombre)}` : ""}</span>
+      <input class="adm-file-input" type="file" accept="image/*" capture="environment" data-adm-foto="${esc(perroId)}" data-adm-foto-nombre="${esc(nombre)}" ${busy || offline ? "disabled" : ""} aria-label="${offline && !busy ? "Sin señal, no se puede subir la foto" : change ? "Cambiar la foto" : "Sacar foto"} de ${esc(nombre)}" />
     </label>
   `;
 }
@@ -813,7 +816,8 @@ function buildPriorities(live = liveData()) {
     const count = live.incidentes.length;
     const latest = live.incidentes[0];
     const dogs = [...new Set(live.incidentes.map((item) => item.perroNombre).filter(Boolean))];
-    const who = latest.creadoPorNombre || "quien lo cargó";
+    const mine = Boolean(latest.creadoPor) && latest.creadoPor === currentUser().usuario;
+    const who = latest.creadoPorNombre || nameOf(latest.creadoPor) || "quien lo cargó";
     priorities.push({
       id: `incidentes-${live.hoy}-${count}`,
       tag: "Incidente",
@@ -822,8 +826,10 @@ function buildPriorities(live = liveData()) {
       title: count === 1
         ? `Hubo un incidente hoy${dogs.length ? ` con ${dogs[0]}` : ""}`
         : `Hubo ${count} incidentes hoy${dogs.length ? ` (${listJoin(dogs)})` : ""}`,
-      detail: `${count > 1 ? "El último lo cargó" : "Lo cargó"} ${who}${recordTime(latest) ? ` a las ${recordTime(latest)}` : ""}. Riesgo: ${latest.riesgo || PENDIENTE}. Lesiones: ${latest.lesiones || PENDIENTE}.`,
-      action: `Leé el incidente${dogs.length ? ` de ${listJoin(dogs)}` : ""} y hablá con ${who} hoy.`,
+      detail: `${count > 1 ? (mine ? "El último lo cargaste vos" : "El último lo cargó") : (mine ? "Lo cargaste vos" : "Lo cargó")}${mine ? "" : ` ${who}`}${recordTime(latest) ? ` a las ${recordTime(latest)}` : ""}. Riesgo: ${latest.riesgo || PENDIENTE}. Lesiones: ${latest.lesiones || PENDIENTE}.`,
+      action: mine
+        ? `Revisá el incidente${dogs.length ? ` de ${listJoin(dogs)}` : ""} que cargaste.`
+        : `Leé el incidente${dogs.length ? ` de ${listJoin(dogs)}` : ""} y hablá con ${who} hoy.`,
       target: "adm-incidentes",
       targetLabel: count === 1 ? "Ver incidente" : "Ver incidentes",
     });
@@ -1142,21 +1148,27 @@ function NextCard(priorities, done) {
     <section class="adm-next adm-next--${next.tone}" aria-labelledby="adm-next-title">
       <p class="adm-next-label" id="adm-next-title">${ico("arrowRight")} Próximo paso</p>
       <p class="adm-next-text">${esc(next.action)}</p>
-      <button class="adm-btn adm-btn--primary adm-btn--block" type="button" data-adm-goto="${next.target}">${esc(next.targetLabel)} ${ico("arrowRight")}</button>
+      <div class="adm-next-actions">
+        <button class="adm-btn adm-btn--primary" type="button" data-adm-goto="${next.target}">${esc(next.targetLabel)} ${ico("arrowRight")}</button>
+        <button class="adm-btn adm-btn--soft" type="button" data-adm-done="${esc(next.id)}" data-adm-done-label="${esc(next.short)}" aria-pressed="false" aria-label="Listo: ${esc(next.short)}">${ico("check")} Listo</button>
+      </div>
     </section>
   `;
 }
 
+// El próximo paso ya está arriba con sus botones: acá van las otras prioridades (sin repetirlo).
 function PriorityList(priorities, done) {
-  if (!priorities.length) return "";
+  const next = priorities.find((priority) => !done.includes(priority.id));
+  const rest = priorities.map((priority, index) => ({ priority, index })).filter((item) => item.priority !== next);
+  if (!rest.length) return "";
   return `
     <section class="adm-block" aria-labelledby="adm-prio-title">
-      <h2 class="adm-h2" id="adm-prio-title">Prioridades</h2>
+      <h2 class="adm-h2" id="adm-prio-title">${next ? "Después" : "Prioridades"}</h2>
       <ol class="adm-prios">
-        ${priorities.map((priority, index) => {
+        ${rest.map(({ priority, index }) => {
           const isDone = done.includes(priority.id);
           return `
-            <li class="adm-prio adm-prio--${priority.tone} ${isDone ? "is-done" : ""}">
+            <li value="${index + 1}" class="adm-prio adm-prio--${priority.tone} ${isDone ? "is-done" : ""}">
               <div class="adm-prio-head">
                 <span class="adm-prio-num" aria-hidden="true">${index + 1}</span>
                 <div class="adm-prio-text">
@@ -1810,18 +1822,18 @@ function PagoRow(pago) {
         </div>
         <strong class="adm-pago-amount">${hasMonto ? esc(formatPeso(monto)) : PENDIENTE}</strong>
       </div>
-      <span class="adm-chips">
-        <span class="adm-chip ${pago.pasadoAlLibro ? "adm-chip--green" : "adm-chip--yellow"}">${pago.pasadoAlLibro ? "En el Libro" : "Falta el Libro"}</span>
-        ${pago.comprobanteId ? `<span class="adm-chip adm-chip--green">${ico("fileCheck", "adm-icon-xs")} Comprobante</span>` : `<span class="adm-chip adm-chip--gray">Sin comprobante</span>`}
-        ${pago.pendiente ? `<span class="adm-chip adm-chip--blue">Sin enviar</span>` : ""}
-        ${fromOther ? `<span class="adm-chip adm-chip--blue" title="Lo cargó ${esc(ROLE_LABELS[creator.rol] || creator.rol)} antes del cambio de roles">Antes del cambio</span>` : ""}
-      </span>
+      ${pago.pendiente || fromOther ? `
+        <span class="adm-chips">
+          ${pago.pendiente ? `<span class="adm-chip adm-chip--blue">Sin enviar</span>` : ""}
+          ${fromOther ? `<span class="adm-chip adm-chip--blue" title="Lo cargó ${esc(ROLE_LABELS[creator.rol] || creator.rol)} antes del cambio de roles">Antes del cambio</span>` : ""}
+        </span>
+      ` : ""}
       <div class="adm-btn-row">
         <button class="adm-btn ${pago.pasadoAlLibro ? "adm-btn--done" : "adm-btn--soft"} adm-btn--sm" type="button" data-adm-pago-libro="${esc(pago.id)}" aria-pressed="${pago.pasadoAlLibro ? "true" : "false"}">
           ${ico("check")} ${pago.pasadoAlLibro ? "En el Libro" : "Pasé al Libro"}
         </button>
         ${pago.comprobanteId ? `
-          <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(pago.comprobanteId)}" data-adm-area="pagos" aria-label="Ver comprobante de ${esc(pago.concepto || "este pago")}">${ico("eye")} Ver</button>
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(pago.comprobanteId)}" data-adm-area="pagos" aria-label="Ver comprobante de ${esc(pago.concepto || "este pago")}">${ico("fileCheck")} Ver comprobante</button>
         ` : pago.pendiente ? "" : `
           <label class="adm-btn adm-btn--ghost adm-btn--sm adm-file-button">
             ${ico("camera")} <span>Comprobante</span>
@@ -1950,8 +1962,10 @@ function PagoSheet() {
         <div class="adm-seg adm-seg--wrap">
           <button class="adm-seg-item ${d.fecha === hoy ? "is-on" : ""}" type="button" data-adm-fecha="${hoy}" aria-pressed="${d.fecha === hoy}">Hoy</button>
           <button class="adm-seg-item ${d.fecha === ayer ? "is-on" : ""}" type="button" data-adm-fecha="${ayer}" aria-pressed="${d.fecha === ayer}">Ayer</button>
-          <label class="adm-sr-only" for="adm-pago-fecha">Otra fecha</label>
-          <input class="adm-input adm-input--date" id="adm-pago-fecha" type="date" required value="${esc(d.fecha)}" data-adm-draft="pago" data-adm-key="fecha" />
+          <label class="adm-seg-item adm-date-pick ${d.fecha !== hoy && d.fecha !== ayer ? "is-on" : ""}" for="adm-pago-fecha">
+            ${ico("calendarCheck")} <span>${d.fecha !== hoy && d.fecha !== ayer && d.fecha ? esc(ymdToAR(d.fecha)) : "Otra"}</span>
+            <input class="adm-date-native" id="adm-pago-fecha" type="date" required value="${esc(d.fecha)}" data-adm-draft="pago" data-adm-key="fecha" aria-label="Otra fecha. Elegida: ${esc(ymdToAR(d.fecha) || "ninguna")}" />
+          </label>
         </div>
       </fieldset>
       <div class="adm-field">
@@ -2061,7 +2075,7 @@ function FotosView() {
       <p><strong>${conFoto} de ${total}</strong> con foto</p>
       <span class="adm-progress" aria-hidden="true"><span style="--v:${(total ? conFoto / total : 0).toFixed(3)}"></span></span>
     </div>
-    <p class="adm-row-meta">${ico("camera", "adm-icon-xs")} ${isOffline() ? "Sin señal: las fotos se suben cuando vuelva." : "Las fotos necesitan señal."}</p>
+    <p class="adm-row-meta">${ico("camera", "adm-icon-xs")} ${isOffline() ? "Sin señal: las fotos no se pueden subir ahora." : "Las fotos necesitan señal."}</p>
     <div class="adm-seg" role="group" aria-label="Qué perros mostrar">
       <button class="adm-seg-item ${filtro === "faltan" ? "is-on" : ""}" type="button" data-adm-fotos-filtro="faltan" aria-pressed="${filtro === "faltan"}" ${faltan.length ? "" : "disabled"}>Faltan (${faltan.length})</button>
       <button class="adm-seg-item ${filtro === "todos" ? "is-on" : ""}" type="button" data-adm-fotos-filtro="todos" aria-pressed="${filtro === "todos"}">Todos (${total})</button>
@@ -2976,13 +2990,25 @@ function toggleDone(id, label) {
     ui.undo = null;
   }
   render();
-  document.querySelector(`.adm-prio [data-adm-done="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  (document.querySelector(`.adm-prio [data-adm-done="${CSS.escape(id)}"]`) || document.querySelector(`[data-adm-done="${CSS.escape(id)}"]`) || document.querySelector("#adm-title"))?.focus({ preventScroll: true });
   announce(isDone ? "Prioridad desmarcada." : "Hecho. Cambió el próximo paso.");
 }
 
 // Acciones de la página. Corre después del control de accesibilidad.
 function handleAdminActionClick(event) {
   if (!event.target.closest(".adm-shell")) return false;
+
+  // "Otra fecha": el calendario nativo queda invisible encima del botón (así la fecha se ve
+  // siempre DD/MM/AAAA, sin importar el idioma del navegador). En compu se abre con showPicker.
+  const datePick = event.target.closest(".adm-date-native");
+  if (datePick) {
+    try {
+      datePick.showPicker?.();
+    } catch {
+      // Si el navegador ya lo abrió solo, no pasa nada.
+    }
+    return false;
+  }
 
   // Tocar el fondo oscuro cierra la hoja.
   const backdrop = event.target.closest("[data-adm-sheet-backdrop]");

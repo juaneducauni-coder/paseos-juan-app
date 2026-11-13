@@ -107,6 +107,12 @@ html[data-theme="dark"] .adm-shell {
   list-style: none;
 }
 
+/* base.css les pone a todos los <p> un gris (#6b706c) que sobre las tarjetas claras queda en 4,39:1.
+   Acá heredan el color de su caja; los que van en gris lo dicen con su propia clase. */
+.adm-shell :where(p) {
+  color: inherit;
+}
+
 /* base.css les pone relleno y línea a todos los <details> y mayúsculas a los <dt>: acá no. */
 .adm-shell details {
   padding: 0;
@@ -190,6 +196,7 @@ html:has(.adm-sheet) {
 
 .adm-brand {
   display: flex;
+  min-height: 48px;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -367,6 +374,13 @@ html:has(.adm-sheet) {
   text-underline-offset: 3px;
 }
 
+/* Enlace suelto dentro de una fila: zona de toque de 48 px aunque el texto sea chico. */
+.adm-row-meta .adm-link {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+}
+
 .adm-msg {
   padding: 12px 14px;
   border: 1px solid var(--adm-info-line);
@@ -465,6 +479,14 @@ html:has(.adm-sheet) {
   cursor: progress;
 }
 
+/* Foto sin señal: apagada pero legible (texto con contraste completo, sin opacidad). */
+.adm-btn.is-off {
+  border: 2px dashed var(--adm-line-strong);
+  background: transparent;
+  color: var(--adm-muted);
+  cursor: not-allowed;
+}
+
 .adm-btn--primary {
   background: var(--adm-green);
   color: var(--adm-on-green);
@@ -538,8 +560,16 @@ html[data-theme="dark"] .adm-btn--danger {
 
 .adm-btn--icon {
   width: 48px;
+  min-width: 48px;
   min-height: 48px;
+  flex: 0 0 auto;
   padding: 0;
+}
+
+/* Botones al costado de una fila (cámara de la parada, etc.): no se achican con textos largos. */
+.adm-row > .adm-btn,
+.adm-row > .adm-file-button {
+  flex: 0 0 auto;
 }
 
 .adm-btn--head {
@@ -689,8 +719,8 @@ html[data-theme="dark"] .adm-btn--danger {
 
 .adm-help > summary {
   display: inline-grid;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   place-items: center;
   border-radius: 999px;
   color: var(--adm-muted);
@@ -785,6 +815,17 @@ html[data-theme="dark"] .adm-btn--danger {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.3;
+}
+
+/* Botón principal ancho (la siguiente acción) y "Listo" al lado, a mano del pulgar. */
+.adm-next-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.adm-next-actions > .adm-btn {
+  min-height: 56px;
 }
 
 .adm-prios {
@@ -1071,7 +1112,7 @@ html[data-theme="dark"] .adm-btn--danger {
 
 .adm-more > summary {
   display: inline-flex;
-  min-height: 44px;
+  min-height: 48px;
   align-items: center;
   color: var(--adm-green);
   font-size: 15px;
@@ -1173,7 +1214,12 @@ html[data-theme="dark"] .adm-btn--danger {
 }
 
 .adm-route-progress {
+  color: var(--adm-muted);
   font-size: 15px;
+}
+
+.adm-route-progress strong {
+  color: var(--adm-ink);
 }
 
 .adm-route-progress strong {
@@ -1447,10 +1493,37 @@ html[data-theme="dark"] .adm-btn--undo {
   font-variant-numeric: tabular-nums;
 }
 
-.adm-input--date {
-  flex: 1 1 150px;
+/* "Otra fecha": botón que muestra la fecha DD/MM/AAAA con el calendario nativo invisible encima. */
+.adm-date-pick {
+  position: relative;
+  gap: 6px;
+}
+
+.adm-seg-item .adm-date-native {
+  position: absolute;
+  /* Tapa también el borde del botón: toda la pastilla (48 px) abre el calendario. */
+  inset: -2px;
   width: auto;
-  min-height: 48px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.adm-date-native::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.adm-date-pick:focus-within {
+  outline: 3px solid var(--adm-focus);
+  outline-offset: 3px;
 }
 
 .adm-money-input {
@@ -1483,6 +1556,17 @@ html[data-theme="dark"] .adm-btn--undo {
 
 .adm-input--money:focus-visible {
   outline: none;
+}
+
+/* base.css pinta de otro color los campos con foco (en oscuro, var(--field)): acá se quedan
+   con el fondo de su tarjeta y el monto no muestra una caja adentro de la caja. */
+.adm-shell .adm-input:focus {
+  background: var(--adm-surface);
+}
+
+.adm-shell .adm-input--money:focus {
+  background: transparent;
+  box-shadow: none;
 }
 
 .adm-pin-row {
