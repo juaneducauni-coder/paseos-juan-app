@@ -148,11 +148,21 @@ export const ROLE_PAGES = {
   coordinador: ["coordinador", "cliente"],
   supervisor: ["supervisor", "paseador", "cliente"],
   paseador: ["paseador"],
+  ayudante: ["paseador"],
   marketing: [],
 };
 
+export const ROLE_LABELS = {
+  admin: "Admin",
+  coordinador: "Coordinador",
+  supervisor: "Supervisor",
+  paseador: "Paseador",
+  ayudante: "Ayudante de paseador",
+  marketing: "Marketing",
+};
+
 export function homeFor(rol) {
-  return { admin: "/admin", coordinador: "/coordinador", supervisor: "/supervisor", paseador: "/paseador" }[rol] || "/";
+  return { admin: "/admin", coordinador: "/coordinador", supervisor: "/supervisor", paseador: "/paseador", ayudante: "/paseador" }[rol] || "/";
 }
 
 // ---------- Usuarios (solo admin) ----------

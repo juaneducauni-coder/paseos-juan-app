@@ -4,7 +4,7 @@ import { scryptSync, randomBytes, timingSafeEqual, createHmac } from "node:crypt
 import { HttpError } from "./http.js";
 import { store } from "./store.js";
 
-export const ROLES = ["admin", "coordinador", "supervisor", "paseador", "marketing"];
+export const ROLES = ["admin", "coordinador", "supervisor", "paseador", "ayudante", "marketing"];
 const SESSION_DAYS = 30;
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;

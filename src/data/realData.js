@@ -173,3 +173,178 @@ export function todayName(date = new Date()) {
 export function formatPeso(value) {
   return `$${Number(value).toLocaleString("es-AR")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Horarios reales de BASE RUTAS (planilla RPJ, leída el 12/11/2026): una fila por paseo.
+// [día, turno, ruta, hora de retiro, perro, minutos, nota de la planilla]
+// Es el punto de partida de la plantilla semanal que arma el coordinador en la app.
+// No incluye nombres de paseadores que no están en el equipo autorizado.
+// "Llak" (jueves tarde) no se cargó: el nombre no coincide con ningún perro (pendiente de confirmar).
+// El sábado la planilla dice "Mañana", pero las horas son de tarde (salvo Sam, 9:15): se usa la hora.
+const RUTAS_FILAS = [
+  ["Lunes", "Mañana", "PJ_1M", "09:00", "Pistacho", 45, "No juntar con Lokaku, Sam, Rocky, Candombe ni Cashi"],
+  ["Lunes", "Mañana", "PJ_1M", "09:00", "Flora", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "10:00", "Wendy", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "10:00", "Sonia", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "10:15", "Kiara", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "11:00", "Duque", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "11:00", "Tayler", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "11:15", "Rambo", 20, ""],
+  ["Lunes", "Mañana", "PJ_1M", "11:15", "Morris", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "11:15", "Zeus", 45, ""],
+  ["Lunes", "Mañana", "PJ_1M", "11:30", "Lokaku", 45, "Bozal"],
+  ["Lunes", "Tarde", "PJ_2T", "14:45", "Caipi", 45, ""],
+  ["Lunes", "Tarde", "PJ_1T", "15:00", "Paco", 45, ""],
+  ["Lunes", "Tarde", "PJ_1T", "15:00", "Coqui", 45, ""],
+  ["Lunes", "Tarde", "PJ_2T", "15:00", "Annie", 45, ""],
+  ["Lunes", "Tarde", "PJ_1T", "15:15", "Manolo", 45, ""],
+  ["Lunes", "Tarde", "PJ_1T", "15:15", "Frida", 45, ""],
+  ["Lunes", "Tarde", "PJ_1T", "15:15", "Natividad", 45, ""],
+  ["Lunes", "Tarde", "PJ_2T", "15:15", "Sam", 45, "Revisar: no figura contratado este día"],
+  ["Lunes", "Tarde", "PJ_2T", "15:15", "Otto", 45, ""],
+  ["Lunes", "Tarde", "PJ_2T", "15:15", "Ron", 45, ""],
+  ["Lunes", "Tarde", "PJ_1T", "16:30", "Jack", 20, "Revisar duración"],
+  ["Lunes", "Tarde", "PJ_1T", "16:45", "Rambo", 20, "Revisar duración"],
+  ["Martes", "Mañana", "PJ_1M", "09:00", "Pistacho", 45, "Bozal"],
+  ["Martes", "Mañana", "PJ_1M", "09:15", "Sonia", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "09:15", "Wendy", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "09:30", "Zeus", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "10:00", "Cashi", 45, "Bozal"],
+  ["Martes", "Mañana", "PJ_1M", "10:00", "Kiara", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "10:15", "Flora", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "10:45", "Tayler", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "10:45", "Duque", 45, ""],
+  ["Martes", "Mañana", "PJ_1M", "11:15", "Rambo", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "14:45", "Caipi", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "15:15", "Forest", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "15:30", "Sam", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "15:45", "Coqui", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "16:00", "Manolo", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "16:15", "Séptima", 45, ""],
+  ["Martes", "Tarde", "PJ_1T", "16:15", "Rambo", 20, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "09:00", "Pistacho", 45, "No juntar con Lokaku, Sam ni Cashi"],
+  ["Miércoles", "Mañana", "PJ_1M", "09:15", "Wendy", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "09:15", "Sonia", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "09:30", "Morris", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "09:30", "Zeus", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "10:15", "Cashi", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "10:15", "Kiara", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "10:45", "Lokaku", 45, "Bozal"],
+  ["Miércoles", "Mañana", "PJ_1M", "11:00", "Paco", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "11:15", "Tayler", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "11:15", "Duque", 45, ""],
+  ["Miércoles", "Mañana", "PJ_1M", "11:30", "Rambo", 20, ""],
+  ["Miércoles", "Tarde", "PJ_2T", "14:45", "Caipi", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "15:00", "Manolo", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "15:15", "Natividad", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "15:15", "Frida", 45, ""],
+  ["Miércoles", "Tarde", "PJ_2T", "15:15", "Sam", 45, "Revisar: no figura contratado este día"],
+  ["Miércoles", "Tarde", "PJ_2T", "15:15", "Otto", 45, ""],
+  ["Miércoles", "Tarde", "PJ_2T", "15:15", "Ron", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "15:30", "Coqui", 45, ""],
+  ["Miércoles", "Tarde", "PJ_2T", "15:30", "Annie", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "15:45", "Séptima", 45, "Sin días contratados cargados"],
+  ["Miércoles", "Tarde", "PJ_2T", "16:00", "Milo", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "16:15", "Flora", 45, ""],
+  ["Miércoles", "Tarde", "PJ_1T", "16:45", "Rambo", 20, "Revisar duración"],
+  ["Jueves", "Mañana", "PJ_1M", "09:00", "Pistacho", 45, "Bozal"],
+  ["Jueves", "Mañana", "PJ_1M", "09:15", "Sonia", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "09:15", "Wendy", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "09:30", "Zeus", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "10:00", "Cashi", 45, "Bozal"],
+  ["Jueves", "Mañana", "PJ_1M", "10:00", "Kiara", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "10:15", "Flora", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "10:45", "Tayler", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "10:45", "Duque", 45, ""],
+  ["Jueves", "Mañana", "PJ_1M", "11:00", "Rambo", 20, ""],
+  ["Jueves", "Tarde", "PJ_1T", "14:45", "Caipi", 45, ""],
+  ["Jueves", "Tarde", "PJ_2T", "14:45", "Forest", 45, "Bozal"],
+  ["Jueves", "Tarde", "PJ_1T", "15:00", "Manolo", 45, ""],
+  ["Jueves", "Tarde", "PJ_1T", "15:15", "Sam", 45, "Revisar: no figura contratado este día"],
+  ["Jueves", "Tarde", "PJ_1T", "15:30", "Coqui", 45, ""],
+  ["Jueves", "Tarde", "PJ_2T", "16:15", "Rambo", 20, "Revisar duración"],
+  ["Viernes", "Mañana", "PJ_1M", "09:45", "Pistacho", 45, "No juntar con Lokaku, Sam, Rocky, Candombe ni Cashi"],
+  ["Viernes", "Mañana", "PJ_1M", "10:00", "Wendy", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "10:00", "Sonia", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "10:00", "Runa", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "10:15", "Cashi", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "10:50", "Kiara", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:00", "Flora", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:00", "Duque", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:00", "Tayler", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:15", "Rambo", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:15", "Morris", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:15", "Zeus", 45, ""],
+  ["Viernes", "Mañana", "PJ_1M", "11:30", "Lokaku", 45, "Bozal"],
+  ["Viernes", "Tarde", "PJ_2T", "14:45", "Coqui", 45, ""],
+  ["Viernes", "Tarde", "PJ_1T", "14:45", "Caipi", 45, ""],
+  ["Viernes", "Tarde", "PJ_1T", "15:00", "Paco", 45, ""],
+  ["Viernes", "Tarde", "PJ_1T", "15:00", "Manolo", 45, ""],
+  ["Viernes", "Tarde", "PJ_2T", "15:00", "Annie", 45, ""],
+  ["Viernes", "Tarde", "PJ_1T", "15:15", "Frida", 45, ""],
+  ["Viernes", "Tarde", "PJ_1T", "15:15", "Natividad", 45, ""],
+  ["Viernes", "Tarde", "PJ_2T", "15:15", "Sam", 45, "Revisar: no figura contratado este día"],
+  ["Viernes", "Tarde", "PJ_2T", "15:15", "Otto", 45, ""],
+  ["Viernes", "Tarde", "PJ_2T", "15:15", "Ron", 45, ""],
+  ["Viernes", "Tarde", "PJ_1T", "16:00", "Séptima", 45, "Sin días contratados cargados"],
+  ["Viernes", "Tarde", "PJ_1T", "16:30", "Jack", 20, "Revisar duración"],
+  ["Viernes", "Tarde", "PJ_1T", "16:45", "Rambo", 5, "Revisar duración"],
+  ["Sábado", "Mañana", "PJ_1M", "09:15", "Sam", 45, ""],
+  ["Sábado", "Tarde", "PJ_1T", "14:45", "Forest", 45, ""],
+  ["Sábado", "Tarde", "PJ_1T", "15:00", "Roma", 55, ""],
+  ["Sábado", "Tarde", "PJ_1T", "15:00", "Manolo", 45, ""],
+  ["Sábado", "Tarde", "PJ_1T", "15:00", "Milo", 45, ""],
+  ["Sábado", "Tarde", "PJ_1T", "16:00", "Tayler", 45, ""],
+];
+
+// Supervisor de cada día y turno según la planilla (el sábado supervisa Juan).
+const SUPERVISOR_PLANILLA = {
+  "Lunes|Mañana": "Juan", "Lunes|Tarde": "Nicolás",
+  "Martes|Mañana": "Juan", "Martes|Tarde": "Nicolás",
+  "Miércoles|Mañana": "Juan", "Miércoles|Tarde": "Nicolás",
+  "Jueves|Mañana": "Juan", "Jueves|Tarde": "Nicolás",
+  "Viernes|Mañana": "Nicolás", "Viernes|Tarde": "Nicolás",
+  "Sábado|Mañana": "Juan", "Sábado|Tarde": "Juan",
+};
+
+const byNameForRoutes = new Map(REAL_DOGS.map((dog) => [dog.name, dog]));
+
+function sumarMinutos(hora, minutos) {
+  const [h, m] = hora.split(":").map(Number);
+  const total = h * 60 + m + Number(minutos || 0);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// Paradas de la planilla: una por paseo, con el id del perro.
+export const RUTAS_BASE = RUTAS_FILAS.map(([dia, turno, ruta, hora, perro, minutos, nota]) => {
+  const dog = byNameForRoutes.get(perro);
+  return { dia, turno, ruta, hora, perroId: dog?.id || null, perroNombre: perro, minutos, salida: sumarMinutos(hora, minutos), nota };
+});
+
+// Plantilla semanal inicial agrupada por día y ruta. id = PJ_1M_lunes (sin tildes).
+export function plantillasDesdePlanilla() {
+  const grupos = new Map();
+  RUTAS_BASE.forEach((p) => {
+    const id = `${p.ruta}_${p.dia.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()}`;
+    if (!grupos.has(id)) {
+      grupos.set(id, {
+        id,
+        dia: p.dia,
+        turno: p.turno,
+        ruta: p.ruta,
+        paseador: "",
+        ayudante: "",
+        supervisor: SUPERVISOR_PLANILLA[`${p.dia}|${p.turno}`] || "",
+        paradas: [],
+        origen: "Planilla RPJ, BASE RUTAS (12/11/2026)",
+      });
+    }
+    grupos.get(id).paradas.push({ perroId: p.perroId, perroNombre: p.perroNombre, hora: p.hora, minutos: p.minutos, nota: p.nota });
+  });
+  return [...grupos.values()].map((g) => ({ ...g, paradas: g.paradas.sort((a, b) => a.hora.localeCompare(b.hora)) }));
+}
+
+// Barrios conocidos. Lo demás lo carga el coordinador en cada cliente.
+export const BARRIOS_BASE = ["Mapuche Country Club", "La Lonja", "Pilar (otros barrios)"];
+
+export { sumarMinutos };
