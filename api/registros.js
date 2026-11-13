@@ -19,9 +19,65 @@ const AUTORIA_PASEO = ["horaRetiroPor", "horaPaseoPor", "horaEntregaPor", "horaI
 const SOLO_PROPIOS = ["incidentes", "observaciones", "avisos"];
 const escRegex = (texto) => String(texto).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// Contaduría (`movimientos`): categorías fijas por tipo y largo máximo de cada texto.
+// La misma lista está en src/views/admin.js (CONTA_CATEGORIAS): si cambia una, cambiá la otra.
+export const CATEGORIAS_MOVIMIENTO = {
+  ingreso: ["Planes", "Tienda", "Otros"],
+  egreso: ["Pagos al equipo", "Insumos", "Transporte", "Alimento/tienda", "Impuestos y servicios", "Otros"],
+};
+const MOVIMIENTO_TEXTOS = { concepto: 120, medio: 40, nota: 300 };
+const MONTO_MAX = 1e12;
+
+function fechaReal(fecha) {
+  if (typeof fecha !== "string" || !FECHA.test(fecha)) return false;
+  const d = new Date(`${fecha}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === fecha;
+}
+
+// Deja solo los campos del movimiento y revisa el registro completo (lo que llega sobre lo que había).
+// Así un cambio parcial (por ejemplo, marcar "En el Libro") tampoco puede dejar datos inválidos.
+function validarMovimiento(datos, previo) {
+  const out = {};
+  for (const campo of ["fecha", "tipo", "categoria", "concepto", "monto", "medio", "nota", "pasadoAlLibro"]) {
+    if (Object.prototype.hasOwnProperty.call(datos, campo)) out[campo] = datos[campo];
+  }
+  for (const [campo, max] of Object.entries(MOVIMIENTO_TEXTOS)) {
+    if (out[campo] === undefined) continue;
+    if (out[campo] === null) out[campo] = "";
+    if (typeof out[campo] !== "string") throw new HttpError(400, `El campo ${campo} tiene que ser texto.`);
+    out[campo] = out[campo].trim();
+    if (out[campo].length > max) throw new HttpError(400, `El campo ${campo} es demasiado largo (máximo ${max} letras).`);
+  }
+  if (out.pasadoAlLibro !== undefined && typeof out.pasadoAlLibro !== "boolean") {
+    throw new HttpError(400, "La marca del Libro tiene que ser sí o no.");
+  }
+  const final = { ...(previo || {}), ...out };
+  if (!fechaReal(final.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
+  if (!Object.prototype.hasOwnProperty.call(CATEGORIAS_MOVIMIENTO, final.tipo)) {
+    throw new HttpError(400, "El tipo tiene que ser ingreso o egreso.");
+  }
+  if (!CATEGORIAS_MOVIMIENTO[final.tipo].includes(final.categoria)) {
+    throw new HttpError(400, "Elegí una categoría de la lista.");
+  }
+  if (typeof final.monto !== "number" || !Number.isFinite(final.monto) || final.monto <= 0 || final.monto > MONTO_MAX) {
+    throw new HttpError(400, "El monto tiene que ser un número mayor que cero.");
+  }
+  if (out.monto !== undefined) out.monto = Math.round(out.monto * 100) / 100;
+  if (typeof final.concepto !== "string" || final.concepto.trim().length < 2) {
+    throw new HttpError(400, "Falta el concepto.");
+  }
+  if (!previo) {
+    out.medio = out.medio || "";
+    out.nota = out.nota || "";
+    out.pasadoAlLibro = out.pasadoAlLibro === true;
+  }
+  return out;
+}
+
 // Reglas por registro (además del permiso por colección). Devuelve los datos ya ajustados.
 function reglasPorRegistro(col, id, datos, previo, user) {
   const admin = user.rol === "admin";
+  if (col === "movimientos") return validarMovimiento(datos, previo);
   if (col === "solicitudes" && !admin && user.rol !== "coordinador") {
     // El supervisor pide; el coordinador (o el admin) aplica o rechaza y responde.
     if (previo && (previo.creadoPor !== user.usuario || (previo.estado || "pendiente") !== "pendiente")) {
@@ -158,6 +214,10 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
   const id = params.get("id");
   if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
   if (!id || !ID.test(id)) throw new HttpError(400, "Identificador no válido.");
+  // Contaduría: quien no la puede cargar ni siquiera se entera de si un movimiento existe.
+  if (col === "movimientos" && !puedeEscribir(user.rol, col)) {
+    throw new HttpError(403, "Tu usuario no puede borrar estos datos.");
+  }
   const previo = await store.get(col, id);
   if (!previo) return send(res, 200, { ok: true, borrado: false });
   // Los archivos los borra solo el admin (lo guardado en Drive o Vercel no se borra desde acá).

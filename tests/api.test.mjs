@@ -503,6 +503,114 @@ test("E-039: cada rol sube solo sus tipos de archivo y solo el admin los borra",
   assert.equal((await call("registros", { method: "DELETE", url: `/?col=archivos&id=${foto.body.registro.id}`, token: admin })).body.borrado, true);
 });
 
+// ---------- Contaduría: colección `movimientos` (ingresos y egresos) ----------
+const movimiento = (extra = {}) => ({
+  col: "movimientos", fecha: "2026-11-13", tipo: "egreso", categoria: "Insumos", concepto: "Bolsas", monto: 4500, medio: "Efectivo", ...extra,
+});
+
+test("contaduría: el admin crea, lee, marca en el Libro y borra un movimiento", async () => {
+  const { ROLES_CONTADURIA, COLECCIONES } = await import("../api/_lib/permisos.js");
+  assert.deepEqual(ROLES_CONTADURIA, ["admin"]);
+  assert.equal(COLECCIONES.movimientos.leer, ROLES_CONTADURIA);
+  assert.equal(COLECCIONES.movimientos.escribir, ROLES_CONTADURIA);
+
+  const creado = await call("registros", { method: "POST", token: admin, body: movimiento({ nota: "  para la ruta  ", inventado: "x" }) });
+  assert.equal(creado.status, 201);
+  const reg = creado.body.registro;
+  assert.equal(reg.tipo, "egreso");
+  assert.equal(reg.categoria, "Insumos");
+  assert.equal(reg.monto, 4500);
+  assert.equal(reg.nota, "para la ruta");
+  assert.equal(reg.pasadoAlLibro, false);
+  assert.equal(reg.creadoPor, "juan");
+  assert.equal(reg.inventado, undefined, "no guarda campos que no son del movimiento");
+
+  const ingreso = await call("registros", { method: "POST", token: admin, body: movimiento({ tipo: "ingreso", categoria: "Planes", concepto: "Plan 2", monto: 30000.555 }) });
+  assert.equal(ingreso.status, 201);
+  assert.equal(ingreso.body.registro.monto, 30000.56);
+
+  const lista = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.equal(lista.status, 200);
+  assert.equal(lista.body.registros.length, 2);
+
+  // Cambio parcial: marcar "En el Libro" conserva el resto.
+  const libro = await call("registros", { method: "POST", token: admin, body: { col: "movimientos", id: reg.id, fecha: reg.fecha, pasadoAlLibro: true } });
+  assert.equal(libro.status, 200);
+  assert.equal(libro.body.registro.pasadoAlLibro, true);
+  assert.equal(libro.body.registro.monto, 4500);
+  assert.equal(libro.body.registro.concepto, "Bolsas");
+
+  const borrado = await call("registros", { method: "DELETE", url: `/?col=movimientos&id=${reg.id}`, token: admin });
+  assert.equal(borrado.status, 200);
+  assert.equal(borrado.body.borrado, true);
+  const despues = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.deepEqual(despues.body.registros.map((r) => r.id), [ingreso.body.registro.id]);
+});
+
+test("contaduría: coordinador, supervisor, paseador y ayudante reciben 403", async () => {
+  const existente = (await call("registros", { url: "/?col=movimientos", token: admin })).body.registros[0];
+  for (const [rol, token] of [["coordinador", coordinador], ["supervisor", supervisor], ["paseador", pas], ["ayudante", ayudante]]) {
+    assert.equal((await call("registros", { url: "/?col=movimientos", token })).status, 403, `${rol} no lee`);
+    assert.equal((await call("registros", { method: "POST", token, body: movimiento() })).status, 403, `${rol} no carga`);
+    assert.equal((await call("registros", { method: "POST", token, body: { col: "movimientos", id: existente.id, fecha: existente.fecha, pasadoAlLibro: true } })).status, 403, `${rol} no cambia`);
+    assert.equal((await call("registros", { method: "DELETE", url: `/?col=movimientos&id=${existente.id}`, token })).status, 403, `${rol} no borra`);
+    assert.equal((await call("registros", { method: "DELETE", url: "/?col=movimientos&id=no-existe", token })).status, 403, `${rol} no averigua si existe`);
+  }
+  assert.equal((await call("registros", { url: "/?col=movimientos" })).status, 401);
+  const sigue = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.equal(sigue.body.registros.length, 1);
+  assert.equal(sigue.body.registros[0].pasadoAlLibro, false);
+});
+
+test("contaduría: el servidor valida tipo, monto, fecha, categoría y largo de los textos", async () => {
+  const malos = [
+    { monto: -100 },
+    { monto: 0 },
+    { monto: "4500" },
+    { monto: null },
+    { tipo: "regalo" },
+    { tipo: undefined },
+    { categoria: "Planes" }, // es de ingresos, no de egresos
+    { categoria: "Cualquiera" },
+    { fecha: "2026-02-31" },
+    { fecha: "13/11/2026" },
+    { fecha: undefined },
+    { concepto: "" },
+    { concepto: "x".repeat(121) },
+    { nota: "x".repeat(301) },
+    { medio: "x".repeat(41) },
+    { medio: 5 },
+    { pasadoAlLibro: "sí" },
+  ];
+  for (const extra of malos) {
+    const r = await call("registros", { method: "POST", token: admin, body: movimiento(extra) });
+    assert.equal(r.status, 400, `tenía que rechazar ${JSON.stringify(extra).slice(0, 60)}`);
+  }
+  // Un cambio parcial tampoco puede dejar el registro inválido.
+  const existente = (await call("registros", { url: "/?col=movimientos", token: admin })).body.registros[0];
+  const cambio = (extra) => call("registros", { method: "POST", token: admin, body: { col: "movimientos", id: existente.id, fecha: existente.fecha, ...extra } });
+  assert.equal((await cambio({ monto: -1 })).status, 400);
+  assert.equal((await cambio({ tipo: "egreso" })).status, 400, "la categoría Planes no vale para un egreso");
+  assert.equal((await cambio({ tipo: "egreso", categoria: "Transporte" })).status, 200);
+  const lista = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.equal(lista.body.registros.length, 1, "nada de lo rechazado quedó guardado");
+});
+
+test("contaduría: creadoPor lo fija el servidor y no se puede falsificar", async () => {
+  const falso = { creadoPor: "coordina", creadoPorNombre: "Otra persona", creadoEn: "2020-01-01T00:00:00.000Z", actualizadoPor: "coordina" };
+  const creado = await call("registros", { method: "POST", token: admin, body: movimiento(falso) });
+  assert.equal(creado.status, 201);
+  assert.equal(creado.body.registro.creadoPor, "juan");
+  assert.notEqual(creado.body.registro.creadoPorNombre, "Otra persona");
+  assert.notEqual(creado.body.registro.creadoEn, "2020-01-01T00:00:00.000Z");
+  assert.equal(creado.body.registro.actualizadoPor, "juan");
+  const cambio = await call("registros", { method: "POST", token: admin, body: { col: "movimientos", id: creado.body.registro.id, fecha: "2026-11-13", nota: "ok", ...falso } });
+  assert.equal(cambio.status, 200);
+  assert.equal(cambio.body.registro.creadoPor, "juan");
+  assert.equal(cambio.body.registro.creadoEn, creado.body.registro.creadoEn);
+  await call("registros", { method: "DELETE", url: `/?col=movimientos&id=${creado.body.registro.id}`, token: admin });
+});
+
 test("E-039: los PDF se descargan aislados (attachment + CSP sandbox)", async () => {
   const pdf = Buffer.from("%PDF-1.4\n%prueba\n").toString("base64");
   const sube = await call("archivos", { method: "POST", token: admin, body: { tipo: "documento", archivo: { nombre: "d.pdf", mime: "application/pdf", base64: pdf } } });

@@ -10,6 +10,10 @@
 // - marketing: pedidos y comunicación.
 const EQUIPO = ["admin", "coordinador", "supervisor", "paseador", "ayudante"];
 const CALLE = ["admin", "supervisor", "paseador", "ayudante"];
+// Quién ve y carga la CONTADURÍA (colección `movimientos`: ingresos y egresos).
+// Es el ÚNICO lugar para cambiarlo. Hoy solo admin: Juan todavía tiene que confirmar si
+// "organizadores" incluye al coordinador (antes decidió que el coordinador NO ve plata).
+export const ROLES_CONTADURIA = ["admin"];
 
 export const COLECCIONES = {
   // Estado del paseo por perro, día y turno. id = AAAA-MM-DD_PJ-001_manana
@@ -48,6 +52,9 @@ export const COLECCIONES = {
   fotos: { leer: EQUIPO, escribir: EQUIPO, maxBytes: 48 * 1024 },
   // Registro de apoyo de pagos: SOLO admin (la fuente oficial es el Libro contable).
   pagos: { leer: ["admin"], escribir: ["admin"] },
+  // Contaduría: ingresos y egresos (registro de apoyo; la fuente oficial es el Libro contable).
+  // Los campos y sus valores válidos los controla api/registros.js.
+  movimientos: { leer: ROLES_CONTADURIA, escribir: ROLES_CONTADURIA, porFecha: true },
 };
 
 export function coleccion(nombre) {

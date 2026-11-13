@@ -4,6 +4,8 @@
 // Datos fijos: src/data/realData.js (BASE RUTAS, precios). Datos del día: servidor compartido
 // (src/api/client.js): paseos, incidentes, checklists, pedidos, rutas, plantillas, avisos y fotos.
 // Solo admin: pagos (registro de apoyo, con su comprobante) y resumen de clientes. Usuarios: /api/usuarios.
+// Contaduría (pestaña Plata): colección "movimientos" (ingresos y egresos). Quién la ve lo decide
+// ROLES_CONTADURIA en api/_lib/permisos.js. Estilos propios en src/styles/contaduria.css (conta-).
 // Archivos recibidos (carnets, comprobantes, documentos): colección "archivos" (admin y coordinador;
 // los comprobantes de pago los abre solo el admin). Se suben con archivos.subir: sin señal no se encolan.
 // Fotos de los perros: colección "fotos" (fotosPerros.de / fotosPerros.subir), necesitan señal.
@@ -42,12 +44,22 @@ const SHIFT_AFTERNOON = SHIFTS.tarde.label;
 const LIVE_COLS = ["paseos", "incidentes", "checklists", "pedidos", "rutas", "plantillas", "avisos", "fotos"];
 // Solo admin: registro de apoyo de pagos y clientes (para el resumen por barrio, sin teléfonos),
 // y los archivos recibidos (el admin es el único que abre los comprobantes de pago).
-const ADMIN_COLS = ["pagos", "clientes", "archivos"];
+const ADMIN_COLS = ["pagos", "movimientos", "clientes", "archivos"];
 // Un perro está atrasado si pasaron más de estos minutos desde la hora prevista y no se retiró.
 const LATE_MINUTES = 10;
 const PAGO_MEDIOS = ["Efectivo", "Transferencia", "Naranja X"];
 const PAGO_CONCEPTOS = ["Plan 1", "Plan 2", "Plan 3", "Paseo suelto"];
 const LIBRO = "Libro contable del Sistema de Gestión";
+// Contaduría. Las mismas categorías que valida el servidor (CATEGORIAS_MOVIMIENTO en api/registros.js).
+const CONTA_CATEGORIAS = {
+  ingreso: ["Planes", "Tienda", "Otros"],
+  egreso: ["Pagos al equipo", "Insumos", "Transporte", "Alimento/tienda", "Impuestos y servicios", "Otros"],
+};
+const CONTA_TIPOS = { ingreso: "Ingreso", egreso: "Egreso" };
+// Los pagos de la lista "Pagos de clientes" entran al resumen como ingresos, con este rótulo.
+const CONTA_CAT_PAGOS = "Pagos de clientes";
+const CONTA_APOYO = "Registro de apoyo. La fuente oficial sigue siendo el Libro contable.";
+const CONTA_SHORT = 8;
 // Tipos de archivo del servidor (api/_lib/archivos.js), con su etiqueta y color.
 const ARCHIVO_TIPOS = {
   "carnet de vacunas": { label: "Carnet", tone: "green" },
@@ -103,7 +115,7 @@ let undoTimer = null;
 const ui = {
   tab: readTab().tab,
   mas: readTab().mas,
-  sheet: null, // "pago" | "crear"
+  sheet: null, // "pago" | "crear" | "mov"
   sheetReturn: "", // selector del botón que abrió la hoja (para volver el foco)
   sheetEnter: false,
   users: null, // lista de /api/usuarios (sin PIN)
@@ -124,14 +136,18 @@ const ui = {
   fotosFiltro: "faltan",
   fotosSubiendo: new Set(),
   savingPago: false,
+  savingMov: false,
+  contaTodos: false, // lista larga de movimientos
+  contaBorrar: null, // id del movimiento esperando confirmación para borrar
   lateSignature: "",
   navBadges: {},
   undo: null, // { text, run }
-  msgs: { users: null, live: null, pagos: null, archivos: null, fotos: null },
+  msgs: { users: null, live: null, pagos: null, conta: null, archivos: null, fotos: null },
 };
 
 // Lo que se va escribiendo en los formularios, para no perderlo si la página se vuelve a dibujar.
 const emptyPago = () => ({ fecha: hoyAR(), concepto: "", monto: "", medioSel: "", medioOtro: "", pasadoAlLibro: false });
+const emptyMov = (tipo = "ingreso") => ({ tipo, fecha: hoyAR(), categoria: "", concepto: "", monto: "", medioSel: "", medioOtro: "", nota: "", pasadoAlLibro: false });
 const emptyCrear = () => ({ nombre: "", usuario: "", usuarioTocado: false, rol: "paseador", pin: "" });
 // pagoArchivo: el comprobante elegido (File) se guarda acá porque el <input type="file"> se vacía al
 // redibujar. pagoSubido: si el comprobante ya subió pero el pago no se pudo guardar, no se sube dos veces.
@@ -141,6 +157,7 @@ const drafts = {
   pago: emptyPago(),
   pagoArchivo: null,
   pagoSubido: null,
+  mov: emptyMov(),
 };
 
 /* ---------- Íconos que no están en el set compartido ---------- */
@@ -153,6 +170,9 @@ const LOCAL_ICONS = {
   key: `<circle cx="8" cy="15" r="4" /><path d="m11 12 9-9" /><path d="m16 7 3 3" />`,
   undo: `<path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" />`,
   off: `<circle cx="12" cy="12" r="9" /><path d="m6 6 12 12" />`,
+  minus: `<path d="M5 12h14" />`,
+  download: `<path d="M12 4v11" /><path d="m7 11 5 5 5-5" /><path d="M5 20h14" />`,
+  trash: `<path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /><path d="M10 11v5" /><path d="M14 11v5" />`,
   wifiOff: `<path d="M3 3l18 18" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M5 12.5a10 10 0 0 1 4.2-2.4" /><path d="M14.8 10.1A10 10 0 0 1 19 12.5" /><path d="M2 8.8a15 15 0 0 1 4.3-2.6" /><path d="M10.7 5.1A15 15 0 0 1 22 8.8" /><path d="M12 20h.01" />`,
 };
 
@@ -551,8 +571,10 @@ async function refreshAdminData() {
     .map((r) => r.reason?.message || "No se pudieron traer los datos."))].join(" ");
   const before = ui.adminError;
   const pagosError = errorsOf(["pagos", "clientes"]);
+  const contaError = errorsOf(["movimientos"]);
   const archivosError = errorsOf(["archivos"]);
-  ui.adminError = [pagosError, archivosError].filter(Boolean).join(" ");
+  ui.adminError = [pagosError, contaError, archivosError].filter(Boolean).join(" ");
+  if (contaError) setMsg("conta", `No se pudieron traer los movimientos: ${contaError}`, true);
   if (pagosError) setMsg("pagos", `No se pudieron traer pagos o clientes: ${pagosError}`, true);
   if (archivosError) setMsg("archivos", `No se pudo traer la lista: ${archivosError}`, true);
   if (before !== ui.adminError) rerender();
@@ -1094,18 +1116,20 @@ export function adminDashboard() {
   const live = liveData();
   ui.lateSignature = lateSignature(live);
   const pagos = pagosData();
+  const conta = contaData(pagos);
+  const sinLibro = pagos.faltan.length + conta.faltanTodos;
   ui.navBadges = {
     inicio: live.incidentes.length + live.lateNow.length
       ? { count: live.incidentes.length + live.lateNow.length, tone: "red", label: `${plural(live.incidentes.length, "incidente", "incidentes")} y ${plural(live.lateNow.length, "atrasado", "atrasados")}` }
       : null,
-    plata: pagos.faltan.length ? { count: pagos.faltan.length, tone: "yellow", label: `${plural(pagos.faltan.length, "pago sin pasar", "pagos sin pasar")} al Libro` } : null,
+    plata: sinLibro ? { count: sinLibro, tone: "yellow", label: `${plural(sinLibro, "registro sin pasar", "registros sin pasar")} al Libro` } : null,
   };
   // Los mensajes nuevos se escriben un instante después, para que el lector de pantalla los lea.
   setTimeout(flushMsgs, 60);
 
   let page;
   if (ui.tab === "equipo") page = EquipoTab();
-  else if (ui.tab === "plata") page = PlataTab(pagos);
+  else if (ui.tab === "plata") page = PlataTab(pagos, conta);
   else if (ui.tab === "mas") page = MasTab();
   else page = InicioTab(live);
 
@@ -1114,6 +1138,7 @@ export function adminDashboard() {
       ${page}
     </main>
     ${ui.sheet === "pago" ? PagoSheet() : ""}
+    ${ui.sheet === "mov" ? MovSheet() : ""}
     ${ui.sheet === "crear" ? CrearSheet() : ""}
   `;
 }
@@ -1832,7 +1857,8 @@ function pagosData() {
   const all = registros.cached("pagos", liveOpts("pagos")).slice()
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(b.creadoEn || "").localeCompare(String(a.creadoEn || "")));
   const current = hoyAR().slice(0, 7);
-  const months = [...new Set([current, ...all.map((p) => String(p.fecha || "").slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m))])].sort().reverse();
+  const movs = registros.cached("movimientos", liveOpts("movimientos"));
+  const months = [...new Set([current, ...[...all, ...movs].map((p) => String(p.fecha || "").slice(0, 7)).filter((m) => /^\d{4}-\d{2}$/.test(m))])].sort().reverse();
   const mes = ui.pagosMes && (ui.pagosMes === "todos" || months.includes(ui.pagosMes)) ? ui.pagosMes : current;
   const filtered = mes === "todos" ? all : all.filter((p) => String(p.fecha || "").startsWith(mes));
   const faltan = all.filter((p) => !p.pasadoAlLibro);
@@ -1882,7 +1908,7 @@ function PagoRow(pago) {
   `;
 }
 
-function PlataTab(data) {
+function PlataTab(data, conta) {
   const mesText = data.mes === "todos" ? "Todos los meses" : monthLabel(data.mes);
   const shown = ui.pagosTodos ? data.filtered.slice(0, 60) : data.filtered.slice(0, PAGOS_SHORT);
   const chips = [...data.months.slice(0, 3), "todos"];
@@ -1892,7 +1918,13 @@ function PlataTab(data) {
       <h1 id="adm-title" tabindex="-1">Plata</h1>
       ${Help(`<p>Registro de apoyo para no olvidarte de nada. Fuente oficial: ${LIBRO}. Cada pago se pasa al Libro. Solo vos lo ves.</p>`, "Qué es Plata")}
     </div>
-    <section class="adm-card adm-money" aria-label="Resumen de ${esc(mesText)}">
+    <p class="conta-apoyo">${CONTA_APOYO}</p>
+    <div class="adm-seg conta-meses" role="group" aria-label="Mes">
+      ${chips.map((m) => `<button class="adm-seg-item ${m === data.mes ? "is-on" : ""}" type="button" data-adm-pagos-mes="${m}" aria-pressed="${m === data.mes}">${m === "todos" ? "Todos" : esc(monthLabel(m, true))}</button>`).join("")}
+    </div>
+    ${ContaBlock(conta, mesText)}
+    <h2 class="conta-h2" id="conta-pagos-titulo">Pagos de clientes</h2>
+    <section class="adm-card adm-money" aria-label="Pagos de clientes de ${esc(mesText)}">
       <p class="adm-money-label">${esc(mesText)}</p>
       <p class="adm-money-total">${esc(formatPeso(data.total))}</p>
       <span class="adm-chips">
@@ -1904,9 +1936,6 @@ function PlataTab(data) {
     </section>
     <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" id="adm-pago-abrir" type="button" data-adm-sheet="pago">${ico("plus", "adm-icon")} Cargar pago</button>
     ${ui.sheet === "pago" ? "" : MsgRegion("pagos")}
-    <div class="adm-seg" role="group" aria-label="Mes">
-      ${chips.map((m) => `<button class="adm-seg-item ${m === data.mes ? "is-on" : ""}" type="button" data-adm-pagos-mes="${m}" aria-pressed="${m === data.mes}">${m === "todos" ? "Todos" : esc(monthLabel(m, true))}</button>`).join("")}
-    </div>
     ${shown.length ? `
       <ul class="adm-pagos" aria-label="Pagos de ${esc(mesText)}">${shown.map(PagoRow).join("")}</ul>
       ${data.filtered.length > shown.length ? `<button class="adm-btn adm-btn--ghost adm-btn--block" type="button" data-adm-pagos-todos>Ver los ${data.filtered.length}</button>` : ""}
@@ -1914,6 +1943,228 @@ function PlataTab(data) {
     ${data.deOtros.length ? `<p class="adm-row-meta">${plural(data.deOtros.length, "pago lo cargó", "pagos los cargó")} otro rol antes del cambio de roles (el coordinador ya no ve plata).</p>` : ""}
     ${FinanceFold()}
   `;
+}
+
+/* ---------- Contaduría (movimientos: ingresos y egresos) ---------- */
+
+// Suma en centavos para no arrastrar errores de decimales.
+function sumaPesos(items) {
+  return items.reduce((sum, item) => sum + Math.round((Number(item.monto) || 0) * 100), 0) / 100;
+}
+
+// "−$4.500" con signo menos de verdad (el color solo no alcanza para leer el resultado).
+function pesoConSigno(value) {
+  return value < 0 ? `−${formatPeso(-value)}` : formatPeso(value);
+}
+
+function agrupar(items, clave) {
+  const grupos = new Map();
+  items.forEach((item) => {
+    const key = clave(item);
+    grupos.set(key, [...(grupos.get(key) || []), item]);
+  });
+  return [...grupos.entries()].map(([nombre, lista]) => ({ nombre, total: sumaPesos(lista), cantidad: lista.length }))
+    .sort((a, b) => b.total - a.total);
+}
+
+// Resumen del mes elegido. Los pagos de "Pagos de clientes" cuentan como ingresos (no se copian
+// ni se migran: se leen de su colección y se suman acá).
+function contaData(pagos) {
+  const movs = registros.cached("movimientos", liveOpts("movimientos"))
+    .filter((m) => CONTA_TIPOS[m.tipo])
+    .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(b.creadoEn || "").localeCompare(String(a.creadoEn || "")));
+  const mes = pagos.mes;
+  const delMes = mes === "todos" ? movs : movs.filter((m) => String(m.fecha || "").startsWith(mes));
+  const comoIngreso = pagos.filtered.map((p) => ({
+    id: p.id, fecha: p.fecha, tipo: "ingreso", categoria: CONTA_CAT_PAGOS, concepto: p.concepto || "", monto: Number(p.monto) || 0,
+    medio: p.medio || "", nota: "", pasadoAlLibro: p.pasadoAlLibro === true, creadoPor: p.creadoPor || "", origen: "Pago de cliente",
+  }));
+  const filas = [...delMes.map((m) => ({ ...m, origen: "Movimiento" })), ...comoIngreso]
+    .sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+  const ingresosFilas = filas.filter((f) => f.tipo === "ingreso");
+  const egresosFilas = filas.filter((f) => f.tipo === "egreso");
+  const ingresos = sumaPesos(ingresosFilas);
+  const egresos = sumaPesos(egresosFilas);
+  const medios = agrupar(filas, (f) => f.medio || "Sin medio").map((grupo) => {
+    const lista = filas.filter((f) => (f.medio || "Sin medio") === grupo.nombre);
+    return { nombre: grupo.nombre, ingresos: sumaPesos(lista.filter((f) => f.tipo === "ingreso")), egresos: sumaPesos(lista.filter((f) => f.tipo === "egreso")) };
+  });
+  return {
+    mes,
+    movs: delMes,
+    filas,
+    ingresos,
+    egresos,
+    resultado: Math.round((ingresos - egresos) * 100) / 100,
+    catIngresos: agrupar(ingresosFilas, (f) => f.categoria || "Otros"),
+    catEgresos: agrupar(egresosFilas, (f) => f.categoria || "Otros"),
+    medios,
+    pagosTotal: sumaPesos(comoIngreso),
+    pagosCantidad: comoIngreso.length,
+    faltanMes: filas.filter((f) => !f.pasadoAlLibro).length,
+    faltanTodos: movs.filter((m) => !m.pasadoAlLibro).length,
+  };
+}
+
+function ContaDesglose(titulo, grupos) {
+  if (!grupos.length) return "";
+  return `
+    <div class="conta-desglose">
+      <h3 class="conta-h3">${esc(titulo)}</h3>
+      <ul class="conta-lineas">
+        ${grupos.map((g) => `<li class="conta-linea"><span>${esc(g.nombre)}</span><strong>${esc(formatPeso(g.total))}</strong></li>`).join("")}
+      </ul>
+    </div>
+  `;
+}
+
+function MovRow(mov) {
+  const ingreso = mov.tipo === "ingreso";
+  const confirmando = ui.contaBorrar === mov.id;
+  const meta = [ymdToAR(mov.fecha) || PENDIENTE, mov.categoria, mov.medio].filter(Boolean).join(" · ");
+  return `
+    <li class="conta-mov conta-mov--${ingreso ? "ingreso" : "egreso"} ${mov.pasadoAlLibro ? "" : "is-missing"}">
+      <div class="conta-mov-top">
+        <div class="conta-mov-main">
+          <strong class="conta-mov-concepto">${esc(mov.concepto || "Sin concepto")}</strong>
+          <span class="conta-mov-meta">${esc(meta)}</span>
+        </div>
+        <strong class="conta-mov-monto"><span class="adm-sr-only">${ingreso ? "Ingreso" : "Egreso"}: </span><span aria-hidden="true">${ingreso ? "+" : "−"} </span>${esc(formatPeso(Number(mov.monto) || 0))}</strong>
+      </div>
+      ${mov.nota ? `<p class="conta-mov-nota">${esc(mov.nota)}</p>` : ""}
+      ${mov.pendiente ? `<span class="adm-chips"><span class="adm-chip adm-chip--blue">Sin enviar</span></span>` : ""}
+      ${confirmando ? `
+        <div class="conta-confirm" role="group" aria-label="Confirmar borrado">
+          <p class="conta-confirm-text">¿Borrás este movimiento? No se puede deshacer.</p>
+          <div class="conta-acciones">
+            <button class="adm-btn adm-btn--soft" type="button" data-conta-borrar-no id="conta-borrar-no">No</button>
+            <button class="adm-btn conta-btn-borrar" type="button" data-conta-borrar-si="${esc(mov.id)}">${ico("trash")} Sí, borrar</button>
+          </div>
+        </div>
+      ` : `
+        <div class="conta-acciones">
+          <button class="adm-btn ${mov.pasadoAlLibro ? "adm-btn--done" : "adm-btn--soft"} adm-btn--sm" type="button" data-conta-libro="${esc(mov.id)}" aria-pressed="${mov.pasadoAlLibro ? "true" : "false"}">${ico("check")} En el Libro</button>
+          ${mov.pendiente ? "" : `<button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-conta-borrar="${esc(mov.id)}" aria-label="Borrar ${esc(mov.concepto || "este movimiento")}">${ico("trash")} Borrar</button>`}
+        </div>
+      `}
+    </li>
+  `;
+}
+
+function ContaBlock(conta, mesText) {
+  const shown = ui.contaTodos ? conta.movs.slice(0, 200) : conta.movs.slice(0, CONTA_SHORT);
+  const signo = conta.resultado < 0 ? "is-neg" : conta.resultado > 0 ? "is-pos" : "";
+  return `
+    <section class="conta-resumen" aria-label="Contaduría de ${esc(mesText)}">
+      <p class="conta-mes">${esc(mesText)}</p>
+      <div class="conta-totales">
+        <p class="conta-total conta-total--ingreso"><span class="conta-total-label">Ingresos</span><strong class="conta-total-num">${esc(formatPeso(conta.ingresos))}</strong></p>
+        <p class="conta-total conta-total--egreso"><span class="conta-total-label">Egresos</span><strong class="conta-total-num">${esc(formatPeso(conta.egresos))}</strong></p>
+      </div>
+      <p class="conta-resultado ${signo}"><span class="conta-total-label">Resultado</span><strong class="conta-resultado-num">${esc(pesoConSigno(conta.resultado))}</strong></p>
+      <span class="adm-chips">
+        ${conta.faltanMes ? `<span class="adm-chip adm-chip--yellow">${plural(conta.faltanMes, "falta", "faltan")} pasar al Libro</span>` : conta.filas.length ? `<span class="adm-chip adm-chip--green">Todo en el Libro</span>` : `<span class="adm-chip adm-chip--gray">Sin movimientos</span>`}
+      </span>
+      <p class="conta-aclara">Ingresos incluye “Pagos de clientes”${conta.pagosCantidad ? ` (${esc(formatPeso(conta.pagosTotal))})` : ""}. No se cuentan dos veces.</p>
+    </section>
+    <div class="conta-botones">
+      <button class="adm-btn adm-btn--primary adm-btn--big conta-btn-mas" id="conta-abrir-ingreso" type="button" data-adm-sheet="mov" data-conta-tipo="ingreso">${ico("plus", "adm-icon")} Ingreso</button>
+      <button class="adm-btn adm-btn--big conta-btn-mas conta-btn-egreso" id="conta-abrir-egreso" type="button" data-adm-sheet="mov" data-conta-tipo="egreso">${ico("minus", "adm-icon")} Egreso</button>
+    </div>
+    ${ui.sheet === "mov" ? "" : MsgRegion("conta")}
+    ${conta.filas.length ? `
+      <section class="conta-card" aria-label="Desglose de ${esc(mesText)}">
+        ${ContaDesglose("Ingresos por categoría", conta.catIngresos)}
+        ${ContaDesglose("Egresos por categoría", conta.catEgresos)}
+        <div class="conta-desglose">
+          <h3 class="conta-h3">Por medio de pago</h3>
+          <ul class="conta-lineas">
+            ${conta.medios.map((m) => `<li class="conta-linea conta-linea--medio"><span>${esc(m.nombre)}</span><span class="conta-linea-nums">${m.ingresos ? `<strong>+ ${esc(formatPeso(m.ingresos))}</strong>` : ""}${m.egresos ? `<strong>− ${esc(formatPeso(m.egresos))}</strong>` : ""}</span></li>`).join("")}
+          </ul>
+        </div>
+      </section>
+    ` : ""}
+    <h2 class="conta-h2" id="conta-movs-titulo">Movimientos</h2>
+    ${shown.length ? `
+      <ul class="conta-movs" aria-labelledby="conta-movs-titulo">${shown.map(MovRow).join("")}</ul>
+      ${conta.movs.length > shown.length ? `<button class="adm-btn adm-btn--ghost adm-btn--block" type="button" data-conta-todos>Ver los ${conta.movs.length}</button>` : ""}
+    ` : `<p class="adm-empty">Sin movimientos en ${esc(mesText.toLowerCase())}.</p>`}
+    ${conta.filas.length ? `<button class="adm-btn adm-btn--soft adm-btn--block conta-btn-csv" id="conta-csv" type="button" data-conta-csv>${ico("download")} Descargar CSV</button>` : ""}
+  `;
+}
+
+function MovSheet() {
+  const d = drafts.mov;
+  const tipo = CONTA_TIPOS[d.tipo] ? d.tipo : "ingreso";
+  const hoy = hoyAR();
+  const ayer = ayerAR();
+  const monto = parseMonto(d.monto);
+  const medioOtro = d.medioSel === "Otro";
+  return Sheet("mov", tipo === "ingreso" ? "Cargar ingreso" : "Cargar egreso", `
+    <form class="adm-sheet-form conta-form" id="conta-form" data-adm-form="mov" novalidate aria-labelledby="adm-sheet-title">
+      <label class="adm-field" for="conta-monto">
+        <span>Monto</span>
+        <span class="adm-money-input">
+          <span aria-hidden="true">$</span>
+          <input class="adm-input adm-input--money" id="conta-monto" inputmode="decimal" autocomplete="off" maxlength="15" required placeholder="0" value="${esc(d.monto)}" data-adm-draft="mov" data-adm-key="monto" aria-describedby="conta-monto-preview" />
+        </span>
+        <span class="adm-row-meta" id="conta-monto-preview" data-conta-monto-preview>${Number.isFinite(monto) && monto > 0 ? esc(formatPeso(monto)) : "Solo números"}</span>
+      </label>
+      <fieldset class="adm-field">
+        <legend>Categoría</legend>
+        <div class="adm-seg adm-seg--wrap">
+          ${CONTA_CATEGORIAS[tipo].map((cat, i) => `
+            <label class="adm-seg-item ${d.categoria === cat ? "is-on" : ""}">
+              <input type="radio" name="categoria" value="${esc(cat)}" ${i === 0 ? 'id="conta-categoria"' : ""} ${d.categoria === cat ? "checked" : ""} data-adm-draft="mov" data-adm-key="categoria" />
+              ${esc(cat)}
+            </label>
+          `).join("")}
+        </div>
+      </fieldset>
+      <label class="adm-field" for="conta-concepto">
+        <span>Concepto</span>
+        <input class="adm-input" id="conta-concepto" autocomplete="off" maxlength="120" required placeholder="¿Qué fue?" value="${esc(d.concepto)}" data-adm-draft="mov" data-adm-key="concepto" />
+      </label>
+      <fieldset class="adm-field">
+        <legend>Medio</legend>
+        <div class="adm-seg adm-seg--wrap">
+          ${[...PAGO_MEDIOS, "Otro"].map((medio) => `
+            <label class="adm-seg-item ${d.medioSel === medio ? "is-on" : ""}">
+              <input type="radio" name="medio" value="${esc(medio)}" ${d.medioSel === medio ? "checked" : ""} data-adm-draft="mov" data-adm-key="medioSel" />
+              ${esc(medio)}
+            </label>
+          `).join("")}
+        </div>
+        ${medioOtro ? `<label class="adm-sr-only" for="conta-medio-otro">Otro medio</label><input class="adm-input" id="conta-medio-otro" autocomplete="off" maxlength="40" placeholder="¿Cuál?" value="${esc(d.medioOtro)}" data-adm-draft="mov" data-adm-key="medioOtro" />` : ""}
+      </fieldset>
+      <fieldset class="adm-field">
+        <legend>Fecha</legend>
+        <div class="adm-seg adm-seg--wrap">
+          <button class="adm-seg-item ${d.fecha === hoy ? "is-on" : ""}" type="button" data-conta-fecha="${hoy}" aria-pressed="${d.fecha === hoy}">Hoy</button>
+          <button class="adm-seg-item ${d.fecha === ayer ? "is-on" : ""}" type="button" data-conta-fecha="${ayer}" aria-pressed="${d.fecha === ayer}">Ayer</button>
+          <label class="adm-seg-item adm-date-pick ${d.fecha !== hoy && d.fecha !== ayer ? "is-on" : ""}" for="conta-fecha">
+            ${ico("calendarCheck")} <span>${d.fecha !== hoy && d.fecha !== ayer && d.fecha ? esc(ymdToAR(d.fecha)) : "Otra"}</span>
+            <input class="adm-date-native" id="conta-fecha" type="date" required value="${esc(d.fecha)}" data-adm-draft="mov" data-adm-key="fecha" aria-label="Otra fecha. Elegida: ${esc(ymdToAR(d.fecha) || "ninguna")}" />
+          </label>
+        </div>
+      </fieldset>
+      <label class="adm-field" for="conta-nota">
+        <span>Nota (opcional)</span>
+        <input class="adm-input" id="conta-nota" autocomplete="off" maxlength="300" value="${esc(d.nota)}" data-adm-draft="mov" data-adm-key="nota" />
+      </label>
+      <label class="adm-switch" for="conta-libro">
+        <input id="conta-libro" type="checkbox" ${d.pasadoAlLibro ? "checked" : ""} data-adm-draft="mov" data-adm-key="pasadoAlLibro" />
+        <span class="adm-switch-ui" aria-hidden="true"></span>
+        <span>Ya está en el Libro</span>
+      </label>
+      ${MsgRegion("conta")}
+      <div class="adm-sheet-foot">
+        <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" id="conta-guardar" type="submit" aria-disabled="${ui.savingMov}">
+          ${ico("check")} ${ui.savingMov ? "Guardando…" : tipo === "ingreso" ? "Guardar ingreso" : "Guardar egreso"}
+        </button>
+      </div>
+    </form>
+  `);
 }
 
 function FinanceFold() {
@@ -2515,6 +2766,9 @@ function resetSession() {
   drafts.pago = emptyPago();
   drafts.pagoArchivo = null;
   drafts.pagoSubido = null;
+  drafts.mov = emptyMov();
+  ui.contaTodos = false;
+  ui.contaBorrar = null;
   drafts.crear = emptyCrear();
 }
 
@@ -2543,7 +2797,14 @@ function setBusy(form, busy) {
 
 function openSheet(kind, opener) {
   ui.sheet = kind;
-  ui.sheetReturn = opener?.id ? `#${CSS.escape(opener.id)}` : kind === "pago" ? "#adm-pago-abrir" : "#adm-crear-abrir";
+  ui.sheetReturn = opener?.id ? `#${CSS.escape(opener.id)}` : kind === "pago" ? "#adm-pago-abrir" : kind === "mov" ? "#conta-abrir-ingreso" : "#adm-crear-abrir";
+  if (kind === "mov") {
+    // Cambiar de ingreso a egreso (o al revés) arranca un borrador nuevo: las categorías son otras.
+    const tipo = CONTA_TIPOS[opener?.dataset?.contaTipo] ? opener.dataset.contaTipo : drafts.mov.tipo;
+    if (drafts.mov.tipo !== tipo) drafts.mov = emptyMov(tipo);
+    ui.contaBorrar = null;
+    setMsg("conta", "");
+  }
   if (kind === "crear") {
     ui.credential = null;
     if (!drafts.crear.pin) drafts.crear.pin = randomPin();
@@ -2554,7 +2815,7 @@ function openSheet(kind, opener) {
   ui.sheetEnter = true;
   render();
   ui.sheetEnter = false;
-  focusLater(kind === "pago" ? "#adm-pago-monto" : "#adm-crear-nombre");
+  focusLater(kind === "pago" ? "#adm-pago-monto" : kind === "mov" ? "#conta-monto" : "#adm-crear-nombre");
 }
 
 function closeSheet() {
@@ -2573,6 +2834,11 @@ async function handleUsersSubmit(event) {
 
   if (tipo === "pago") {
     await savePago();
+    return;
+  }
+
+  if (tipo === "mov") {
+    await saveMov();
     return;
   }
 
@@ -2706,6 +2972,153 @@ async function savePago() {
     ui.savingPago = false;
     rerender();
   }
+}
+
+async function saveMov() {
+  const d = drafts.mov;
+  const tipo = CONTA_TIPOS[d.tipo] ? d.tipo : "";
+  const concepto = d.concepto.trim();
+  const medio = (d.medioSel === "Otro" ? d.medioOtro : d.medioSel || "").trim();
+  const monto = parseMonto(d.monto);
+  let problem = "";
+  let field = "";
+  if (!tipo) problem = "Cerrá y tocá “+ Ingreso” o “+ Egreso”.";
+  else if (!Number.isFinite(monto) || monto <= 0) [problem, field] = ["Escribí el monto (solo números).", "#conta-monto"];
+  else if (!CONTA_CATEGORIAS[tipo].includes(d.categoria)) [problem, field] = ["Elegí la categoría.", "#conta-categoria"];
+  else if (concepto.length < 2) [problem, field] = ["Escribí el concepto.", "#conta-concepto"];
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(d.fecha)) [problem, field] = ["Elegí la fecha.", "#conta-fecha"];
+  if (problem) {
+    setMsg("conta", problem, true);
+    rerender();
+    if (field) focusLater(field);
+    return;
+  }
+  ui.busy = true;
+  ui.savingMov = true;
+  rerender();
+  try {
+    const saved = await registros.save("movimientos", {
+      fecha: d.fecha,
+      tipo,
+      categoria: d.categoria,
+      concepto,
+      monto: Math.round(monto * 100) / 100,
+      medio,
+      nota: d.nota.trim(),
+      pasadoAlLibro: d.pasadoAlLibro === true,
+    });
+    drafts.mov = emptyMov(tipo);
+    ui.pagosMes = d.fecha.slice(0, 7);
+    ui.sheet = null;
+    setMsg("conta", saved.pendiente
+      ? "Se enviará cuando haya señal."
+      : `Listo: ${CONTA_TIPOS[tipo].toLowerCase()} de ${formatPeso(monto)} guardado${d.pasadoAlLibro ? "" : ". Falta pasarlo al Libro"}.`);
+    focusLater(tipo === "ingreso" ? "#conta-abrir-ingreso" : "#conta-abrir-egreso");
+  } catch (error) {
+    setMsg("conta", error.message || "No se pudo guardar el movimiento.", true);
+  } finally {
+    ui.busy = false;
+    ui.savingMov = false;
+    rerender();
+  }
+}
+
+async function setMovLibro(id, value, withUndo = true) {
+  const mov = registros.cached("movimientos", liveOpts("movimientos")).find((item) => item.id === id);
+  if (!mov || ui.busy) return;
+  ui.busy = true;
+  try {
+    const saved = await registros.save("movimientos", { id, fecha: mov.fecha, pasadoAlLibro: value });
+    if (saved.pendiente) setMsg("conta", "Se enviará cuando haya señal.");
+    if (withUndo) {
+      offerUndo(value ? "Marcado: en el Libro." : "Desmarcado del Libro.", () => setMovLibro(id, !value, false));
+    }
+  } catch (error) {
+    setMsg("conta", error.message || "No se pudo cambiar la marca.", true);
+  } finally {
+    ui.busy = false;
+    rerender();
+    focusLater(`[data-conta-libro="${CSS.escape(id)}"]`);
+  }
+}
+
+async function borrarMov(id) {
+  if (ui.busy) return;
+  if (isOffline()) {
+    setMsg("conta", "Sin señal no se puede borrar. Probá cuando vuelva.", true);
+    rerender();
+    return;
+  }
+  ui.busy = true;
+  try {
+    await registros.remove("movimientos", id);
+    ui.contaBorrar = null;
+    setMsg("conta", "Movimiento borrado.");
+  } catch (error) {
+    setMsg("conta", error.message || "No se pudo borrar el movimiento.", true);
+  } finally {
+    ui.busy = false;
+    rerender();
+    focusLater("#conta-abrir-ingreso");
+  }
+}
+
+// Celda de CSV: entre comillas, y sin dejar que una planilla la tome como fórmula.
+function csvCelda(value) {
+  let text = String(value ?? "").replace(/\r?\n/g, " ");
+  if (/^[=+\-@\t]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+// CSV del mes que se está mirando, armado en el navegador (no pasa por el servidor).
+// Punto y coma y coma decimal: así lo abre bien una planilla en español.
+function contaCsv(conta) {
+  const quien = (usuario) => ui.users?.find((user) => user.usuario === usuario)?.nombre || usuario || "";
+  const head = ["Fecha", "Tipo", "Categoría", "Concepto", "Monto", "Medio", "Nota", "En el Libro", "Origen", "Cargado por"];
+  const rows = conta.filas.map((f) => [
+    ymdToAR(f.fecha),
+    CONTA_TIPOS[f.tipo] || "",
+    f.categoria || "",
+    f.concepto || "",
+    String(Number(f.monto) || 0).replace(".", ","),
+    f.medio || "",
+    f.nota || "",
+    f.pasadoAlLibro ? "Sí" : "No",
+    f.origen,
+    quien(f.creadoPor),
+  ]);
+  const num = (value) => String(value).replace(".", ",");
+  const pie = [
+    ["", "", "", "Ingresos", num(conta.ingresos)],
+    ["", "", "", "Egresos", num(conta.egresos)],
+    ["", "", "", "Resultado", num(conta.resultado)],
+  ];
+  // El resultado negativo es un número, no una fórmula: esas celdas van sin el apóstrofo.
+  const linea = (cells, crudo = false) => cells.map((cell, i) => (crudo && i === 4 ? `"${cell}"` : csvCelda(cell))).join(";");
+  return `﻿${[linea(head), ...rows.map((row) => linea(row)), ...pie.map((row) => linea(row, true))].join("\r\n")}\r\n`;
+}
+
+function descargarContaCsv() {
+  const conta = contaData(pagosData());
+  if (!conta.filas.length) {
+    setMsg("conta", "No hay nada para descargar en este mes.", true);
+    rerender();
+    return;
+  }
+  try {
+    const url = URL.createObjectURL(new Blob([contaCsv(conta)], { type: "text/csv;charset=utf-8" }));
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = `paseos-juan-contaduria-${conta.mes}.csv`;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30 * 1000);
+    setMsg("conta", `CSV descargado: ${plural(conta.filas.length, "fila", "filas")}. ${CONTA_APOYO}`);
+  } catch {
+    setMsg("conta", "No se pudo armar el CSV en este navegador.", true);
+  }
+  rerender();
 }
 
 // Comprobante elegido para el pago nuevo: se revisa el tipo enseguida y se guarda en memoria.
@@ -3012,6 +3425,15 @@ function handleDraftInput(event) {
     const monto = parseMonto(value);
     if (preview) preview.textContent = Number.isFinite(monto) && monto > 0 ? formatPeso(monto) : "Solo números";
   }
+  if (form === "mov" && key === "monto") {
+    const preview = document.querySelector("[data-conta-monto-preview]");
+    const monto = parseMonto(value);
+    if (preview) preview.textContent = Number.isFinite(monto) && monto > 0 ? formatPeso(monto) : "Solo números";
+  }
+  if (form === "mov" && (key === "medioSel" || key === "categoria" || (key === "fecha" && event.type === "change"))) {
+    rerender();
+    if (key === "medioSel" && value === "Otro") focusLater("#conta-medio-otro");
+  }
   // Elegir un medio, la fecha o el concepto cambia qué botón queda marcado: se redibuja.
   if (form === "pago" && (key === "medioSel" || (key === "fecha" && event.type === "change") || (key === "concepto" && event.type === "change"))) {
     rerender();
@@ -3159,7 +3581,57 @@ function handleAdminActionClick(event) {
     ui.pagosMes = mes.dataset.admPagosMes;
     ui.pagosTodos = false;
     rerender();
-    announce(`Pagos de ${ui.pagosMes === "todos" ? "todos los meses" : monthLabel(ui.pagosMes).toLowerCase()}.`);
+    ui.contaTodos = false;
+    ui.contaBorrar = null;
+    announce(`Plata de ${ui.pagosMes === "todos" ? "todos los meses" : monthLabel(ui.pagosMes).toLowerCase()}.`);
+    return true;
+  }
+
+  const contaLibro = event.target.closest("[data-conta-libro]");
+  if (contaLibro) {
+    const mov = registros.cached("movimientos", liveOpts("movimientos")).find((item) => item.id === contaLibro.dataset.contaLibro);
+    if (mov) setMovLibro(mov.id, !mov.pasadoAlLibro);
+    return true;
+  }
+
+  const contaBorrar = event.target.closest("[data-conta-borrar]");
+  if (contaBorrar) {
+    ui.contaBorrar = contaBorrar.dataset.contaBorrar;
+    rerender();
+    focusLater("#conta-borrar-no");
+    return true;
+  }
+
+  if (event.target.closest("[data-conta-borrar-no]")) {
+    const id = ui.contaBorrar || "";
+    ui.contaBorrar = null;
+    rerender();
+    focusLater(`[data-conta-borrar="${CSS.escape(id)}"]`);
+    announce("Cancelado.");
+    return true;
+  }
+
+  const contaBorrarSi = event.target.closest("[data-conta-borrar-si]");
+  if (contaBorrarSi) {
+    borrarMov(contaBorrarSi.dataset.contaBorrarSi);
+    return true;
+  }
+
+  if (event.target.closest("[data-conta-todos]")) {
+    ui.contaTodos = true;
+    rerender();
+    return true;
+  }
+
+  if (event.target.closest("[data-conta-csv]")) {
+    descargarContaCsv();
+    return true;
+  }
+
+  const contaFecha = event.target.closest("[data-conta-fecha]");
+  if (contaFecha) {
+    drafts.mov.fecha = contaFecha.dataset.contaFecha;
+    rerender();
     return true;
   }
 

@@ -76,8 +76,19 @@ Checklist del ayudante antes de salir (corto): botiquín (agua oxigenada y gasa)
 | `archivos` | admin, coordinador (comprobantes: solo admin) | se crean solo con `archivos.subir()` / `POST /api/archivos` (equipo) o desde el formulario web | automático | `fecha`, `tipo` ("carnet de vacunas", "comprobante de pago", "documento", "foto"), `titulo`, `nombreArchivo`, `mime`, `tamano`, `perroId`, `perroNombre`, `clienteId`, `pedidoId`, `nota`, `ubicacion` ("drive", "vercel" o "local"), `driveUrl` (si está en Drive) |
 | `fotos` | equipo* | equipo* | id del perro (`PJ-001`) | `perroId`, `perroNombre`, `miniatura` (data URL JPG ~15 KB, cuadrada 240 px), `archivoId` (foto grande en `archivos`, tipo "foto") |
 | `pagos` | **solo admin** | **solo admin** | automático | `fecha`, `concepto`, `monto`, `medio`, `pasadoAlLibro` |
+| `movimientos` | **`ROLES_CONTADURIA`** (hoy: solo admin) | **`ROLES_CONTADURIA`** (hoy: solo admin) | automático | Contaduría (ingresos y egresos): `fecha` (AAAA-MM-DD), `tipo` ("ingreso" o "egreso"), `categoria` (ver abajo), `concepto` (2 a 120 letras), `monto` (número mayor que 0), `medio` (hasta 40 letras; los mismos de `pagos`: "Efectivo", "Transferencia", "Naranja X" u otro), `nota` (opcional, hasta 300), `pasadoAlLibro` (true/false) |
 
 \* equipo = admin, coordinador, supervisor, paseador y ayudante.
+
+### Contaduría (`movimientos`)
+
+- Es un **registro de apoyo**: la fuente oficial sigue siendo el Libro contable. Se ve en `/admin`, pestaña Plata.
+- **Quién la ve y la carga** se define en UN solo lugar: `ROLES_CONTADURIA` en `api/_lib/permisos.js` (hoy `["admin"]`). Pendiente de confirmar con Juan si "organizadores" incluye al coordinador (antes decidió que el coordinador no ve plata). El resto recibe 403 al leer, cargar, cambiar o borrar. Ojo: la pantalla hoy está solo en `/admin`; si se suma otro rol a la constante, además hay que darle una pantalla.
+- Categorías fijas (`CATEGORIAS_MOVIMIENTO` en `api/registros.js`, y la misma lista en `CONTA_CATEGORIAS` de `src/views/admin.js`): ingresos → "Planes", "Tienda", "Otros"; egresos → "Pagos al equipo", "Insumos", "Transporte", "Alimento/tienda", "Impuestos y servicios", "Otros".
+- El servidor valida el registro completo en cada guardado (también en cambios parciales como marcar `pasadoAlLibro`), descarta cualquier campo que no sea de la lista y responde 400 si el tipo, la categoría, el monto, la fecha o el largo de un texto no son válidos.
+- Los `pagos` **no se migran ni se copian**: el resumen del mes los suma como ingresos (rótulo "Pagos de clientes") leyéndolos de su colección. No cargues el mismo cobro en `pagos` y en `movimientos`, porque se contaría dos veces.
+- El CSV del mes se arma en el navegador (no hay endpoint): incluye movimientos y pagos del mes, separado por punto y coma.
+- Con la planilla conectada (Apps Script) los movimientos van a una hoja nueva "Movimientos" que se crea sola: no hace falta volver a pegar `Code.gs`.
 
 Todos los registros llevan, puestos por el servidor: `creadoPor`, `creadoPorNombre`, `creadoEn`, `actualizadoPor`, `actualizadoEn`. Usalos para mostrar "Cargado por Sebastián a las 10:15".
 

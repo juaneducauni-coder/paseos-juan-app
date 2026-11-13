@@ -163,8 +163,7 @@ function HeroSection() {
       <div class="organic-blob organic-blob--two" aria-hidden="true"></div>
       <div class="hero-copy reveal">
         <div class="hero-badges">
-          <span class="hero-season-tag">🌊 Edición Verano · Aire libre y frescura</span>
-          <span class="hero-free-tag">🎁 1.er paseo de adaptación sin cargo</span>
+          <span class="hero-free-tag">🎁 El primer paseo es gratis</span>
         </div>
         <p class="eyebrow">Disciplina. Libertad. Bienestar.</p>
         <h1 class="hero-title">
@@ -289,12 +288,6 @@ function AlliancesSection() {
       detail: "Alimento DogPro y CatPro, disponible en nuestra tienda.",
       status: "Alianza confirmada",
     },
-    {
-      name: "Más alianzas",
-      role: "Veterinarias, pet shops y profesionales",
-      detail: "Pendiente de confirmar.",
-      status: "Próximamente",
-    },
   ];
 
   return `
@@ -302,7 +295,7 @@ function AlliancesSection() {
       <div class="alliances-heading">
         <p class="eyebrow">Red de beneficios y comunidad</p>
         <h2 id="alianzas-titulo">Nuestras alianzas</h2>
-        <p>Sumamos marcas, veterinarias y profesionales de ${BUSINESS.zone} para darle más beneficios a tu perro.</p>
+        <p>Trabajamos con DogPro y CatPro. Si tenés una veterinaria, pet shop o marca en ${BUSINESS.zone}, sumate.</p>
       </div>
       <div class="alliances-grid">
         ${alliances.map((item) => `
@@ -610,7 +603,7 @@ function CTASection() {
       <span class="anchor-alias" id="contacto" aria-hidden="true"></span>
       <div class="evaluation-heading">
         <p class="eyebrow">Evaluación inicial</p>
-        <h2 id="evaluacion-titulo">Pedí tu evaluación en 1 minuto</h2>
+        <h2 id="evaluacion-titulo">Pedí tu 1.er paseo gratis en 1 minuto</h2>
         <p>Con 3 datos alcanza. Lo demás, si querés, lo sumás abajo o nos lo contás por WhatsApp.</p>
       </div>
       <form class="evaluation-form quick-form" data-evaluation-form novalidate>
