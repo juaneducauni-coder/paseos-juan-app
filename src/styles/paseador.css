@@ -181,8 +181,9 @@ body:has(.pw-shell) #a11y-root {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 48px;
+  min-height: 48px;
+  justify-content: center;
   text-decoration: none;
 }
 
@@ -915,6 +916,9 @@ button.pw-strip {
 
 .pw-link {
   max-width: 100%;
+  /* Zona de toque de 48 px sin agrandar la tarjeta. */
+  min-height: 48px;
+  margin-block: -9px;
   overflow: hidden;
   border: 0;
   padding: 0;
@@ -1298,6 +1302,13 @@ body:has(.pw-shell.has-sheet) {
   white-space: nowrap;
 }
 
+/* Quién marcó: el nombre entero (puede ir en dos líneas), no cortado con "…". */
+.pw-steps small.pw-step-who {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .pw-step-dot {
   display: grid;
   width: 26px;
@@ -1583,7 +1594,11 @@ body:has(.pw-shell.has-sheet) {
   text-transform: uppercase;
 }
 
+/* "Listo" queda siempre a mano, pegado arriba de la barra (el paseador tiene 9 ítems). */
 .pw-equip-foot {
+  position: sticky;
+  bottom: calc(var(--pw-bar-h) + var(--pw-safe) + 8px);
+  z-index: 5;
   display: grid;
   gap: 8px;
 }
@@ -1781,6 +1796,7 @@ body:has(.pw-shell.has-sheet) {
 .pw-field {
   display: grid;
   gap: 6px;
+  color: var(--pw-ink);
   font-weight: 800;
 }
 
@@ -1890,6 +1906,14 @@ body:has(.pw-shell.has-sheet) {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
+}
+
+/* En el celular, 7 botones en una fila quedan de 44 px: van en dos filas (4 + 3). */
+@media (max-width: 479px) {
+  .pw-days {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
 }
 
 .pw-chip--day {

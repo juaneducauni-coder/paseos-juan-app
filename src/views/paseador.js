@@ -1044,7 +1044,7 @@ function RouteScreen(ctx) {
   return `
     <section class="pw-screen" aria-labelledby="pw-tab-title">
       <div class="pw-title-row">
-        <h1 id="pw-tab-title" tabindex="-1">${sel.isToday ? "Hoy" : esc(sel.day)} · ${esc(sel.shift)}</h1>
+        <h1 id="pw-tab-title" tabindex="-1">${sel.isToday ? "Hoy" : esc(sel.day)}${view.shift || !sel.isToday ? ` · ${esc(sel.shift)}` : ""}</h1>
         ${sel.isToday && stops.length ? `<span class="pw-title-count" aria-label="${totals.delivered} de ${totals.toWalk} entregados">${ic("checkCircle", "pw-icon pw-icon--sm")}${totals.delivered}/${totals.toWalk}</span>` : ""}
       </div>
       ${sel.isToday && stops.length ? `<span class="pw-progress-bar" aria-hidden="true"><span style="width:${percent}%"></span></span>` : ""}
@@ -1152,7 +1152,7 @@ function AlertStrip({ sel, plan, stops }) {
     if (checked < total) {
       items.push(`
         <button class="pw-strip pw-strip--idle" type="button" data-pw-tab="equipo">
-          ${ic("clipboardCheck", "pw-icon")}<span><b>Equipo ${checked}/${total}</b> · revisalo antes de salir</span>${ic("arrowRight", "pw-icon pw-icon--sm")}
+          ${ic("clipboardCheck", "pw-icon")}<span><b>Equipo ${checked}/${total}</b></span>${ic("arrowRight", "pw-icon pw-icon--sm")}
         </button>
       `);
     }
@@ -1175,13 +1175,22 @@ function buildQueue(stops, progress, sel) {
     if (state.noSale) return done.push({ ...entry, kind: "nosale", time: stop.hora });
     if (state.step >= STEPS.length) return done.push({ ...entry, kind: "done", time: state.times[STEPS.length - 1] });
     if (state.step === 0) return active.push({ ...entry, kind: "pickup", time: stop.hora });
-    return active.push({ ...entry, kind: "deliver", time: stop.salida });
+    return active.push({ ...entry, kind: "deliver", time: deliveryTime(stop, state) });
   });
   if (sel.isToday) {
     const rank = (entry) => (entry.kind === "blocked" ? 2 : entry.kind === "deliver" ? 0 : 1);
     active.sort((a, b) => (a.kind === "blocked") - (b.kind === "blocked") || (minutesOf(a.time) ?? 9999) - (minutesOf(b.time) ?? 9999) || rank(a) - rank(b));
   }
   return { active, done };
+}
+
+// Entrega prevista = retiro real + minutos del paseo (la misma cuenta que usa el supervisor para
+// "Entrega demorada"). Así un perro que se retiró tarde no aparece "Entrega tarde" apenas se marca
+// "Retiré". Sin hora de retiro, la salida de la ruta.
+function deliveryTime(stop, state) {
+  const start = state.times[0] || state.times[1];
+  if (!start || !stop.minutos || minutesOf(start) === null) return stop.salida;
+  return sumarMinutos(start, stop.minutos);
 }
 
 function isLate(entry, sel) {
@@ -1395,7 +1404,7 @@ function DogSheet(ctx) {
         <div class="pw-sheet-id">
           <h2 id="pw-sheet-title" tabindex="-1">${esc(dog.name)}</h2>
           <p>${esc(dog.unknown ? "Sin ficha" : dog.size)} · ${minutes ? `${minutes} min` : "Duración sin dato"}</p>
-          <p class="pw-sheet-times">${ic("clock", "pw-icon pw-icon--sm")}${stop.hora ? `Retiro ${esc(stop.hora)}` : "Sin hora"}${stop.salida ? ` · vuelve ${esc(stop.salida)}` : ""}</p>
+          <p class="pw-sheet-times">${ic("clock", "pw-icon pw-icon--sm")}${stop.hora ? `Retiro ${esc(stop.hora)}` : "Sin hora"}${entry?.kind === "deliver" && entry.time ? ` · vuelve ${esc(entry.time)}` : stop.salida ? ` · vuelve ${esc(stop.salida)}` : ""}</p>
         </div>
         <button class="pw-sheet-close" type="button" data-pw-close-sheet aria-label="Cerrar">${ic("x", "pw-icon")}</button>
       </div>
@@ -1428,7 +1437,7 @@ function DogSheet(ctx) {
               return `
                 <li class="${index < step ? "is-done" : ""} ${index === step ? "is-next" : ""}">
                   <span class="pw-step-dot" aria-hidden="true">${index < step ? ic("check", "pw-icon pw-icon--sm") : index + 1}</span>
-                  <span>${item.label}<small>${index < step ? esc(state.times[index] || "sin hora") : "—"}${marker ? ` · ${esc(marker)}` : ""}</small></span>
+                  <span>${item.label}<small>${index < step ? esc(state.times[index] || "sin hora") : "—"}</small>${marker ? `<small class="pw-step-who">${esc(marker)}</small>` : ""}</span>
                   <span class="pw-sr">${index < step ? "hecho" : "pendiente"}</span>
                 </li>
               `;
@@ -1685,7 +1694,7 @@ function MoreScreen({ sel, plan, stops, names }) {
     ["Horario", hours],
     ["Supervisa", supervisor],
     ...people,
-    ["Fuente", plan.shown.map((route) => sourceText(route, names)).join(" ") || "—"],
+    ["Fuente", plan.shown.map((route) => sourceText(route, names)).join(" · ") || "—"],
   ];
 
   return `
@@ -1757,10 +1766,10 @@ function sourceText(route, names) {
   if (route.fuente === "dia") {
     const who = route.record.actualizadoPor ? whoName(route.record.actualizadoPor, names) : "";
     const time = route.record.actualizadoEn ? timeAR(route.record.actualizadoEn) : "";
-    return `${route.ruta}: cambio del día${who ? ` (${who}` : ""}${time ? `${who ? ", " : " ("}${time}` : ""}${who || time ? ")" : ""}.`;
+    return `${route.ruta}: cambio del día${[who, time].filter(Boolean).length ? ` · ${[who, time].filter(Boolean).join(" ")}` : ""}`;
   }
-  if (route.fuente === "plantilla") return `${route.ruta}: plantilla semanal.`;
-  return `${route.ruta}: planilla RPJ (sin confirmar).`;
+  if (route.fuente === "plantilla") return `${route.ruta}: plantilla semanal`;
+  return `${route.ruta}: planilla RPJ, sin confirmar`;
 }
 
 // ---------- mensaje de incidente ----------
@@ -2464,8 +2473,17 @@ function handlePaseadorClick(event) {
 }
 
 function handlePaseadorChange(event) {
-  // Las fotos se manejan en el propio input (ver handlePaseadorClick).
-  if (event.target.closest?.("[data-pw-photo]")) return true;
+  // Fotos: si el input ya tiene su propio oyente (se tocó antes), lo maneja él (ver
+  // handlePaseadorClick); si no (llegó el archivo sin clic previo), se sube desde acá.
+  const photo = event.target.closest?.("[data-pw-photo]");
+  if (photo) {
+    if (!photo.dataset.pwListening) {
+      const file = photo.files?.[0];
+      photo.value = "";
+      uploadPhoto(photo.dataset.pwPhoto, file);
+    }
+    return true;
+  }
   if (event.target.closest?.(".pw-shell [data-pw-field]")) {
     saveFieldFromInput(event.target);
     return true;
