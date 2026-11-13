@@ -12,7 +12,7 @@ import {
 import { whatsappLink, icon } from "../ui/shared.js";
 import { publicShell, publicFooter } from "./landing.js";
 
-const MENSAJE_CONTRATAR = "Hola, vi los precios en la página y quiero contratar paseos grupales para mi perro.";
+const MENSAJE_CONSULTAR = "Hola, vi los precios en la página y quiero consultar por los paseos grupales para mi perro.";
 
 function tablaPorTamano({ caption, filas }) {
   return `
@@ -44,7 +44,7 @@ export function preciosPage() {
       <header class="precios-head">
         <p class="eyebrow">Precios</p>
         <h1>Precios de Paseos Juan</h1>
-        <p class="precios-fecha">Precios vigentes al <strong>${PRECIOS_VIGENTES_AL}</strong></p>
+        <p class="precios-fecha">Precios actualizados al <strong>${PRECIOS_VIGENTES_AL}</strong></p>
       </header>
 
       <section class="precios-card" aria-labelledby="planes-titulo">
@@ -74,7 +74,7 @@ export function preciosPage() {
         <p class="precios-sub">Descuento según cuántos perros pasean con nosotros.</p>
         <ul class="precios-descuentos">
           ${DESCUENTOS_VARIOS_PERROS.map((item) => `
-            <li><strong>${item.descuento}</strong><span>${item.perros} perros</span></li>
+            <li><strong>${item.descuento} menos</strong><span>Con ${item.perros} perros</span></li>
           `).join("")}
         </ul>
       </section>
@@ -99,8 +99,8 @@ export function preciosPage() {
         <h2 id="contratar-titulo">¿Arrancamos?</h2>
         <p>Antes de sumarlo al grupo hacemos una evaluación inicial.</p>
         <div class="precios-cta-actions">
-          <a class="primary-button" href="${whatsappLink(MENSAJE_CONTRATAR)}" target="_blank" rel="noreferrer">Contratar por WhatsApp</a>
-          <a class="secondary-button" href="/#evaluacion" data-link>Pedí tu evaluación</a>
+          <a class="primary-button" href="/#evaluacion" data-link>Pedí tu evaluación</a>
+          <a class="secondary-button" href="${whatsappLink(MENSAJE_CONSULTAR)}" target="_blank" rel="noreferrer">Consultar por WhatsApp</a>
         </div>
         <small>WhatsApp ${BUSINESS.whatsappLabel}</small>
       </section>

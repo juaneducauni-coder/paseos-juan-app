@@ -103,6 +103,7 @@ function renderControl() {
       </div>
     </section>
   `;
+  requestAnimationFrame(() => updateFloating());
 }
 
 function volverFoco() {
@@ -161,4 +162,130 @@ export function initAccessibility() {
   darkQuery.addEventListener?.("change", apply);
   motionQuery.addEventListener?.("change", apply);
   apply();
+  initFloatingGuard();
+}
+
+// ---- Botones flotantes que no tapan contenido ----
+// El botón de accesibilidad (abajo a la izquierda) y el de WhatsApp (abajo a la derecha):
+// - mientras se hace scroll se achican y quedan semitransparentes;
+// - cuando el scroll se frena, si en su lugar hay texto, un campo o un botón, se corren al borde
+//   de la pantalla y queda a la vista solo una pestaña angosta (dentro del margen, sin tapar nada).
+//   Tocar la pestaña o llegar con el teclado los muestra enteros.
+
+const FLOATING = [
+  { box: () => document.getElementById("a11y-root"), button: () => document.querySelector(".a11y-toggle") },
+  { box: () => document.querySelector("a.whatsapp"), button: () => document.querySelector("a.whatsapp") },
+];
+const CONTENT_SKIP = "#a11y-root, a.whatsapp, .topbar, .tienda-bar, .mobile-menu, .menu-backdrop, script, style, noscript, .visually-hidden, [hidden]";
+const INTERACTIVE = "input:not([type=hidden]), textarea, select, button, a[href], summary";
+
+let scrollTimer = 0;
+
+// Lugar que ocupa el botón cuando está entero (sin la transformación de "corrido al borde").
+function homeRect(box) {
+  const style = getComputedStyle(box);
+  const width = box.offsetWidth;
+  const height = box.offsetHeight;
+  const viewW = document.documentElement.clientWidth;
+  const viewH = window.innerHeight;
+  const bottom = viewH - (parseFloat(style.bottom) || 0);
+  const left = style.left !== "auto" ? parseFloat(style.left) || 0 : viewW - (parseFloat(style.right) || 0) - width;
+  return { left, right: left + width, top: bottom - height, bottom };
+}
+
+// Lo que está dentro de un desplegable cerrado no se ve (menos su título).
+function insideClosedDetails(element) {
+  const details = element.closest("details:not([open])");
+  return Boolean(details && !element.closest("summary"));
+}
+
+function intersects(a, b) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+function isShown(element) {
+  const style = getComputedStyle(element);
+  return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.05;
+}
+
+// ¿Hay texto, un campo o un botón debajo de este rectángulo? (Una foto de fondo no cuenta.)
+export function coversContent(rect) {
+  const root = document.getElementById("app") || document.body;
+  const zone = { left: rect.left - 4, right: rect.right + 4, top: rect.top - 4, bottom: rect.bottom + 4 };
+  for (const element of root.querySelectorAll(INTERACTIVE)) {
+    if (element.closest(CONTENT_SKIP) || insideClosedDetails(element)) continue;
+    const box = element.getBoundingClientRect();
+    if (box.width && box.height && intersects(box, zone) && isShown(element)) return true;
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent || parent.closest(CONTENT_SKIP) || insideClosedDetails(parent)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const range = document.createRange();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parentBox = node.parentElement.getBoundingClientRect();
+    if (!intersects(parentBox, zone)) continue;
+    range.selectNodeContents(node);
+    for (const box of range.getClientRects()) {
+      if (box.width && intersects(box, zone) && isShown(node.parentElement)) return true;
+    }
+  }
+  return false;
+}
+
+function updateFloating() {
+  for (const item of FLOATING) {
+    const box = item.box();
+    const button = item.button();
+    if (!box || !button) continue;
+    const keepOpen = panelOpen || button.matches(":focus-visible") || button.dataset.floatingOpen === "1";
+    const covers = !keepOpen && coversContent(homeRect(box));
+    button.classList.toggle("is-tucked", covers);
+  }
+}
+
+function onScroll() {
+  document.documentElement.classList.add("is-scrolling");
+  clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    document.documentElement.classList.remove("is-scrolling");
+    FLOATING.forEach((item) => { const b = item.button(); if (b) delete b.dataset.floatingOpen; });
+    updateFloating();
+  }, 160);
+}
+
+function initFloatingGuard() {
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll, { passive: true });
+  // Tocar la pestaña muestra el botón entero (el primer toque no abre nada).
+  document.addEventListener("click", (event) => {
+    const tucked = event.target.closest?.(".is-tucked");
+    if (!tucked || !FLOATING.some((item) => item.button() === tucked)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    tucked.dataset.floatingOpen = "1";
+    tucked.classList.remove("is-tucked");
+  }, true);
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches?.(".a11y-toggle, a.whatsapp")) event.target.classList.remove("is-tucked");
+  });
+  document.addEventListener("focusout", (event) => {
+    if (event.target.matches?.(".a11y-toggle, a.whatsapp")) setTimeout(updateFloating, 0);
+  });
+  // Después de cada dibujo de la página (y cuando cambia el contenido) se vuelve a revisar.
+  const app = document.getElementById("app");
+  let pending = 0;
+  const schedule = () => {
+    cancelAnimationFrame(pending);
+    pending = requestAnimationFrame(() => requestAnimationFrame(updateFloating));
+  };
+  if (app) new MutationObserver(schedule).observe(app, { childList: true, subtree: true });
+  window.addEventListener("load", schedule);
+  // Las secciones que aparecen con movimiento terminan de ubicarse un rato después.
+  setTimeout(updateFloating, 1300);
+  schedule();
 }

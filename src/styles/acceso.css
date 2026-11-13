@@ -158,3 +158,55 @@ html[data-theme="dark"] .acc-alert {
   color: var(--text);
   font-size: 0.9rem;
 }
+
+/* Campo de PIN con botón "Ver" */
+.acc-field {
+  display: grid;
+  gap: 6px;
+}
+
+.acc-field label {
+  font-weight: 700;
+}
+
+.acc-pin-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.acc-pin-wrap input {
+  flex: 1;
+  min-width: 0;
+}
+
+.acc-ver {
+  min-width: 76px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.acc-ver[aria-pressed="true"] {
+  background: var(--line);
+}
+
+.acc-form input::placeholder {
+  color: var(--text);
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.acc-foot .acc-back {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 1rem;
+}

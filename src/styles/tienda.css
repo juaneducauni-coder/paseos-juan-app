@@ -126,7 +126,7 @@ html[data-theme="dark"] body:has(.tienda-page) {
   padding: 16px 16px 40px;
 }
 
-.tienda-back,
+.tienda-home,
 .tienda-footer a {
   display: inline-flex;
   min-height: 44px;
@@ -137,7 +137,7 @@ html[data-theme="dark"] body:has(.tienda-page) {
   text-decoration: none;
 }
 
-.tienda-back:hover,
+.tienda-home:hover,
 .tienda-footer a:hover {
   text-decoration: underline;
 }
@@ -223,12 +223,6 @@ html[data-theme="dark"] body:has(.tienda-page) {
 
 .tienda-tag {
   margin: 0;
-}
-
-.tienda-maker {
-  margin: 0;
-  color: var(--t-muted);
-  font-size: 0.9rem;
 }
 
 .tienda-specs {
@@ -405,14 +399,20 @@ html[data-theme="dark"] body:has(.tienda-page) {
 .tienda-remove {
   grid-column: 1 / -1;
   justify-self: start;
+  min-width: 96px;
   min-height: 44px;
-  border: 0;
-  background: none;
+  border: 1px solid rgba(242, 184, 181, 0.55);
+  border-radius: 12px;
+  background: transparent;
   color: #f2b8b5;
   cursor: pointer;
+  font: inherit;
   font-weight: 800;
-  padding: 0;
-  text-decoration: underline;
+  padding: 0 16px;
+}
+
+.tienda-remove:hover {
+  background: rgba(242, 184, 181, 0.12);
 }
 
 .tienda-order {
@@ -472,7 +472,6 @@ html[data-theme="dark"] body:has(.tienda-page) {
     align-items: start;
   }
 
-  .tienda-back,
   .tienda-hero,
   .tienda-grid,
   .tienda-health {
@@ -483,6 +482,66 @@ html[data-theme="dark"] body:has(.tienda-page) {
     position: sticky;
     top: 88px;
     grid-column: 2;
-    grid-row: 1 / span 4;
+    grid-row: 1 / span 3;
+  }
+}
+
+/* Encabezado: volver a Paseos Juan siempre a la vista */
+.tienda-bar .tienda-home {
+  flex: none;
+  padding: 0 4px;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.tienda-bar .tienda-brand {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Aviso de "sin pago online" arriba de los productos */
+.tienda-aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 560px;
+  margin: 14px 0 0;
+  border: 1px solid rgba(92, 196, 151, 0.35);
+  border-radius: 14px;
+  background: rgba(92, 196, 151, 0.1);
+  color: var(--t-text);
+  font-size: 0.98rem;
+  padding: 10px 12px;
+}
+
+.tienda-hero p.tienda-aviso {
+  margin-top: 14px;
+  color: var(--t-text);
+  font-size: 0.98rem;
+}
+
+.tienda-aviso .line-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  color: var(--t-accent);
+}
+
+@media (max-width: 420px) {
+  .tienda-bar {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .tienda-logo {
+    display: none;
+  }
+
+  .tienda-brand small {
+    display: none;
+  }
+
+  .tienda-cart-link {
+    padding: 0 6px 0 10px;
   }
 }
