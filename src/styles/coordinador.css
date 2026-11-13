@@ -1012,6 +1012,18 @@ html[data-theme="dark"] .cd-toast-undo {
   font-weight: 750;
 }
 
+/* "Hoy" grande y la fecha al lado, en el mismo renglón. */
+.cd-hello h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.cd-hello h1 .cd-date {
+  font-size: 1rem;
+}
+
 .cd-viewhead {
   display: flex;
   flex-wrap: wrap;
@@ -1770,6 +1782,71 @@ html[data-theme="dark"] .cd-toast-undo {
 
 .cd-pick-dog:has(input:checked) .cd-pick-check {
   display: grid;
+}
+
+/* ---------- Inicio sin rutas: pasos que siguen ---------- */
+
+.cd-pasos {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cd-paso {
+  display: flex;
+  width: 100%;
+  min-height: 72px;
+  align-items: center;
+  gap: 12px;
+  border: 2px solid var(--c-line);
+  border-radius: var(--radius);
+  background: var(--c-card);
+  box-shadow: var(--c-shadow);
+  color: var(--c-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.cd-paso:hover {
+  border-color: var(--c-line-strong);
+}
+
+.cd-paso:focus-visible {
+  outline: 3px solid var(--c-green);
+  outline-offset: 2px;
+}
+
+.cd-paso > .coord-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--c-green);
+}
+
+.cd-paso-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.cd-paso-text b {
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.cd-paso-text small {
+  color: var(--c-text);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.cd-paso > .cd-paso-go {
+  color: var(--c-text);
 }
 
 /* ---------- Más ---------- */
