@@ -768,10 +768,11 @@ export const PERMISSIONS = [
 export const MENU_ITEMS = [
   ["Inicio", "/", "home"],
   ["Sobre nosotros", "/#sobre-nosotros", "shieldCheck"],
-  ["Planes", "/#planes", "calendarCheck"],
+  ["Precios", "/precios", "calendarCheck"],
+  ["Tienda", "/tienda", "shoppingBag"],
   ["Compromiso", "/#testimonios", "message"],
   ["Preguntas frecuentes", "/#faq", "help"],
   ["Contacto", "/#contacto", "mail"],
-  ["Login", "/login", "logIn"],
+  ["Ingresar", "/login", "logIn"],
   ["Registro", "/registro", "userPlus"],
 ];
