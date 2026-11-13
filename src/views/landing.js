@@ -19,9 +19,12 @@ function esc(value) {
 
 const PUBLIC_MENU = [
   ["Inicio", "/", "home"],
+  ["Temporada Verano", "/#verano", "droplets"],
   ["Servicios", "/#servicios", "pawPrint"],
   ["Precios", "/precios", "dollarSign"],
   ["Tienda", "/tienda", "shoppingBag"],
+  ["Alianzas", "/#alianzas", "medal"],
+  ["Portal de Clientes", "/cliente", "users"],
   ["Cómo trabajamos", "/#como-trabajamos", "shieldCheck"],
   ["Preguntas frecuentes", "/#faq", "help"],
   ["Pedí tu evaluación", "/#evaluacion", "clipboardCheck"],
@@ -41,6 +44,7 @@ export function publicShell(content, current = "/") {
       <div class="header-actions">
         <a class="header-link header-link--precios ${current === "/precios" ? "is-current" : ""}" href="/precios" data-link ${current === "/precios" ? 'aria-current="page"' : ""}>Precios</a>
         <a class="header-link" href="/tienda" data-link>Tienda</a>
+        <a class="header-link header-link--cliente" href="/cliente" data-link>Soy cliente</a>
         <a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>
         <button class="menu-button ${state.menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${state.menuOpen}" aria-label="Abrir menú">
           <span></span><span></span><span></span>
@@ -82,13 +86,34 @@ export function publicFooter() {
         </span>
       </a>
       <nav class="footer-links" aria-label="Páginas">
+        <a href="/#verano" data-link>Temporada Verano</a>
         <a href="/#servicios" data-link>Servicios</a>
         <a href="/precios" data-link>Precios</a>
         <a href="/tienda" data-link>Tienda</a>
+        <a href="/#alianzas" data-link>Alianzas</a>
+        <a href="/cliente" data-link>Portal de Clientes</a>
+        <a href="/#terminos-privacidad" data-link>Términos y privacidad</a>
       </nav>
       <p>Paseos grupales, baños y más. ${BUSINESS.zone}.</p>
       <a class="footer-whatsapp" href="${whatsappLink(WHATSAPP_INFO)}" target="_blank" rel="noreferrer">WhatsApp ${BUSINESS.whatsappLabel}</a>
     </footer>
+  `;
+}
+
+// ---------- Divisores orgánicos (olas de mar y manchas fluidas) ----------
+
+function waveDivider(variant = "top", extraClass = "") {
+  const paths = {
+    top: "M0,36 C240,86 480,-12 720,38 C960,88 1200,8 1440,44 L1440,96 L0,96 Z",
+    sea: "M0,52 C320,4 620,96 960,42 C1180,8 1320,64 1440,32 L1440,96 L0,96 Z",
+    soft: "M0,24 C360,90 720,-18 1080,48 C1260,80 1360,36 1440,20 L1440,96 L0,96 Z",
+  };
+  return `
+    <div class="organic-wave ${extraClass}" aria-hidden="true">
+      <svg viewBox="0 0 1440 96" preserveAspectRatio="none" focusable="false">
+        <path d="${paths[variant] || paths.top}"></path>
+      </svg>
+    </div>
   `;
 }
 
@@ -97,24 +122,50 @@ export function publicFooter() {
 export function landingPage() {
   return publicShell(`
     <canvas class="lava-lamp" data-lava aria-hidden="true"></canvas>
-    <main class="landing-main">
+    <main class="landing-main landing-organic">
+      ${SeasonBanner()}
       ${HeroSection()}
+      ${waveDivider("top", "organic-wave--hero")}
+      ${FirstWalkAndClientPortalSection()}
+      ${SummerShowcaseSection()}
+      ${waveDivider("sea", "organic-wave--mid")}
       ${ServicesSection()}
       ${PricesStrip()}
       ${HowWeWorkSection()}
+      ${AlliancesSection()}
       ${TrustSection()}
+      ${waveDivider("soft", "organic-wave--cta")}
       ${CTASection()}
+      ${TermsAndPrivacySection()}
       ${publicFooter()}
       <a class="whatsapp" href="${whatsappLink(WHATSAPP_INFO)}" target="_blank" rel="noreferrer" aria-label="Escribinos por WhatsApp">WhatsApp</a>
     </main>
   `);
 }
 
+function SeasonBanner() {
+  return `
+    <div class="season-banner" role="region" aria-label="Temporada actual">
+      <div class="season-banner-inner">
+        <span class="season-pill">☀️ Ahora Verano</span>
+        <p><strong>Paseos de verano:</strong> agua en ruta con botella bebedero en ${BUSINESS.zone}.</p>
+        <a class="season-banner-link" href="#verano" data-link>Ver modo verano</a>
+      </div>
+    </div>
+  `;
+}
+
 function HeroSection() {
   return `
-    <section class="hero" id="inicio">
+    <section class="hero hero--organic" id="inicio">
       <div class="hero-pattern" aria-hidden="true"></div>
+      <div class="organic-blob organic-blob--one" aria-hidden="true"></div>
+      <div class="organic-blob organic-blob--two" aria-hidden="true"></div>
       <div class="hero-copy reveal">
+        <div class="hero-badges">
+          <span class="hero-season-tag">🌊 Edición Verano · Aire libre y frescura</span>
+          <span class="hero-free-tag">🎁 1.er paseo de adaptación sin cargo</span>
+        </div>
         <p class="eyebrow">Disciplina. Libertad. Bienestar.</p>
         <h1 class="hero-title">
           <span>Paseos grupales</span>
@@ -126,24 +177,178 @@ function HeroSection() {
           como en casa, en ${BUSINESS.zone}.
         </p>
         <div class="hero-actions">
-          <a class="primary-button" href="#evaluacion" data-link>Pedí tu evaluación</a>
-          <a class="secondary-button" href="#servicios" data-link>Ver servicios</a>
+          <a class="primary-button" href="#evaluacion" data-link>Pedí tu 1.er paseo gratis</a>
+          <a class="secondary-button" href="/cliente" data-link>Ya soy cliente · Entrar</a>
         </div>
       </div>
       <div class="hero-media reveal">
         <div class="dog-frame">
-          <img src="/hero-dog-premium.png" alt="Perro atento con arnés, imagen de Paseos Juan" />
+          <img src="/verano-manada.png" onerror="this.onerror=null;this.src='/hero-dog-premium.png';" alt="Imagen ilustrativa: perros paseando con arnés sobre el pasto en verano" />
         </div>
-        <div class="dog-glass-card">
-          <span class="glass-icon">${icon("radar")}</span>
-          <strong>Seguimiento del paseo</strong>
-          <span>Registramos el retiro, la foto del paseo y la entrega.</span>
+        <div class="dog-glass-card dog-glass-card--organic">
+          <span class="glass-icon">${icon("droplets")}</span>
+          <strong>Modo Verano activo</strong>
+          <span>Agua en ruta, retiro, foto del paseo y entrega.</span>
         </div>
       </div>
-      <a class="scroll-indicator" href="#servicios" data-link aria-label="Bajar a servicios">
+      <a class="scroll-indicator" href="#verano" data-link aria-label="Bajar a temporada de verano">
         <span>Bajar</span>
         <b>${icon("chevronDown")}</b>
       </a>
+    </section>
+  `;
+}
+
+function FirstWalkAndClientPortalSection() {
+  return `
+    <section class="organic-duo-section reveal" aria-label="Primer paseo gratis y acceso de clientes">
+      <article class="organic-splash-card organic-splash-card--free">
+        <span class="organic-badge">🎁 Beneficio de bienvenida</span>
+        <h2>El primer paseo es gratis</h2>
+        <p>
+          Queremos conocer a tu perro con tranquilidad. Hacemos una evaluación inicial y su
+          <strong>primer paseo grupal de adaptación es sin cargo</strong> para asegurar que se sienta cómodo con la manada.
+        </p>
+        <div class="organic-card-actions">
+          <a class="primary-button" href="#evaluacion" data-link>Anotar a mi perro gratis</a>
+        </div>
+      </article>
+
+      <article class="organic-splash-card organic-splash-card--client">
+        <span class="organic-badge organic-badge--sea">🐾 Acceso directo</span>
+        <h2>¿Ya sos cliente de Paseos Juan?</h2>
+        <p>
+          Entrá directo y tranquilo a tu panel: mirá el paseo de hoy, subí tu comprobante de pago,
+          elegí horario, canjeá <strong>cupones</strong> y hablá en el <strong>chat grupal de clientes</strong>.
+        </p>
+        <div class="organic-card-actions">
+          <a class="primary-button" href="/cliente" data-link>Entrar al Portal de Clientes</a>
+          <a class="secondary-button" href="/login" data-link>Acceso del equipo</a>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function SummerShowcaseSection() {
+  const summerHighlights = [
+    {
+      title: "Manada al sol suave y sombra",
+      tag: "Ahora Verano · Caminatas frescas",
+      desc: "En verano cuidamos a la manada del calor durante todo el paseo.",
+      img: "/verano-manada.png",
+      fallback: "/hero-dog-premium.png",
+    },
+    {
+      title: "Hidratación constante en cada salida",
+      tag: "Ahora Verano · Agua fresca",
+      desc: "Nuestro equipo y ayudante llevan botellas bebedero en toda la ruta para hidratar a cada perro durante el paseo.",
+      img: "/verano-hidratacion.png",
+      fallback: "/hero-dog-premium.png",
+    },
+    {
+      title: "Grupos armados por energía",
+      tag: "Ahora Verano · Bienestar en grupo",
+      desc: "Cada grupo se organiza por tamaño, carácter y ritmo para que disfruten el verano seguros y en armonía.",
+      img: "/hero-dog-premium.png",
+      fallback: "/hero-dog-premium.png",
+    },
+  ];
+
+  return `
+    <section class="summer-section reveal" id="verano" aria-labelledby="verano-titulo">
+      <div class="summer-heading">
+        <p class="eyebrow">Estación actual · Ahora Verano</p>
+        <h2 id="verano-titulo">Viví el verano con la manada</h2>
+        <p>En verano salimos con agua en ruta y registramos cada paseo con una foto.</p>
+      </div>
+      <div class="summer-gallery">
+        ${summerHighlights.map((item, idx) => `
+          <article class="summer-card summer-card--blob-${idx + 1}">
+            <div class="summer-media-blob">
+              <img src="${item.img}" onerror="this.onerror=null;this.src='${item.fallback}';" alt="Imagen ilustrativa: ${esc(item.title)}" loading="lazy" />
+              <span class="summer-photo-pill">☀️ ${esc(item.tag)}</span>
+              <span class="summer-ilustra-pill">Imagen ilustrativa</span>
+            </div>
+            <div class="summer-card-body">
+              <h3>${esc(item.title)}</h3>
+              <p>${esc(item.desc)}</p>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function AlliancesSection() {
+  const alliances = [
+    {
+      name: "DogPro & CatPro",
+      role: "Alimento y nutrición",
+      detail: "Alimento DogPro y CatPro, disponible en nuestra tienda.",
+      status: "Alianza confirmada",
+    },
+    {
+      name: "Más alianzas",
+      role: "Veterinarias, pet shops y profesionales",
+      detail: "Pendiente de confirmar.",
+      status: "Próximamente",
+    },
+  ];
+
+  return `
+    <section class="alliances-section reveal" id="alianzas" aria-labelledby="alianzas-titulo">
+      <div class="alliances-heading">
+        <p class="eyebrow">Red de beneficios y comunidad</p>
+        <h2 id="alianzas-titulo">Nuestras alianzas</h2>
+        <p>Sumamos marcas, veterinarias y profesionales de ${BUSINESS.zone} para darle más beneficios a tu perro.</p>
+      </div>
+      <div class="alliances-grid">
+        ${alliances.map((item) => `
+          <article class="alliance-blob-card">
+            <span class="alliance-status">${esc(item.status)}</span>
+            <h3>${esc(item.name)}</h3>
+            <small class="alliance-role">${esc(item.role)}</small>
+            <p>${esc(item.detail)}</p>
+          </article>
+        `).join("")}
+        <article class="alliance-blob-card alliance-blob-card--cta">
+          <span class="alliance-status">Sumate a la red</span>
+          <h3>¿Tenés una marca, veterinaria o pet shop?</h3>
+          <p>Hacé una alianza con Paseos Juan para llegar a las familias de ${BUSINESS.zone} con cupones y beneficios.</p>
+          <a class="primary-button service-button" href="${whatsappLink("Hola Juan, me gustaría proponer una alianza comercial con Paseos Juan.")}" target="_blank" rel="noreferrer">
+            Contactar por alianzas
+          </a>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function TermsAndPrivacySection() {
+  return `
+    <section class="terms-section reveal" id="terminos-privacidad" aria-labelledby="terminos-titulo">
+      <div class="terms-blob-box">
+        <div>
+          <p class="eyebrow">Transparencia y confianza</p>
+          <h2 id="terminos-titulo">Términos del servicio y privacidad</h2>
+        </div>
+        <div class="terms-columns">
+          <article class="terms-item">
+            <h3>${icon("shieldCheck")} Seguridad y admisión grupal</h3>
+            <p>Todos los paseos son <strong>grupales</strong>. Cada perro ingresa tras una evaluación inicial de compatibilidad y con carnet de vacunas al día. El primer paseo de prueba es sin cargo.</p>
+          </article>
+          <article class="terms-item">
+            <h3>${icon("calendarCheck")} Pagos, aprobación y horarios</h3>
+            <p>El pago del plan se hace por transferencia con alias. Subís el comprobante, Juan lo aprueba y después elegís tu horario.</p>
+          </article>
+          <article class="terms-item">
+            <h3>${icon("lock")} Privacidad de tus datos</h3>
+            <p>Tus teléfonos, domicilio, datos de pago e indicaciones de salud se resguardan de forma privada únicamente para la operación del equipo autorizado de Paseos Juan y nunca se publican.</p>
+          </article>
+        </div>
+      </div>
     </section>
   `;
 }
@@ -470,6 +675,10 @@ function CTASection() {
         </details>
 
         <div class="quick-send">
+          <label class="quick-terms-check">
+            <input type="checkbox" name="aceptaTerminos" required />
+            <span>Acepto los <a href="#terminos-privacidad" data-link>términos del servicio y la política de privacidad</a> (incluye 1.er paseo de adaptación sin cargo).</span>
+          </label>
           <p class="quick-note">Al tocar Enviar se abre WhatsApp: apretá Enviar ahí para mandarnos el pedido.</p>
           <div class="quick-submit-bar" data-submit-bar>
             <div class="quick-submit-text">

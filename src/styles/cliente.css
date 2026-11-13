@@ -1828,3 +1828,236 @@ html[data-theme="dark"] .cl-page select option {
     display: none;
   }
 }
+
+/* ---- Rediseño Orgánico en Portal de Clientes: Verano, Pagos con Horario, Cupones y Chat Grupal ---- */
+
+.cl-season-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 18px;
+  border: 1px solid var(--cl-green-line);
+  border-radius: 32px 18px 34px 20px / 20px 32px 18px 28px;
+  background: linear-gradient(125deg, var(--cl-green-soft), var(--cl-card));
+}
+
+.cl-season-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--cl-green);
+  color: var(--cl-on-green);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cl-card--organic,
+.cl-today-main.cl-card {
+  border-radius: 34px 20px 36px 22px / 22px 34px 20px 32px;
+}
+
+.cl-more:nth-child(odd) {
+  border-radius: 26px 18px 28px 18px / 18px 26px 18px 24px;
+}
+
+.cl-more:nth-child(even) {
+  border-radius: 18px 28px 18px 26px / 24px 18px 26px 18px;
+}
+
+.cl-alias-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--cl-green-line);
+  border-radius: 26px 16px 28px 18px / 18px 26px 16px 24px;
+  background: var(--cl-green-soft);
+}
+
+.cl-alias-value {
+  display: block;
+  margin: 4px 0;
+  font-size: 1.2rem;
+  font-weight: 950;
+  color: var(--cl-ink);
+}
+
+.cl-pay-pipeline {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--cl-line);
+  border-radius: 24px;
+  background: var(--cl-card-2);
+}
+
+.cl-pay-stage-box,
+.cl-schedule-unlock {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--cl-green-line);
+  border-radius: 20px;
+  background: var(--cl-card);
+}
+
+.cl-pay-stage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Cupones */
+.cl-coupon-redeem {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--cl-line);
+  border-radius: 22px;
+  background: var(--cl-card-2);
+}
+
+.cl-coupon-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.cl-coupon-input-row input {
+  flex: 1 1 180px;
+}
+
+.cl-coupon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cl-coupon-card {
+  display: grid;
+  align-content: space-between;
+  gap: 10px;
+  padding: 18px;
+  border: 2px dashed var(--cl-green-line);
+  border-radius: 28px 16px 30px 18px / 18px 28px 16px 26px;
+  background: var(--cl-card);
+}
+
+.cl-coupon-card.is-redeemed {
+  border-style: solid;
+  border-color: var(--cl-green);
+  background: var(--cl-green-soft);
+}
+
+.cl-coupon-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cl-coupon-season {
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: var(--cl-green-ink);
+}
+
+.cl-coupon-code {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--cl-card-2);
+  color: var(--cl-ink);
+  font-weight: 900;
+  font-size: 0.82rem;
+}
+
+.cl-coupon-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--cl-line);
+  padding-top: 10px;
+}
+
+.cl-coupon-status {
+  font-size: 0.84rem;
+  font-weight: 850;
+  color: var(--cl-green-ink);
+}
+
+/* Chat Grupal de Clientes */
+.cl-community-board {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--cl-line);
+  border-radius: 24px;
+  background: var(--cl-card-2);
+}
+
+.cl-community-msg {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--cl-line);
+  border-radius: 22px 16px 22px 8px;
+  background: var(--cl-card);
+}
+
+.cl-community-msg.is-team {
+  border-color: var(--cl-green-line);
+  background: var(--cl-green-soft);
+}
+
+.cl-community-msg.is-mine {
+  border-color: var(--cl-green);
+  border-radius: 16px 22px 8px 22px;
+}
+
+.cl-community-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.82rem;
+  color: var(--cl-muted);
+}
+
+.cl-community-meta strong {
+  color: var(--cl-ink);
+  font-size: 0.9rem;
+}
+
+.cl-community-meta time {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.cl-community-compose {
+  display: grid;
+  gap: 8px;
+}
+
+.cl-community-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cl-community-row input {
+  flex: 1 1 200px;
+}

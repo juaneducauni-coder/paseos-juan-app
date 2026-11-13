@@ -32,7 +32,49 @@ const KEYS = {
   carnet: "paseosJuan_cliente_carnet",
   comprobantes: "paseosJuan_cliente_comprobantes",
   foto: "paseosJuan_cliente_foto",
+  cupones: "paseosJuan_cliente_cupones",
+  chatGrupal: "paseosJuan_cliente_chat_grupal",
+  pagoFlujo: "paseosJuan_cliente_pago_flujo",
 };
+
+const DEFAULT_CUPONES = [
+  {
+    id: "paseo-gratis-1",
+    code: "PRIMERPASEO",
+    title: "1.er Paseo Grupal Gratis",
+    detail: "Tu primer paseo de adaptación con la manada, 100% bonificado luego de la evaluación inicial.",
+    status: "Activo",
+    season: "Bienvenida",
+  },
+  {
+    id: "dogpro-regalo",
+    code: "VERANODOGPRO",
+    title: "Muestra DogPro / CatPro + Paseo de regalo",
+    detail: "Beneficio vigente por alianza oficial hasta el 01/12/2026.",
+    status: "Disponible",
+    season: "Ahora Verano",
+  },
+  {
+    id: "multipack-familia",
+    code: "MANADAFAMILIA",
+    title: "10% a 30% OFF por varios perros",
+    detail: "2 perros 10% · 3 perros 20% · 4 perros 30% de descuento en tu plan semanal.",
+    status: "Automático en plan",
+    season: "Permanente",
+  },
+];
+
+const DEFAULT_GROUP_CHAT = [
+  {
+    id: "msg-1",
+    author: "Juan (Admin)",
+    dog: "Coordinación",
+    zone: "Pilar y La Lonja",
+    time: "09:10",
+    text: "¡Bienvenidos al chat grupal de la manada! Acá van las novedades de los paseos. No compartan teléfonos ni direcciones.",
+    isTeam: true,
+  },
+];
 
 const DEFAULT_DOG_NAME = "Tu perro";
 
@@ -104,6 +146,32 @@ function getDogPhoto() {
   } catch {
     return "";
   }
+}
+
+function getCouponsState() {
+  const saved = readJSON(KEYS.cupones, null);
+  if (!Array.isArray(saved) || !saved.length) return DEFAULT_CUPONES;
+  return saved;
+}
+
+function getGroupChatMessages() {
+  const saved = readJSON(KEYS.chatGrupal, null);
+  if (!Array.isArray(saved) || !saved.length) return DEFAULT_GROUP_CHAT;
+  return saved;
+}
+
+function getPaymentFlow() {
+  const saved = readJSON(KEYS.pagoFlujo, null);
+  if (!saved || typeof saved !== "object") {
+    return {
+      step: "pendiente", // "pendiente" | "correo-enviado" | "aprobado-horario" | "horario-confirmado"
+      emailNotifiedAt: "",
+      approvedAt: "",
+      chosenShift: "Mañana",
+      chosenWindow: "09:00 a 10:30",
+    };
+  }
+  return saved;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,22 +450,28 @@ export function clientDashboard() {
 
 function pageContent(ctx) {
   return `
+    <div class="cl-season-strip">
+      <span class="cl-season-badge">☀️ Ahora Verano</span>
+      <p>Paseos con sombra, botella bebedero en ruta y seguimiento con foto.</p>
+    </div>
     <p class="cl-demo-note">
       ${icon("help", "cl-icon-sm")}
-      <span><strong>Página de ejemplo.</strong> El perro y el plan son de demostración. Lo que cargás se guarda solo en este dispositivo.</span>
+      <span><strong>Página de ejemplo.</strong> El perro, el plan, los cupones y el chat son de demostración. Lo que cargás se guarda solo en este dispositivo.</span>
     </p>
     ${todaySection(ctx)}
     ${quickActions(ctx)}
     <div class="cl-more-list" aria-label="Más opciones">
+      ${morePanel("cl-pagos", "wallet", "Pagos, alias y elegir horario", paymentSection(ctx))}
+      ${morePanel("cl-cupones", "medal", "Mis cupones y 1.er paseo gratis", couponsSection(ctx))}
+      ${morePanel("cl-comunidad", "users", "Chat grupal de clientes", communityChatSection(ctx))}
       ${morePanel("cl-detalle-hoy", "calendarCheck", "Detalle de hoy", todayDetails(ctx))}
       ${morePanel("cl-ausencia", "bell", "Ausencias", absenceSection(ctx))}
       ${morePanel("cl-vacunas", "fileUp", "Carnet de vacunas", vaccineSection())}
       ${morePanel("cl-plan", "calendarCheck", "Mi plan", planSection(ctx))}
       ${morePanel("cl-ficha", "fileText", "Ficha de mi perro", fichaSection(ctx))}
-      ${morePanel("cl-pagos", "wallet", "Pagos y comprobantes", paymentSection(ctx))}
-      ${isPromoActive(ctx) ? morePanel("cl-promo", "medal", "Promo", promoSection()) : ""}
+      ${isPromoActive(ctx) ? morePanel("cl-promo", "medal", "Promo de verano", promoSection()) : ""}
       ${morePanel("cl-accesibilidad", "eye", "Accesibilidad", accessibilityNote())}
-      ${morePanel("cl-privacidad", "lock", "Mis datos", privacySection())}
+      ${morePanel("cl-privacidad", "lock", "Términos y mis datos", privacySection())}
     </div>
   `;
 }
@@ -561,9 +635,11 @@ function weekStrip(ctx) {
 
 function quickActions(ctx) {
   const actions = [
+    { label: "Pagar y horario", go: "cl-pagos", iconName: "wallet" },
+    { label: "Mis cupones", go: "cl-cupones", iconName: "medal" },
+    { label: "Chat grupal", go: "cl-comunidad", iconName: "users" },
     { label: "Avisar ausencia", go: "cl-ausencia", iconName: "bell" },
     { label: "Carnet de vacunas", go: "cl-vacunas", iconName: "fileUp" },
-    { label: "Mi plan", go: "cl-plan", iconName: "calendarCheck" },
   ];
   return `
     <nav class="cl-quick" aria-label="Acciones rápidas">
@@ -856,44 +932,201 @@ function vaccineSection() {
 
 function paymentSection(ctx) {
   const receipts = getFileList(KEYS.comprobantes);
+  const flow = getPaymentFlow();
+  const stepIndex = {
+    pendiente: 0,
+    "correo-enviado": 1,
+    "aprobado-horario": 2,
+    "horario-confirmado": 3,
+  }[flow.step] ?? 0;
+
   return `
-    <section class="cl-card cl-section" aria-labelledby="cl-pagos-title">
+    <section class="cl-card cl-section cl-card--organic" aria-labelledby="cl-pagos-title">
       <header class="cl-section-head">
         <span class="cl-section-icon">${icon("wallet", "cl-icon")}</span>
         <div>
-          <h2 id="cl-pagos-title" class="cl-h2" tabindex="-1">Pagos</h2>
-          <p>El alias y el detalle de pago te los enviamos por WhatsApp.</p>
+          <h2 id="cl-pagos-title" class="cl-h2" tabindex="-1">Pagos, alias y elección de horario</h2>
+          <p>Transferí con el alias, subí tu comprobante y, cuando se aprueba, elegí tu horario.</p>
         </div>
       </header>
-      <p class="cl-price-ref">Precio de lista de tu plan: <strong>${formatPeso(ctx.plan.prices[ctx.settings.size])} por semana</strong>. El monto final te lo confirmamos por WhatsApp.</p>
-      <a class="cl-btn" href="${waLink("Hola, ¿me pasan el alias y el detalle de pago del plan de mi perro?")}" target="_blank" rel="noreferrer">
-        ${icon("message", "cl-icon-sm")} Pedir alias y detalle por WhatsApp
-      </a>
-      <p class="cl-fine"><strong>Después mandanos la imagen por WhatsApp.</strong></p>
-      <a class="cl-btn is-secondary" href="${waLink("Hola, te mando la imagen del comprobante para que la revisen.")}" target="_blank" rel="noreferrer">
-        ${icon("message", "cl-icon-sm")} Mandar imagen por WhatsApp
-      </a>
-      <div class="cl-upload">
-        <input id="cl-receipt-file" class="cl-file-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/*" data-cl-file="comprobante" />
-        <label for="cl-receipt-file" class="cl-upload-box is-small">
-          ${icon("receipt", "cl-icon")}
-          <strong>Subir comprobante</strong>
-          <small>JPG, PNG o PDF</small>
-        </label>
+
+      <div class="cl-alias-box">
+        <div>
+          <span class="cl-eyebrow">Alias bancario / Mercado Pago</span>
+          <strong class="cl-alias-value">${PENDIENTE} (pedilo por WhatsApp)</strong>
+          <p class="cl-fine">Precio de lista de tu ${esc(ctx.plan.name)} (${esc(ctx.settings.size.toLowerCase())}): <strong>${formatPeso(ctx.plan.prices[ctx.settings.size])} por semana</strong>.</p>
+        </div>
+        <div class="cl-alias-actions">
+          <a class="cl-btn" href="${waLink("Hola, ¿me pasan el alias oficial y el detalle de pago del plan de mi perro?")}" target="_blank" rel="noreferrer">
+            ${icon("message", "cl-icon-sm")} Pedir alias por WhatsApp
+          </a>
+        </div>
       </div>
+
+      <div class="cl-pay-pipeline" aria-label="Pasos de aprobación de pago y horario">
+        <p class="cl-h4">${icon("mail", "cl-icon-sm")} Estado de tu pago y habilitación de horario</p>
+        <ol class="cl-steps cl-steps--pay">
+          <li class="${stepIndex > 0 ? "is-done" : ""} ${stepIndex === 0 ? "is-current" : ""}">
+            <span class="cl-step-dot" aria-hidden="true"></span>
+            <span>1. Subís comprobante</span>
+          </li>
+          <li class="${stepIndex > 1 ? "is-done" : ""} ${stepIndex === 1 ? "is-current" : ""}">
+            <span class="cl-step-dot" aria-hidden="true"></span>
+            <span>2. Juan lo revisa</span>
+          </li>
+          <li class="${stepIndex >= 2 ? "is-done" : ""} ${stepIndex === 2 ? "is-current" : ""}">
+            <span class="cl-step-dot" aria-hidden="true"></span>
+            <span>3. Aprobado · Elegís horario</span>
+          </li>
+        </ol>
+
+        <div class="cl-upload">
+          <input id="cl-receipt-file" class="cl-file-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/*" data-cl-file="comprobante" />
+          <label for="cl-receipt-file" class="cl-upload-box is-small">
+            ${icon("receipt", "cl-icon")}
+            <strong>Subir comprobante</strong>
+            <small>JPG, PNG o PDF</small>
+          </label>
+        </div>
+
+        ${stepIndex === 1 ? `
+          <div class="cl-pay-stage-box">
+            <p><strong>Comprobante anotado (${esc(flow.emailNotifiedAt || "recién")}).</strong> En esta página de ejemplo queda solo en tu dispositivo: avisanos por WhatsApp para que lo revisemos.</p>
+            <div class="cl-pay-stage-actions">
+              <button type="button" class="cl-btn is-secondary is-small" data-cl-simulate-approve>
+                ${icon("checkCircle", "cl-icon-sm")} Ver cómo sigue (ejemplo)
+              </button>
+              <a class="cl-btn is-ghost is-small" href="${waLink("Hola, ya subí el comprobante de pago en la página para que me aprueben y habilitar el horario.")}" target="_blank" rel="noreferrer">
+                Avisar también por WhatsApp
+              </a>
+            </div>
+          </div>
+        ` : ""}
+
+        ${stepIndex >= 2 ? `
+          <div class="cl-schedule-unlock">
+            <p class="cl-eyebrow">${icon("checkCircle", "cl-icon-xs")} Pago aprobado · Horario habilitado</p>
+            <h3 class="cl-h3">Elegí tu franja horaria de retiro</h3>
+            <p class="cl-fine">Como tu pago ya fue aprobado, podés confirmar tu turno y franja preferida para la ruta grupal.</p>
+            <div class="cl-form-row">
+              <label for="cl-pay-shift">Turno
+                <select id="cl-pay-shift" data-cl-pay-shift>
+                  <option value="Mañana" ${flow.chosenShift === "Mañana" ? "selected" : ""}>Mañana (09:00 a 12:15)</option>
+                  <option value="Tarde" ${flow.chosenShift === "Tarde" ? "selected" : ""}>Tarde (14:45 a 17:05)</option>
+                </select>
+              </label>
+              <label for="cl-pay-window">Franja preferida en ruta
+                <select id="cl-pay-window" data-cl-pay-window>
+                  <option value="Primera tanda (inicio del turno)" ${flow.chosenWindow === "Primera tanda (inicio del turno)" ? "selected" : ""}>Primera tanda (inicio del turno)</option>
+                  <option value="Mitad del turno" ${flow.chosenWindow === "Mitad del turno" ? "selected" : ""}>Mitad del turno</option>
+                  <option value="Última tanda del turno" ${flow.chosenWindow === "Última tanda del turno" ? "selected" : ""}>Última tanda del turno</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" class="cl-btn" data-cl-confirm-schedule>
+              ${icon("calendarCheck", "cl-icon-sm")} Confirmar horario elegido
+            </button>
+            ${flow.step === "horario-confirmado" ? `
+              <p class="cl-all-done">${icon("checkCircle", "cl-icon-sm")} Horario confirmado: Turno ${esc(flow.chosenShift)} · ${esc(flow.chosenWindow)}.</p>
+            ` : ""}
+          </div>
+        ` : ""}
+      </div>
+
       ${receipts.length ? `
         <ul class="cl-list" aria-label="Comprobantes cargados">
           ${receipts.slice(0, 5).map((item) => `
             <li>
-              <span><strong>${esc(item.name)}</strong><small>Cargado el ${esc(item.date)} · Pendiente de confirmación</small></span>
+              <span><strong>${esc(item.name)}</strong><small>Cargado el ${esc(item.date)} · ${stepIndex >= 2 ? "Aprobado (ejemplo)" : "Pendiente de revisión"}</small></span>
             </li>
           `).join("")}
         </ul>
-        <a class="cl-btn is-secondary" href="${waLink("Hola, te mando el comprobante de pago del plan de mi perro.")}" target="_blank" rel="noreferrer">
-          ${icon("message", "cl-icon-sm")} Mandar comprobante por WhatsApp
-        </a>
       ` : `<p class="cl-empty">Todavía no cargaste comprobantes.</p>`}
       ${statusRegion("comprobante")}
+    </section>
+  `;
+}
+
+function couponsSection(ctx) {
+  const coupons = getCouponsState();
+  return `
+    <section class="cl-card cl-section cl-card--organic" aria-labelledby="cl-cupones-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("medal", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-cupones-title" class="cl-h2" tabindex="-1">Cupones y beneficios</h2>
+          <p>Usá tus cupones de bienvenida, beneficios de verano y alianzas de Paseos Juan.</p>
+        </div>
+      </header>
+
+      <div class="cl-coupon-redeem">
+        <label for="cl-coupon-input">¿Tenés un código de cupón o alianza?
+          <div class="cl-coupon-input-row">
+            <input id="cl-coupon-input" type="text" maxlength="40" placeholder="Ej. PRIMERPASEO o VERANO" data-cl-coupon-input />
+            <button type="button" class="cl-btn is-small" data-cl-coupon-apply>Activar cupón</button>
+          </div>
+        </label>
+        ${statusRegion("cupones")}
+      </div>
+
+      <ul class="cl-coupon-grid" aria-label="Cupones disponibles">
+        ${coupons.map((c) => `
+          <li class="cl-coupon-card ${c.status === "Activado" ? "is-redeemed" : ""}">
+            <div class="cl-coupon-top">
+              <span class="cl-coupon-season">${esc(c.season || "Beneficio")}</span>
+              <code class="cl-coupon-code">${esc(c.code)}</code>
+            </div>
+            <strong>${esc(c.title)}</strong>
+            <p>${esc(c.detail)}</p>
+            <div class="cl-coupon-foot">
+              <span class="cl-coupon-status">${esc(c.status)}</span>
+              <button type="button" class="cl-btn is-secondary is-small" data-cl-coupon-use="${esc(c.code)}">
+                ${c.status === "Activado" ? "Pedir por WhatsApp" : "Usar cupón"}
+              </button>
+            </div>
+          </li>
+        `).join("")}
+      </ul>
+    </section>
+  `;
+}
+
+function communityChatSection(ctx) {
+  const messages = getGroupChatMessages();
+  return `
+    <section class="cl-card cl-section cl-card--organic" aria-labelledby="cl-comunidad-title">
+      <header class="cl-section-head">
+        <span class="cl-section-icon">${icon("users", "cl-icon")}</span>
+        <div>
+          <h2 id="cl-comunidad-title" class="cl-h2" tabindex="-1">Chat grupal de clientes · La Manada</h2>
+          <p>Para hablar entre tutores y ver novedades de los paseos. <strong>Ejemplo:</strong> todavía no está conectado entre clientes.</p>
+        </div>
+      </header>
+
+      <div class="cl-community-board" role="log" aria-label="Mensajes del chat grupal de clientes">
+        ${messages.map((msg) => `
+          <article class="cl-community-msg ${msg.isTeam ? "is-team" : ""} ${msg.isMine ? "is-mine" : ""}">
+            <header class="cl-community-meta">
+              <strong>${esc(msg.author)}</strong>
+              <span>🐾 ${esc(msg.dog)} · ${esc(msg.zone)}</span>
+              <time>${esc(msg.time)}</time>
+            </header>
+            <p>${esc(msg.text)}</p>
+          </article>
+        `).join("")}
+      </div>
+
+      <div class="cl-community-compose">
+        <label for="cl-community-input">Escribir en el grupo de clientes (como tutor de ${esc(ctx.dogName)})</label>
+        <div class="cl-community-row">
+          <input id="cl-community-input" type="text" maxlength="240" placeholder="Contale algo al grupo de clientes…" data-cl-community-input />
+          <button type="button" class="cl-btn" data-cl-community-send>
+            ${icon("send", "cl-icon-sm")} Publicar
+          </button>
+        </div>
+        <p class="cl-fine">Convivencia cuidada: no compartas direcciones exactas ni datos bancarios personales en el chat público.</p>
+        ${statusRegion("comunidad")}
+      </div>
     </section>
   `;
 }
@@ -1095,6 +1328,109 @@ function handleClienteClick(event) {
     return true;
   }
 
+  if (event.target.closest("[data-cl-simulate-approve]")) {
+    const flow = getPaymentFlow();
+    writeJSON(KEYS.pagoFlujo, {
+      ...flow,
+      step: "aprobado-horario",
+      approvedAt: todayLabel(),
+    });
+    setStatus("comprobante", "Ejemplo: así se ve cuando Juan aprueba el pago. Ya podés elegir tu horario.");
+    refreshPage("[data-cl-confirm-schedule]");
+    return true;
+  }
+
+  if (event.target.closest("[data-cl-confirm-schedule]")) {
+    const chosenShift = document.querySelector("[data-cl-pay-shift]")?.value || "Mañana";
+    const chosenWindow = document.querySelector("[data-cl-pay-window]")?.value || "Primera tanda (inicio del turno)";
+    const flow = getPaymentFlow();
+    writeJSON(KEYS.pagoFlujo, {
+      ...flow,
+      step: "horario-confirmado",
+      chosenShift,
+      chosenWindow,
+    });
+    const currentPlan = getPlanSettings();
+    writeJSON(KEYS.plan, { ...currentPlan, shift: chosenShift });
+    setStatus(
+      "comprobante",
+      `¡Horario confirmado! Turno ${chosenShift} (${chosenWindow}).`,
+      `<a href="${waLink(`Hola, mi pago fue aprobado y elijo el Turno ${chosenShift} (${chosenWindow}) para el paseo grupal.`)}" target="_blank" rel="noreferrer">Enviar confirmación por WhatsApp</a>`,
+    );
+    refreshPage("[data-cl-status='comprobante']");
+    return true;
+  }
+
+  const couponUse = event.target.closest("[data-cl-coupon-use]");
+  if (couponUse) {
+    const code = couponUse.dataset.clCouponUse;
+    const coupons = getCouponsState().map((item) =>
+      item.code === code ? { ...item, status: "Activado" } : item,
+    );
+    writeJSON(KEYS.cupones, coupons);
+    const chosen = coupons.find((c) => c.code === code);
+    const link = waLink(`Hola, quiero usar mi cupón ${code} (${chosen?.title || "Beneficio"}) en Paseos Juan.`);
+    setStatus(
+      "cupones",
+      `Cupón ${code} activado.`,
+      `<a href="${link}" target="_blank" rel="noreferrer">Tocá acá para aplicarlo por WhatsApp</a>.`,
+    );
+    refreshPage("[data-cl-status='cupones']");
+    return true;
+  }
+
+  if (event.target.closest("[data-cl-coupon-apply]")) {
+    const input = document.querySelector("[data-cl-coupon-input]");
+    const raw = (input?.value || "").trim().toUpperCase();
+    if (!raw) {
+      showStatus("cupones", "Escribí un código de cupón para activarlo.");
+      return true;
+    }
+    const coupons = getCouponsState();
+    const existing = coupons.find((item) => item.code.toUpperCase() === raw);
+    if (existing) {
+      existing.status = "Activado";
+      writeJSON(KEYS.cupones, coupons);
+      setStatus("cupones", `¡Listo! Activaste el cupón ${existing.code}: ${existing.title}.`);
+    } else {
+      showStatus("cupones", `No reconocemos el código ${raw}. Consultanos por WhatsApp.`);
+      return true;
+    }
+    refreshPage("[data-cl-status='cupones']");
+    return true;
+  }
+
+  if (event.target.closest("[data-cl-community-send]")) {
+    const input = document.querySelector("[data-cl-community-input]");
+    const text = (input?.value || "").trim();
+    if (!text) {
+      showStatus("comunidad", "Escribí un mensaje antes de publicar.");
+      return true;
+    }
+    const ctx = getContext();
+    const nowParts = new Intl.DateTimeFormat("es-AR", {
+      timeZone: "America/Argentina/Buenos_Aires",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date());
+    const newMsg = {
+      id: `msg-${Date.now()}`,
+      author: `Tutor de ${ctx.dogName}`,
+      dog: ctx.dogName,
+      zone: "Pilar / La Lonja",
+      time: nowParts,
+      text,
+      isTeam: false,
+      isMine: true,
+    };
+    const updated = [...getGroupChatMessages(), newMsg].slice(-25);
+    writeJSON(KEYS.chatGrupal, updated);
+    setStatus("comunidad", "Mensaje guardado en este dispositivo (chat de ejemplo: todavía no lo ven otros clientes).");
+    refreshPage("[data-cl-community-input]");
+    return true;
+  }
+
   if (event.target.closest("[data-cl-reset]")) {
     if (!ui.resetArmed) {
       ui.resetArmed = true;
@@ -1156,7 +1492,13 @@ async function handleClienteChange(event) {
     } else {
       const list = [entry, ...getFileList(KEYS.comprobantes)].slice(0, 10);
       writeJSON(KEYS.comprobantes, list);
-      setStatus("comprobante", `Anotamos “${file.name}”. Mandalo por WhatsApp así lo confirmamos.`);
+      const currentFlow = getPaymentFlow();
+      writeJSON(KEYS.pagoFlujo, {
+        ...currentFlow,
+        step: "correo-enviado",
+        emailNotifiedAt: todayLabel(),
+      });
+      setStatus("comprobante", `Anotamos “${file.name}” en este dispositivo. Avisanos por WhatsApp así lo revisamos; cuando se aprueba, elegís tu horario.`);
       refreshPage("[data-cl-status='comprobante']");
     }
     return false;

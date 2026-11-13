@@ -1044,3 +1044,567 @@ html[data-theme="dark"] .quick-submit[aria-disabled="true"] {
 html:has(.quick-submit-bar.is-floating) {
   scroll-padding-bottom: 180px;
 }
+
+/* ---- Rediseño Fluido Orgánico ("Olas del Mar / Manchas") + Modo Verano ---- */
+
+.season-banner {
+  position: relative;
+  z-index: 2;
+  padding: 100px 16px 0;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.season-banner-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 20px;
+  border: 1px solid rgba(2, 95, 64, 0.24);
+  border-radius: 36px 22px 38px 20px / 24px 36px 20px 32px;
+  background: linear-gradient(120deg, rgba(255, 244, 209, 0.94), rgba(226, 245, 234, 0.94));
+  box-shadow: 0 12px 32px rgba(15, 31, 19, 0.08);
+}
+
+html[data-theme="dark"] .season-banner-inner {
+  border-color: rgba(92, 196, 151, 0.35);
+  background: linear-gradient(120deg, rgba(46, 37, 19, 0.92), rgba(18, 53, 40, 0.92));
+}
+
+.season-banner-inner p {
+  margin: 0;
+  flex: 1 1 240px;
+  color: var(--ink);
+  font-size: 0.94rem;
+}
+
+.season-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #025f40;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+html[data-theme="dark"] .season-pill {
+  background: #5cc497;
+  color: #09140e;
+}
+
+.season-banner-link {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--green);
+  color: var(--green);
+  font-size: 0.84rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+html[data-theme="dark"] .season-banner-link {
+  border-color: #7dd6ae;
+  color: #7dd6ae;
+}
+
+.hero--organic {
+  padding-top: 38px;
+}
+
+.organic-blob {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(2px);
+}
+
+.organic-blob--one {
+  top: 8%;
+  left: -6%;
+  width: 380px;
+  height: 360px;
+  border-radius: 58% 42% 64% 36% / 44% 58% 42% 56%;
+  background: radial-gradient(circle at 35% 35%, rgba(2, 95, 64, 0.14), rgba(159, 189, 114, 0.05) 70%, transparent);
+  animation: waveBlobDrift 14s ease-in-out infinite alternate;
+}
+
+.organic-blob--two {
+  bottom: 6%;
+  right: -4%;
+  width: 440px;
+  height: 390px;
+  border-radius: 42% 58% 37% 63% / 55% 39% 61% 45%;
+  background: radial-gradient(circle at 60% 50%, rgba(235, 184, 72, 0.15), rgba(2, 95, 64, 0.08) 68%, transparent);
+  animation: waveBlobDrift 18s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes waveBlobDrift {
+  0% {
+    border-radius: 58% 42% 64% 36% / 44% 58% 42% 56%;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  100% {
+    border-radius: 40% 60% 45% 55% / 60% 42% 58% 40%;
+    transform: translate(12px, -14px) rotate(4deg);
+  }
+}
+
+.hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.hero-season-tag,
+.hero-free-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 13px;
+  border-radius: 24px 14px 26px 12px / 14px 24px 12px 22px;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.hero-season-tag {
+  background: rgba(2, 95, 64, 0.12);
+  border: 1px solid rgba(2, 95, 64, 0.25);
+  color: var(--green);
+}
+
+.hero-free-tag {
+  background: #fff3d1;
+  border: 1px solid #d9a23a;
+  color: #523500;
+}
+
+html[data-theme="dark"] .hero-season-tag {
+  background: rgba(92, 196, 151, 0.16);
+  border-color: rgba(92, 196, 151, 0.4);
+  color: #7dd6ae;
+}
+
+html[data-theme="dark"] .hero-free-tag {
+  background: #2f2511;
+  border-color: #b5892e;
+  color: #f6dc9b;
+}
+
+.dog-glass-card--organic {
+  border-radius: 34px 20px 38px 22px / 22px 36px 20px 34px;
+}
+
+/* Divisores de ola de mar (SVG Waves) */
+.organic-wave {
+  width: 100%;
+  overflow: hidden;
+  line-height: 0;
+  margin: -18px 0;
+  pointer-events: none;
+}
+
+.organic-wave svg {
+  display: block;
+  width: 100%;
+  height: 54px;
+}
+
+.organic-wave path {
+  fill: rgba(2, 95, 64, 0.08);
+}
+
+html[data-theme="dark"] .organic-wave path {
+  fill: rgba(92, 196, 151, 0.1);
+}
+
+/* Formas de manchas / olas en las tarjetas en vez de rectángulos rígidos */
+.landing-organic .service-card:nth-child(odd) {
+  border-radius: 38px 22px 42px 24px / 24px 40px 22px 36px;
+}
+
+.landing-organic .service-card:nth-child(even) {
+  border-radius: 22px 40px 24px 38px / 38px 22px 36px 24px;
+}
+
+.landing-organic .prices-strip {
+  border-radius: 46px 26px 50px 28px / 28px 44px 26px 46px;
+}
+
+.landing-organic .evaluation-board {
+  border-radius: 36px 22px 38px 24px / 22px 36px 24px 34px;
+}
+
+/* Dúo orgánico: 1.er paseo gratis + Portal de Clientes */
+.organic-duo-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 36px 24px;
+}
+
+@media (min-width: 820px) {
+  .organic-duo-section {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.organic-splash-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 28px 24px;
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--soft-shadow);
+  background: var(--public-card);
+}
+
+.organic-splash-card--free {
+  border-radius: 44px 24px 48px 22px / 26px 46px 24px 42px;
+  border-color: rgba(2, 95, 64, 0.32);
+  background:
+    radial-gradient(circle at 90% 15%, rgba(242, 196, 90, 0.22), transparent 48%),
+    linear-gradient(155deg, rgba(2, 95, 64, 0.08), var(--public-card) 72%);
+}
+
+.organic-splash-card--client {
+  border-radius: 24px 46px 22px 44px / 42px 24px 46px 26px;
+  border-color: rgba(2, 95, 64, 0.28);
+  background:
+    radial-gradient(circle at 12% 85%, rgba(2, 95, 64, 0.14), transparent 52%),
+    var(--public-card);
+}
+
+.organic-splash-card h2 {
+  margin: 0;
+  font-size: clamp(1.55rem, 3vw, 2.15rem);
+  font-weight: 950;
+  line-height: 1.08;
+}
+
+.organic-splash-card p {
+  margin: 0;
+  color: var(--public-muted);
+}
+
+.organic-badge {
+  width: fit-content;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #025f40;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.organic-badge--sea {
+  background: #0f3d2e;
+}
+
+html[data-theme="dark"] .organic-badge {
+  background: #5cc497;
+  color: #09140e;
+}
+
+.organic-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* Galería y estación "Ahora Verano" */
+.summer-section,
+.alliances-section,
+.terms-section {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 64px 24px;
+}
+
+.summer-heading,
+.alliances-heading {
+  max-width: 740px;
+  margin-bottom: 28px;
+}
+
+.summer-heading h2,
+.alliances-heading h2,
+.terms-blob-box h2 {
+  margin-bottom: 8px;
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.summer-heading p:not(.eyebrow),
+.alliances-heading p:not(.eyebrow) {
+  margin: 0;
+  color: var(--public-muted);
+}
+
+.summer-gallery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+
+@media (min-width: 760px) {
+  .summer-gallery {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.summer-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--public-card);
+  box-shadow: var(--soft-shadow);
+  padding: 14px;
+  gap: 14px;
+}
+
+.summer-card--blob-1 {
+  border-radius: 42px 24px 38px 26px / 26px 40px 24px 38px;
+}
+
+.summer-card--blob-2 {
+  border-radius: 26px 42px 24px 40px / 38px 24px 42px 26px;
+}
+
+.summer-card--blob-3 {
+  border-radius: 38px 28px 44px 22px / 24px 38px 28px 42px;
+}
+
+.summer-media-blob {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border-radius: 34px 20px 36px 18px / 22px 34px 20px 32px;
+  background: #13281d;
+}
+
+.summer-media-blob img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.summer-photo-pill {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 31, 19, 0.84);
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 850;
+  backdrop-filter: blur(8px);
+}
+
+.summer-card-body {
+  padding: 4px 8px 10px;
+}
+
+.summer-card-body h3 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.summer-card-body p {
+  margin: 0;
+  color: var(--public-muted);
+  font-size: 0.95rem;
+}
+
+/* Alianzas */
+.alliances-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 720px) {
+  .alliances-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.alliance-blob-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 38px 22px 40px 24px / 24px 38px 22px 36px;
+  background: var(--public-card);
+  box-shadow: var(--soft-shadow);
+}
+
+.alliance-blob-card:nth-child(even) {
+  border-radius: 22px 40px 24px 38px / 36px 22px 38px 24px;
+}
+
+.alliance-blob-card--cta {
+  border: 2px solid var(--green);
+  background: linear-gradient(145deg, var(--public-tint), var(--public-card) 75%);
+}
+
+.alliance-status {
+  width: fit-content;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--public-tint);
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.alliance-blob-card h3 {
+  margin: 2px 0 0;
+  font-size: 1.22rem;
+  font-weight: 900;
+}
+
+.alliance-role {
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.alliance-blob-card p {
+  margin: 0;
+  color: var(--public-muted);
+}
+
+/* Términos y Privacidad */
+.terms-blob-box {
+  display: grid;
+  gap: 22px;
+  padding: 30px 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 44px 24px 46px 26px / 26px 42px 24px 44px;
+  background: var(--public-card);
+  box-shadow: var(--soft-shadow);
+}
+
+.terms-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+@media (min-width: 820px) {
+  .terms-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.terms-item {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 26px 18px 28px 16px / 18px 26px 16px 24px;
+  background: rgba(2, 95, 64, 0.04);
+}
+
+.terms-item h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.terms-item h3 .line-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--green);
+  flex: 0 0 auto;
+}
+
+.terms-item p {
+  margin: 0;
+  color: var(--public-muted);
+  font-size: 0.94rem;
+}
+
+.quick-terms-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--public-card);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.quick-terms-check input {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  accent-color: var(--green);
+  flex: 0 0 auto;
+}
+
+.quick-terms-check a {
+  color: var(--green);
+  font-weight: 900;
+}
+
+@media (max-width: 760px) {
+  .season-banner {
+    padding-top: 94px;
+  }
+
+  .organic-duo-section,
+  .summer-section,
+  .alliances-section,
+  .terms-section {
+    padding: 40px 16px;
+  }
+
+  .organic-card-actions .primary-button,
+  .organic-card-actions .secondary-button {
+    width: 100%;
+  }
+}
+
+/* Rótulo de imagen generada con IA (regla de marca) */
+.summer-ilustra-pill {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
