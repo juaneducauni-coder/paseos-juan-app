@@ -19,7 +19,7 @@ import {
 } from "../data/realData.js";
 import { PROMO } from "../data/mock.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
-import { isCalmMotion, isDarkTheme, onAccessibilityChange } from "../ui/accesibilidad.js";
+import { isCalmMotion } from "../ui/accesibilidad.js";
 
 // ---------------------------------------------------------------------------
 // Datos guardados en el dispositivo del tutor
@@ -396,7 +396,7 @@ function pageContent(ctx) {
       ${morePanel("cl-ficha", "fileText", "Ficha de mi perro", fichaSection(ctx))}
       ${morePanel("cl-pagos", "wallet", "Pagos y comprobantes", paymentSection(ctx))}
       ${isPromoActive(ctx) ? morePanel("cl-promo", "medal", "Promo", promoSection()) : ""}
-      ${morePanel("cl-accesibilidad", "eye", "Accesibilidad", accessibilityBand())}
+      ${morePanel("cl-accesibilidad", "eye", "Accesibilidad", accessibilityNote())}
       ${morePanel("cl-privacidad", "lock", "Mis datos", privacySection())}
     </div>
   `;
@@ -412,7 +412,7 @@ function todayDetails(ctx) {
         <span class="cl-section-icon">${icon("calendarCheck", "cl-icon")}</span>
         <div>
           <h2 id="cl-detail-title" class="cl-h2" tabindex="-1">Detalle de hoy</h2>
-          <p>Estado según el horario del turno. Seguimiento en vivo: ${PENDIENTE}.</p>
+          <p>Estado según el horario del turno.</p>
         </div>
       </header>
       ${status.step >= 0 ? `
@@ -463,7 +463,7 @@ function todaySection(ctx) {
     libre: `Los días de paseo de tu plan son ${listJoin(settings.days.map((d) => d.toLowerCase()))}.`,
     ausente: "Quedó anotado en este dispositivo. Si todavía no mandaste el aviso por WhatsApp, mandalo así el equipo se entera.",
     programado: `Sale en el turno ${settings.shift.toLowerCase()}, entre las ${shift.from} y las ${shift.to}.`,
-    "en-curso": `Ahora es el horario del turno ${settings.shift.toLowerCase()} (${shift.from} a ${shift.to}). El equipo te avisa por WhatsApp cuando lo retira y cuando lo entrega.`,
+    "en-curso": "En horario del turno",
     terminado: `El turno ${settings.shift.toLowerCase()} terminó a las ${shift.to}. Si no te llegó el aviso de entrega, escribinos.`,
   }[status.kind];
 
@@ -581,23 +581,9 @@ function quickActions(ctx) {
   `;
 }
 
-function accessibilityState() {
-  const theme = isDarkTheme() ? "oscuro" : "claro";
-  const motion = isCalmMotion() ? "calmo (sin movimiento)" : "normal";
-  return `Ahora: tema ${theme} · movimiento ${motion}.`;
-}
-
-function accessibilityBand() {
+function accessibilityNote() {
   return `
-    <section class="cl-a11y cl-card" aria-labelledby="cl-a11y-title">
-      <span class="cl-a11y-icon">${icon("eye", "cl-icon")}</span>
-      <div>
-        <h2 id="cl-a11y-title" class="cl-h3">Mirá la página como te quede más cómoda</h2>
-        <p><strong>Modo oscuro:</strong> menos brillo, ideal de noche. <strong>Modo calmo:</strong> apaga animaciones y el fondo en movimiento; recomendado si tenés epilepsia fotosensible, migrañas o te mareás con el movimiento en pantalla.</p>
-        <p class="cl-fine" data-cl-a11y-state>${accessibilityState()} Se guarda solo en este dispositivo.</p>
-      </div>
-      <button type="button" class="cl-btn is-secondary" data-cl-open-a11y>Abrir opciones de accesibilidad</button>
-    </section>
+    <p class="cl-a11y-note">Modo oscuro y modo calmo: botón redondo abajo a la izquierda.</p>
   `;
 }
 
@@ -653,7 +639,6 @@ function absenceSection(ctx) {
 
 function planSection(ctx) {
   const { plan, settings, shift } = ctx;
-  const single = REAL_SINGLE_WALK[settings.size];
   const daysOk = settings.days.length === plan.walks;
   return `
     <section class="cl-card cl-section" aria-labelledby="cl-plan-title">
@@ -700,13 +685,13 @@ function planSection(ctx) {
         `).join("")}
       </ul>
       <div class="cl-plan-extra">
-        <p><strong>Paseo suelto (${esc(settings.size.toLowerCase())}):</strong> individual ${formatPeso(single.individual)} · en grupo ${formatPeso(single.grupo)}.</p>
+        <p><strong>Paseo suelto en grupo (${esc(settings.size.toLowerCase())}):</strong> ${formatPeso(REAL_SINGLE_WALK[settings.size].grupo)}.</p>
         <p><strong>Más de un perro en casa:</strong> ${MULTI_DOG_DISCOUNTS.map((item) => `${item.dogs} perros ${item.discount}`).join(" · ")} de descuento.</p>
         <p class="cl-fine">Fuente: tabla oficial de planes de Paseos Juan. El monto final de tu cuenta te lo confirmamos por WhatsApp.</p>
       </div>
 
       <details class="cl-details" data-cl-details="plan" ${ui.openGroups.has("plan") ? "open" : ""}>
-        <summary>${icon("sliders", "cl-icon-sm")} Cambiar el ejemplo</summary>
+        <summary>${icon("sliders", "cl-icon-sm")} Probar con otro plan (solo vista previa)</summary>
         <div class="cl-form cl-plan-form">
           <p class="cl-fine">Esto solo cambia lo que ves en este dispositivo. Para cambiar tu plan de verdad, escribinos por WhatsApp.</p>
           <div class="cl-form-row">
@@ -755,7 +740,7 @@ function fichaSection(ctx) {
         <span class="cl-section-icon">${icon("fileText", "cl-icon")}</span>
         <div>
           <h2 id="cl-ficha-title" class="cl-h2" tabindex="-1">Ficha de <span data-cl-dogname>${esc(ctx.dogName)}</span></h2>
-          <p>Con estos datos cuidamos mejor a tu perro. Lo que falte figura como “${PENDIENTE}”. Se guarda solo en este dispositivo mientras lo escribís.</p>
+          <p>Con estos datos cuidamos mejor a tu perro. Si todavía no cargaste información, vas a ver “Sin cargar”. Se guarda solo en este dispositivo mientras lo escribís.</p>
         </div>
       </header>
 
@@ -763,7 +748,7 @@ function fichaSection(ctx) {
         <div class="cl-progress-wrap" data-cl-region="ficha-progreso">${fichaProgressBlock(done, total)}</div>
         <div class="cl-category">
           <span class="cl-category-tag">SIN EVALUAR</span>
-          <p><strong>Categoría operativa.</strong> ${esc(CATEGORIES["SIN EVALUAR"])} Todo perro nuevo empieza así y su primer paseo es individual. Fecha de evaluación: ${PENDIENTE}.</p>
+          <p><strong>Categoría operativa.</strong> ${esc(CATEGORIES["SIN EVALUAR"])} Evaluación pendiente: antes de sumarlo al grupo, coordinamos una evaluación inicial para conocerlo.</p>
         </div>
       </div>
       <div data-cl-region="alertas-ficha">${alertsBlock(safetyAlerts(ficha))}</div>
@@ -789,7 +774,7 @@ function fichaProgressBlock(done, total) {
 function groupCountLabel(ficha, group) {
   const count = groupProgress(ficha, group);
   if (count === group.fields.length) return `<span class="cl-count is-done">${icon("checkCircle", "cl-icon-xs")} Completo</span>`;
-  return `<span class="cl-count">${count} de ${group.fields.length} · ${PENDIENTE.toLowerCase()}</span>`;
+  return `<span class="cl-count">${count} de ${group.fields.length}</span>`;
 }
 
 function fichaGroup(group, ficha) {
@@ -820,20 +805,19 @@ function fichaField(field, ficha) {
   if (field.options) {
     control = `
       <select id="${id}" data-cl-ficha="${field.key}">
-        <option value="">${PENDIENTE}</option>
+        <option value="">Elegí una opción</option>
         ${field.options.map((option) => `<option ${option === value ? "selected" : ""}>${esc(option)}</option>`).join("")}
       </select>
     `;
   } else if (field.textarea) {
-    control = `<textarea id="${id}" rows="3" maxlength="600" data-cl-ficha="${field.key}" placeholder="${esc(field.placeholder || PENDIENTE)}">${esc(value)}</textarea>`;
+    control = `<textarea id="${id}" rows="3" maxlength="600" data-cl-ficha="${field.key}" placeholder="${esc(field.placeholder || "Escribí acá")}">${esc(value)}</textarea>`;
   } else {
-    control = `<input id="${id}" type="${field.type || "text"}" maxlength="140" ${field.autocomplete ? `autocomplete="${field.autocomplete}"` : 'autocomplete="off"'} data-cl-ficha="${field.key}" value="${esc(value)}" placeholder="${esc(field.placeholder || PENDIENTE)}" />`;
+    control = `<input id="${id}" type="${field.type || "text"}" maxlength="140" ${field.autocomplete ? `autocomplete="${field.autocomplete}"` : 'autocomplete="off"'} data-cl-ficha="${field.key}" value="${esc(value)}" placeholder="${esc(field.placeholder || "Escribí acá")}" />`;
   }
   return `
     <label class="cl-field ${wide}" for="${id}">
       <span>${field.label}</span>
       ${control}
-      ${field.placeholder && !field.options ? `<small class="cl-field-state" data-cl-field-state="${field.key}">${filled(ficha, field.key) ? "" : PENDIENTE}</small>` : ""}
     </label>
   `;
 }
@@ -884,6 +868,10 @@ function paymentSection(ctx) {
       <p class="cl-price-ref">Precio de lista de tu plan: <strong>${formatPeso(ctx.plan.prices[ctx.settings.size])} por semana</strong>. El monto final te lo confirmamos por WhatsApp.</p>
       <a class="cl-btn" href="${waLink("Hola, ¿me pasan el alias y el detalle de pago del plan de mi perro?")}" target="_blank" rel="noreferrer">
         ${icon("message", "cl-icon-sm")} Pedir alias y detalle por WhatsApp
+      </a>
+      <p class="cl-fine"><strong>Después mandanos la imagen por WhatsApp.</strong></p>
+      <a class="cl-btn is-secondary" href="${waLink("Hola, te mando la imagen del comprobante para que la revisen.")}" target="_blank" rel="noreferrer">
+        ${icon("message", "cl-icon-sm")} Mandar imagen por WhatsApp
       </a>
       <div class="cl-upload">
         <input id="cl-receipt-file" class="cl-file-input" type="file" accept=".jpg,.jpeg,.png,.pdf,image/*" data-cl-file="comprobante" />
@@ -974,9 +962,6 @@ function refreshFichaParts() {
   });
   root.querySelectorAll("[data-cl-dogname]").forEach((element) => {
     element.textContent = ctx.dogName;
-  });
-  root.querySelectorAll("[data-cl-field-state]").forEach((element) => {
-    element.textContent = filled(ctx.ficha, element.dataset.clFieldState) ? "" : PENDIENTE;
   });
 }
 
@@ -1208,8 +1193,4 @@ export function registerClienteEvents() {
   changeHandlers.push(handleClienteChange);
   document.addEventListener("input", handleClienteInput);
   document.addEventListener("toggle", handleClienteToggle, true);
-  onAccessibilityChange(() => {
-    const element = document.querySelector("[data-cl-a11y-state]");
-    if (element) element.textContent = `${accessibilityState()} Se guarda solo en este dispositivo.`;
-  });
 }
