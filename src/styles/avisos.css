@@ -91,3 +91,17 @@ html[data-theme="dark"] .pw-notice--info {
   background: rgba(37, 99, 235, 0.16);
   color: #dbeafe;
 }
+
+/* Iconos limpios dentro de etiquetas (reemplazan emojis) */
+.pill-icon {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 0.4em;
+  vertical-align: -0.2em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

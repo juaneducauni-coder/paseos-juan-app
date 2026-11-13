@@ -134,17 +134,16 @@ export function landingPage() {
   return publicShell(`
     <canvas class="lava-lamp" data-lava aria-hidden="true"></canvas>
     <main class="landing-main landing-organic">
-      ${SeasonBanner()}
       ${HeroSection()}
       ${waveDivider("top", "organic-wave--hero")}
-      ${FirstWalkAndClientPortalSection()}
-      ${SummerShowcaseSection()}
-      ${waveDivider("sea", "organic-wave--mid")}
       ${ServicesSection()}
       ${PricesStrip()}
+      ${FirstWalkAndClientPortalSection()}
       ${HowWeWorkSection()}
-      ${AlliancesSection()}
+      ${SummerShowcaseSection()}
+      ${waveDivider("sea", "organic-wave--mid")}
       ${TrustSection()}
+      ${AlliancesSection()}
       ${waveDivider("soft", "organic-wave--cta")}
       ${CTASection()}
       ${TermsAndPrivacySection()}
@@ -158,7 +157,7 @@ function SeasonBanner() {
   return `
     <div class="season-banner" role="region" aria-label="Temporada actual">
       <div class="season-banner-inner">
-        <span class="season-pill">☀️ Ahora Verano</span>
+        <span class="season-pill">${icon("sun", "pill-icon")}Ahora Verano</span>
         <p><strong>Paseos de verano:</strong> agua en ruta con botella bebedero en ${BUSINESS.zone}.</p>
         <a class="season-banner-link" href="#verano" data-link>Ver modo verano</a>
       </div>
@@ -174,7 +173,7 @@ function HeroSection() {
       <div class="organic-blob organic-blob--two" aria-hidden="true"></div>
       <div class="hero-copy reveal">
         <div class="hero-badges">
-          <span class="hero-free-tag">🎁 El primer paseo es gratis</span>
+          <span class="hero-free-tag">${icon("gift", "pill-icon")}El primer paseo es gratis</span>
         </div>
         <p class="eyebrow">Disciplina. Libertad. Bienestar.</p>
         <h1 class="hero-title">
@@ -193,7 +192,7 @@ function HeroSection() {
       </div>
       <div class="hero-media reveal">
         <div class="dog-frame">
-          <img src="/verano-manada.png" onerror="this.onerror=null;this.src='/hero-dog-premium.png';" alt="Imagen ilustrativa: perros paseando con arnés sobre el pasto en verano" />
+          <img src="/paseo-grupal-real-hd.png" onerror="this.onerror=null;this.src='/hero-dog-premium.png';" alt="Paseo grupal real de Paseos Juan en una calle de Pilar" />
         </div>
         <div class="dog-glass-card dog-glass-card--organic">
           <span class="glass-icon">${icon("droplets")}</span>
@@ -201,7 +200,7 @@ function HeroSection() {
           <span>Agua en ruta, retiro, foto del paseo y entrega.</span>
         </div>
       </div>
-      <a class="scroll-indicator" href="#verano" data-link aria-label="Bajar a temporada de verano">
+      <a class="scroll-indicator" href="#servicios" data-link aria-label="Bajar a servicios">
         <span>Bajar</span>
         <b>${icon("chevronDown")}</b>
       </a>
@@ -213,7 +212,7 @@ function FirstWalkAndClientPortalSection() {
   return `
     <section class="organic-duo-section reveal" aria-label="Primer paseo gratis y acceso de clientes">
       <article class="organic-splash-card organic-splash-card--free">
-        <span class="organic-badge">🎁 Beneficio de bienvenida</span>
+        <span class="organic-badge">${icon("gift", "pill-icon")}Beneficio de bienvenida</span>
         <h2>El primer paseo es gratis</h2>
         <p>
           Queremos conocer a tu perro con tranquilidad. Hacemos una evaluación inicial y su
@@ -225,7 +224,7 @@ function FirstWalkAndClientPortalSection() {
       </article>
 
       <article class="organic-splash-card organic-splash-card--client">
-        <span class="organic-badge organic-badge--sea">🐾 Acceso directo</span>
+        <span class="organic-badge organic-badge--sea">${icon("pawPrint", "pill-icon")}Acceso directo</span>
         <h2>¿Ya sos cliente de Paseos Juan?</h2>
         <p>
           Entrá directo y tranquilo a tu panel: mirá el paseo de hoy, subí tu comprobante de pago,
@@ -243,25 +242,31 @@ function FirstWalkAndClientPortalSection() {
 function SummerShowcaseSection() {
   const summerHighlights = [
     {
-      title: "Manada al sol suave y sombra",
-      tag: "Ahora Verano · Caminatas frescas",
-      desc: "En verano cuidamos a la manada del calor durante todo el paseo.",
-      img: "/verano-manada.png",
+      title: "Paseos grupales reales",
+      tag: "Ahora Verano · En movimiento",
+      desc: "Una salida real de Paseos Juan, con la manada organizada durante el recorrido.",
+      img: "/paseo-grupal-real-hd.png",
       fallback: "/hero-dog-premium.png",
+      alt: "Paseo grupal real de Paseos Juan con varios perros",
+      label: "Foto real mejorada en HD",
     },
     {
-      title: "Hidratación constante en cada salida",
-      tag: "Ahora Verano · Agua fresca",
-      desc: "Nuestro equipo y ayudante llevan botellas bebedero en toda la ruta para hidratar a cada perro durante el paseo.",
-      img: "/verano-hidratacion.png",
+      title: "Rambo, identidad Paseos Juan",
+      tag: "Compañero de la manada",
+      desc: "Retrato fotorealista creado a partir de la ilustración original de Rambo.",
+      img: "/rambo-fotorealista-hd.png",
       fallback: "/hero-dog-premium.png",
+      alt: "Representación fotorealista de Rambo con boina y arnés de Paseos Juan",
+      label: "Recreación fotorealista",
     },
     {
-      title: "Grupos armados por energía",
-      tag: "Ahora Verano · Bienestar en grupo",
-      desc: "Cada grupo se organiza por tamaño, carácter y ritmo para que disfruten el verano seguros y en armonía.",
-      img: "/verano-armonia.png",
+      title: "Compañero de la manada",
+      tag: "Identidad Paseos Juan",
+      desc: "Retrato fotorealista creado a partir de la ilustración original del labrador.",
+      img: "/labrador-fotorealista-hd.png",
       fallback: "/hero-dog-premium.png",
+      alt: "Representación fotorealista de un labrador con boina y arnés de Paseos Juan",
+      label: "Recreación fotorealista",
     },
   ];
 
@@ -276,9 +281,9 @@ function SummerShowcaseSection() {
         ${summerHighlights.map((item, idx) => `
           <article class="summer-card summer-card--blob-${idx + 1}">
             <div class="summer-media-blob">
-              <img src="${item.img}" onerror="this.onerror=null;this.src='${item.fallback}';" alt="Imagen ilustrativa: ${esc(item.title)}" loading="lazy" />
-              <span class="summer-photo-pill">☀️ ${esc(item.tag)}</span>
-              <span class="summer-ilustra-pill">Imagen ilustrativa</span>
+              <img src="${item.img}" onerror="this.onerror=null;this.src='${item.fallback}';" alt="${esc(item.alt)}" loading="lazy" />
+              <span class="summer-photo-pill">${icon("sun", "pill-icon")}${esc(item.tag)}</span>
+              <span class="summer-ilustra-pill">${esc(item.label)}</span>
             </div>
             <div class="summer-card-body">
               <h3>${esc(item.title)}</h3>
