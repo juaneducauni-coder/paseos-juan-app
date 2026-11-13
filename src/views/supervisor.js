@@ -1,8 +1,15 @@
 // Vista del rol Supervisor: Juan (turno mañana) y Nicolás (turno tarde).
 // Arriba va lo del turno que se está mirando (por defecto, el turno actual en Argentina):
-// seguridad, perros y control de retiro y entrega. El resto (armado de rutas, observaciones
-// de conducta, cierre del turno y referencias) queda agrupado en secciones plegables.
-// Todo lo que se carga en esta pantalla se guarda solo en este dispositivo (localStorage).
+// incidentes del día (si hay), seguridad, perros y control de retiro y entrega. El resto
+// (armado de rutas, observaciones de conducta, cierre del turno y referencias) queda en
+// secciones plegables.
+//
+// Los datos del trabajo son compartidos (src/api/client.js, contrato en docs/datos-compartidos.md):
+// - paseos: el MISMO registro por perro, día y turno que marca el paseador desde su celular.
+// - rutas, observaciones y cierres: lo que carga el supervisor.
+// - incidentes y checklists: lo que carga el paseador (acá solo se leen).
+// En localStorage quedan solo comodidades de este dispositivo: día y turno elegidos, secciones
+// abiertas y borradores sin guardar.
 import {
   REAL_DOGS,
   SHIFTS,
@@ -11,32 +18,53 @@ import {
   PENDIENTE,
   DATA_UPDATED,
   BUSINESS_INFO,
+  TEAM,
   dogsForShift,
 } from "../data/realData.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
+import { session, registros, onDataChange, hoyAR } from "../api/client.js";
 
 const TIME_ZONE = "America/Argentina/Buenos_Aires";
 const SHIFT_KEYS = ["manana", "tarde"];
 const WALKER_OPTIONS = ["Paseador asignado", "Sebastián"];
 const FORBIDDEN_LABELS = /(^|[^a-záéíóúñ])(agresiv[oa]s?|agresividad|mal[oa]s?|dominantes?|dominancia)(?=$|[^a-záéíóúñ])/i;
+// Colecciones compartidas que usa esta página.
+const COLS = ["paseos", "checklists", "incidentes", "observaciones", "rutas", "cierres"];
+// Las observaciones se muestran de los últimos 7 días (pueden cargarse con fecha anterior).
+const OBS_DAYS = 7;
+const ROLE_LABELS = { admin: "Admin", supervisor: "Supervisor", coordinador: "Coordinación", paseador: "Paseador" };
 
+// Comodidades de este dispositivo (no son datos del trabajo).
 const KEYS = {
   view: "paseosJuanSupervisor_vista",
   folds: "paseosJuanSupervisor_plegado",
-  control: "paseosJuanSupervisor_control",
-  closure: "paseosJuanSupervisor_cierre",
-  routes: "paseosJuanSupervisor_rutas",
   routeDraft: "paseosJuanSupervisor_rutaBorrador",
-  observations: "paseosJuanSupervisor_observaciones",
   observationDraft: "paseosJuanSupervisor_observacionBorrador",
+};
+
+// Claves de la versión anterior, que guardaba todo solo en el teléfono. Se suben una vez y se borran.
+const LEGACY = {
+  routes: "paseosJuanSupervisor_rutas",
+  observations: "paseosJuanSupervisor_observaciones",
+  closure: "paseosJuanSupervisor_cierre",
 };
 
 // Mensajes de estado que se muestran una vez (zona aria-live de cada sección).
 let flash = null;
-// Ruta que espera confirmación para borrarse (paso doble, sin diálogos del navegador).
+// Ruta u observación que espera confirmación para borrarse (paso doble, sin diálogos del navegador).
 let pendingRouteDelete = null;
 let pendingObservationDelete = null;
+// Notas del cierre mientras se escriben (se guardan al salir del campo).
+let closureDraft = null;
+// Registros que se están guardando (evita doble toque mientras viaja el pedido).
+const inFlight = new Set();
+// Lo último que devolvió el servidor al guardar desde esta página, hasta que llegue en la lista.
+const recent = new Map();
+const saveQueues = new Map();
+let liveRegistered = false;
+let liveTimer = null;
+let migrationState = "idle";
 
 // ---------- Utilidades ----------
 
@@ -65,6 +93,14 @@ function writeJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Sin almacenamiento (modo privado): el dato vale solo mientras la página esté abierta.
+  }
+}
+
+function removeKey(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // nada
   }
 }
 
@@ -119,9 +155,60 @@ function nowInArgentina() {
   };
 }
 
+function addDays(iso, days) {
+  const date = new Date(`${iso}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function isoToLabel(iso) {
+  const [year, month, day] = String(iso || "").split("-");
+  return year && month && day ? `${day}/${month}/${year}` : PENDIENTE;
+}
+
+// "DD/MM/AAAA" → "AAAA-MM-DD" solo si es una fecha real del calendario.
+function labelToIso(label) {
+  const match = String(label || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
+  const iso = `${match[3]}-${match[2]}-${match[1]}`;
+  const date = new Date(`${iso}T12:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+function dayNameOf(iso) {
+  return WEEK_DAYS[(new Date(`${iso}T12:00:00Z`).getUTCDay() + 6) % 7];
+}
+
+// Próxima fecha (hoy incluido) que cae en ese día de la semana.
+function nextDateFor(dayName, fromIso) {
+  const from = WEEK_DAYS.indexOf(dayNameOf(fromIso));
+  const target = WEEK_DAYS.indexOf(dayName);
+  return addDays(fromIso, (target - from + 7) % 7);
+}
+
+// Hora argentina (HH:MM) de una marca de tiempo del servidor.
+function timeOf(isoStamp) {
+  const date = new Date(isoStamp || "");
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("es-AR", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date);
+}
+
+function dateOfStamp(isoStamp) {
+  const date = new Date(isoStamp || "");
+  return Number.isNaN(date.getTime()) ? null : hoyAR(date);
+}
+
 function currentShiftKey(now) {
   // Entre turnos (después de las 13:30) ya se muestra la tarde.
   return now.minutes < toMinutes("13:30") ? "manana" : "tarde";
+}
+
+// "Mañana" / "manana" / "Tarde" → "manana" / "tarde".
+function shiftKeyOf(turno) {
+  const text = String(turno || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  if (text.startsWith("man")) return "manana";
+  if (text.startsWith("tar")) return "tarde";
+  return null;
 }
 
 function shiftRoutes(shiftKey) {
@@ -136,6 +223,334 @@ function shiftMoment(shiftKey, now) {
   return { label: "Terminado", tone: "done" };
 }
 
+function currentUser() {
+  return session.user() || {};
+}
+
+function canDelete(record) {
+  const user = currentUser();
+  if (!record || record.pendiente) return false;
+  return user.rol === "admin" || (record.creadoPor && record.creadoPor === user.usuario);
+}
+
+// Nombre para mostrar de un usuario del servidor (el servidor guarda el nombre solo de quien lo creó).
+function personName(usuario, record) {
+  if (!usuario) return "";
+  if (record?.creadoPor === usuario && record.creadoPorNombre) return record.creadoPorNombre;
+  const user = currentUser();
+  if (user.usuario === usuario && user.nombre) return user.nombre;
+  return TEAM.find((person) => person.id === usuario)?.name || usuario;
+}
+
+// "Marcó Sebastián a las 10:15 hs" (o aviso si todavía no salió por falta de señal).
+function lastMark(record, verb = "Marcó") {
+  if (!record) return "";
+  if (record.pendiente) return "Se enviará cuando haya señal.";
+  const who = personName(record.actualizadoPor || record.creadoPor, record);
+  const at = timeOf(record.actualizadoEn || record.creadoEn);
+  return who ? `${verb} ${who}${at ? ` a las ${at} hs` : ""}.` : "";
+}
+
+// ---------- Datos compartidos ----------
+
+function watchOpts(col) {
+  const today = hoyAR();
+  return { desde: col === "observaciones" ? addDays(today, -(OBS_DAYS - 1)) : today };
+}
+
+function startWatching() {
+  if (!session.token()) return;
+  COLS.forEach((col) => registros.watch(col, watchOpts(col)));
+}
+
+// Lo que hay en caché (instantáneo) + lo que acabamos de guardar, quedándose con lo más nuevo.
+function records(col) {
+  const byId = new Map(registros.cached(col, watchOpts(col)).map((record) => [record.id, record]));
+  recent.forEach((record, key) => {
+    if (!key.startsWith(`${col}:`)) return;
+    const current = byId.get(record.id);
+    if (!current || (!current.pendiente && String(current.actualizadoEn || "") < String(record.actualizadoEn || ""))) {
+      byId.set(record.id, record);
+    }
+  });
+  return [...byId.values()];
+}
+
+// Los guardados de un mismo registro van en fila (por ejemplo, notas del cierre y "cerrar turno"
+// casi juntos): así ninguno pisa al otro.
+function persist(col, data, area, okText, tone = "ok") {
+  if (!data.id) return persistNow(col, data, area, okText, tone);
+  const key = `${col}:${data.id}`;
+  const next = (saveQueues.get(key) || Promise.resolve()).then(() => persistNow(col, data, area, okText, tone));
+  saveQueues.set(key, next);
+  next.then(() => {
+    if (saveQueues.get(key) === next) saveQueues.delete(key);
+  });
+  return next;
+}
+
+async function persistNow(col, data, area, okText, tone) {
+  try {
+    const result = await registros.save(col, data);
+    if (result.pendiente) {
+      setFlash(area, `${okText} Sin señal: se enviará cuando haya conexión.`, "info");
+    } else {
+      const key = `${col}:${result.id}`;
+      const previous = recent.get(key);
+      if (!previous || String(previous.actualizadoEn || "") <= String(result.actualizadoEn || "")) recent.set(key, result);
+      setFlash(area, okText, tone);
+    }
+    return result;
+  } catch (error) {
+    setFlash(area, error?.message || "No se pudo guardar. Probá de nuevo.", "error");
+    return null;
+  }
+}
+
+async function removeRecord(col, id, area, okText) {
+  try {
+    await registros.remove(col, id);
+    recent.delete(`${col}:${id}`);
+    setFlash(area, okText, "info");
+    return true;
+  } catch (error) {
+    setFlash(area, error?.message || "No se pudo borrar. Probá de nuevo.", "error");
+    return false;
+  }
+}
+
+async function refreshAll(announce = true) {
+  if (!session.token()) return;
+  const results = await Promise.allSettled(COLS.map((col) => registros.list(col, watchOpts(col))));
+  if (!announce) return;
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) setFlash("sync", failed.reason?.message || "No se pudieron traer los datos.", "error");
+  else if (!navigator.onLine) setFlash("sync", "Sin señal: ves lo último que se guardó en este teléfono.", "info");
+  else setFlash("sync", `Datos actualizados a las ${nowInArgentina().time} hs.`);
+  rerender("sv-refresh");
+}
+
+function onSupervisorPage() {
+  return window.location.pathname.replace(/\/+$/, "") === "/supervisor";
+}
+
+// Redibuja cuando llegan datos nuevos sin perder lo que se está escribiendo ni el foco.
+function liveRerender() {
+  liveTimer = null;
+  if (!onSupervisorPage() || !document.querySelector(".sv-shell")) return;
+  renderKeepingFocus();
+}
+
+function renderKeepingFocus() {
+  const active = document.activeElement;
+  const id = active?.id || "";
+  let selection = null;
+  try {
+    if (active && typeof active.selectionStart === "number") selection = [active.selectionStart, active.selectionEnd];
+  } catch {
+    selection = null;
+  }
+  render();
+  if (!id) return;
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.focus({ preventScroll: true });
+  if (selection && typeof element.setSelectionRange === "function") {
+    try {
+      element.setSelectionRange(selection[0], selection[1]);
+    } catch {
+      // Algunos campos (fecha, hora) no admiten selección.
+    }
+  }
+}
+
+function scheduleLive() {
+  if (liveTimer) return;
+  liveTimer = setTimeout(liveRerender, 40);
+}
+
+// Se registra UNA sola vez (al arrancar la app).
+function registerLive() {
+  if (liveRegistered) return;
+  liveRegistered = true;
+  onDataChange((col) => {
+    if (COLS.includes(col)) scheduleLive();
+  });
+  window.addEventListener("online", scheduleLive);
+  window.addEventListener("offline", scheduleLive);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && onSupervisorPage()) refreshAll(false);
+  });
+}
+
+// ---------- Migración de la versión anterior ----------
+
+function legacyPending() {
+  try {
+    return Object.values(LEGACY).some((key) => localStorage.getItem(key) !== null);
+  } catch {
+    return false;
+  }
+}
+
+function safeId(text) {
+  return String(text).replace(/[^a-z0-9_.-]/gi, "-").slice(0, 100);
+}
+
+function stampFromLegacyId(id) {
+  const ms = Number(String(id || "").replace(/^\D+/, ""));
+  return Number.isFinite(ms) && ms > 1e12 ? new Date(ms).toISOString() : null;
+}
+
+function legacyRouteRecord(route) {
+  if (!route || typeof route !== "object" || !Array.isArray(route.dogIds) || !SHIFT_KEYS.includes(route.shift)) return null;
+  // La ruta se armaba para un día de la semana: va a la primera fecha de ese día desde que se guardó.
+  const savedIso = labelToIso(String(route.savedAt || "").slice(0, 10)) || dateOfStamp(stampFromLegacyId(route.id)) || hoyAR();
+  const fecha = WEEK_DAYS.includes(route.day) ? nextDateFor(route.day, savedIso) : savedIso;
+  const turno = SHIFTS[route.shift].label;
+  return {
+    id: safeId(`${fecha}_${route.id || Date.now()}`),
+    fecha,
+    turno,
+    ruta: route.route || "",
+    paseador: route.walker || WALKER_OPTIONS[0],
+    perros: route.dogIds.filter((id) => dogById(id)),
+    conflictos: Array.isArray(route.conflicts) ? route.conflicts : [],
+    medida: route.reason || "",
+    notas: route.notes || "",
+    titulo: `Ruta ${route.route || ""} · ${turno} · ${isoToLabel(fecha)}`,
+    migrado: true,
+  };
+}
+
+function legacyObservationRecord(obs) {
+  if (!obs || typeof obs !== "object" || !obs.dogId) return null;
+  const dog = dogById(obs.dogId);
+  const fecha = labelToIso(obs.fecha) || dateOfStamp(stampFromLegacyId(obs.id)) || hoyAR();
+  return {
+    id: safeId(`${fecha}_${obs.id || Date.now()}`),
+    fecha,
+    hora: obs.hora || "",
+    perroId: obs.dogId,
+    perroNombre: dog ? dog.name : "",
+    lugar: obs.lugar || "",
+    estimulo: obs.estimulo || "",
+    reaccion: obs.reaccion || "",
+    accion: obs.accion || "",
+    resultado: obs.resultado || "",
+    seguimiento: Boolean(obs.seguimiento),
+    turno: SHIFTS[obs.shift]?.label || "",
+    titulo: `Observación: ${dog ? dog.name : PENDIENTE}`,
+    autorAnterior: obs.autor || "",
+    migrado: true,
+  };
+}
+
+async function uploadLegacy(col, record) {
+  try {
+    await registros.save(col, record);
+    return null;
+  } catch (error) {
+    return error?.message || "Error al subir.";
+  }
+}
+
+// Sube una sola vez lo que quedó guardado solo en este teléfono y deja de usar esas claves.
+async function migrateLegacy() {
+  if (migrationState !== "idle" || !session.token() || !legacyPending() || !navigator.onLine) return;
+  migrationState = "running";
+  let uploaded = 0;
+  let failed = 0;
+  let lastError = "";
+
+  const oldRoutes = readJSON(LEGACY.routes, []);
+  const keepRoutes = [];
+  for (const route of oldRoutes) {
+    const record = legacyRouteRecord(route);
+    if (!record) continue;
+    const error = await uploadLegacy("rutas", record);
+    if (error) {
+      keepRoutes.push(route);
+      failed += 1;
+      lastError = error;
+    } else uploaded += 1;
+  }
+  if (keepRoutes.length) writeJSON(LEGACY.routes, keepRoutes);
+  else removeKey(LEGACY.routes);
+
+  const oldObservations = readJSON(LEGACY.observations, []);
+  const keepObservations = [];
+  for (const obs of oldObservations) {
+    const record = legacyObservationRecord(obs);
+    if (!record) continue;
+    const error = await uploadLegacy("observaciones", record);
+    if (error) {
+      keepObservations.push(obs);
+      failed += 1;
+      lastError = error;
+    } else uploaded += 1;
+  }
+  if (keepObservations.length) writeJSON(LEGACY.observations, keepObservations);
+  else removeKey(LEGACY.observations);
+
+  // Cierres: no se pisa un cierre que ya esté cargado en el servidor (otro supervisor pudo cerrarlo).
+  const oldClosures = readJSON(LEGACY.closure, {});
+  const entries = Object.entries(oldClosures).filter(([key, value]) => {
+    const [iso, shift] = key.split("|");
+    return /^\d{4}-\d{2}-\d{2}$/.test(iso) && SHIFT_KEYS.includes(shift) && value && (String(value.notas || "").trim() || value.cerrado);
+  });
+  if (entries.length) {
+    const desde = entries.map(([key]) => key.split("|")[0]).sort()[0];
+    let existing = null;
+    try {
+      existing = new Set((await registros.list("cierres", { desde })).filter((record) => !record.pendiente).map((record) => record.id));
+    } catch (error) {
+      lastError = error?.message || "No se pudieron revisar los cierres.";
+    }
+    if (existing) {
+      const keepClosures = {};
+      for (const [key, value] of entries) {
+        const [iso, shift] = key.split("|");
+        const id = `${iso}_${shift}`;
+        if (existing.has(id)) continue;
+        const error = await uploadLegacy("cierres", {
+          id,
+          fecha: iso,
+          turno: SHIFTS[shift].label,
+          notas: String(value.notas || ""),
+          resumen: "",
+          cerrado: Boolean(value.cerrado),
+          horaCierre: value.cerrado ? String(value.cerrado) : "",
+          migrado: true,
+        });
+        if (error) {
+          keepClosures[key] = value;
+          failed += 1;
+          lastError = error;
+        } else uploaded += 1;
+      }
+      if (Object.keys(keepClosures).length) writeJSON(LEGACY.closure, keepClosures);
+      else removeKey(LEGACY.closure);
+    } else {
+      failed += entries.length;
+    }
+  } else {
+    removeKey(LEGACY.closure);
+  }
+
+  migrationState = "done";
+  if (uploaded || failed) {
+    setFlash(
+      "sync",
+      failed
+        ? `Se subieron ${uploaded} registros de la versión anterior y ${failed} no se pudieron subir (${lastError}). Quedan en este teléfono.`
+        : `Se subieron ${uploaded} registro${uploaded === 1 ? "" : "s"} que estaban solo en este teléfono (versión anterior). Ahora los ve el equipo.`,
+      failed ? "error" : "ok",
+    );
+  }
+  scheduleLive();
+}
+
 // ---------- Estado de la vista ----------
 
 function getView() {
@@ -146,7 +561,10 @@ function getView() {
   const view = stored.date === now.iso ? { ...fallback, ...stored } : fallback;
   if (!WEEK_DAYS.includes(view.day)) view.day = fallback.day;
   if (!SHIFT_KEYS.includes(view.shift)) view.shift = fallback.shift;
-  return { ...view, now, isToday: view.day === now.dayName };
+  const isToday = view.day === now.dayName;
+  // Otro día de la semana = la próxima fecha que cae ese día (para planificar).
+  const fecha = isToday ? now.iso : nextDateFor(view.day, now.iso);
+  return { day: view.day, shift: view.shift, now, isToday, fecha, fechaLabel: isoToLabel(fecha) };
 }
 
 function saveView(view) {
@@ -158,28 +576,73 @@ function isFoldOpen(name, fallback = false) {
   return typeof folds[name] === "boolean" ? folds[name] : fallback;
 }
 
-function controlKey(view) {
-  return `${view.now.iso}|${view.shift}`;
+// ---------- Paseos (retiro y entrega) ----------
+
+function paseoId(fecha, dogId, shiftKey) {
+  return `${fecha}_${dogId}_${shiftKey}`;
 }
 
-function getControl(view) {
-  return readJSON(KEYS.control, {})[controlKey(view)] || {};
+function paseosById() {
+  return new Map(records("paseos").map((record) => [record.id, record]));
 }
 
-function saveControl(view, value) {
-  const all = readJSON(KEYS.control, {});
-  all[controlKey(view)] = value;
-  writeJSON(KEYS.control, all);
+function paseoState(record) {
+  const estado = record?.estado || "pendiente";
+  const noSale = estado === "no-sale";
+  const retirado = ["retirado", "paseando", "entregado"].includes(estado);
+  return {
+    record,
+    estado,
+    noSale,
+    retirado,
+    paseando: estado === "paseando",
+    entregado: estado === "entregado",
+    horaRetiro: retirado ? record?.horaRetiro || "" : "",
+    horaPaseo: retirado ? record?.horaPaseo || "" : "",
+    horaEntrega: estado === "entregado" ? record?.horaEntrega || "" : "",
+    nota: record?.nota || "",
+  };
 }
 
-function getClosure(view) {
-  return readJSON(KEYS.closure, {})[controlKey(view)] || {};
+function controlFor(view, dogs) {
+  const byId = paseosById();
+  const control = {};
+  dogs.forEach((dog) => {
+    control[dog.id] = paseoState(byId.get(paseoId(view.fecha, dog.id, view.shift)));
+  });
+  return control;
 }
 
-function saveClosure(view, value) {
-  const all = readJSON(KEYS.closure, {});
-  all[controlKey(view)] = value;
-  writeJSON(KEYS.closure, all);
+// ---------- Checklists e incidentes (los carga el paseador) ----------
+
+function checklistsFor(fecha, shiftKey) {
+  return records("checklists").filter(
+    (record) => record.fecha === fecha && (shiftKeyOf(record.turno) === shiftKey || String(record.id).endsWith(`_${shiftKey}`)),
+  );
+}
+
+function checklistInfo(record) {
+  const items = record.items && typeof record.items === "object" ? Object.entries(record.items) : [];
+  const missing = items.filter(([, value]) => !value).map(([name]) => humanize(name));
+  const complete = typeof record.completo === "boolean" ? record.completo : items.length > 0 && !missing.length;
+  return { complete, missing, who: personName(record.actualizadoPor || record.creadoPor, record), at: timeOf(record.actualizadoEn || record.creadoEn) };
+}
+
+function humanize(name) {
+  const text = String(name).replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim().toLowerCase();
+  return text ? text[0].toUpperCase() + text.slice(1) : PENDIENTE;
+}
+
+function incidentsFor(fecha) {
+  return records("incidentes")
+    .filter((record) => record.fecha === fecha)
+    .sort((a, b) => String(a.hora || a.creadoEn || "").localeCompare(String(b.hora || b.creadoEn || "")));
+}
+
+function incidentDogs(record) {
+  if (record.perroNombre) return record.perroNombre;
+  const names = (Array.isArray(record.perros) ? record.perros : []).map((id) => dogById(id)?.name || id);
+  return names.length ? listWithAnd(names) : PENDIENTE;
 }
 
 // ---------- Perros y riesgos ----------
@@ -300,21 +763,31 @@ function shiftWarnings(dogs) {
 
 // ---------- Rutas ----------
 
-function getRoutes() {
-  return readJSON(KEYS.routes, []);
+function normalizeRoute(record) {
+  const conflicts = Array.isArray(record.conflictos) ? record.conflictos : record.conflictos ? [String(record.conflictos)] : [];
+  return {
+    id: record.id,
+    record,
+    route: record.ruta || PENDIENTE,
+    walker: record.paseador || WALKER_OPTIONS[0],
+    dogIds: Array.isArray(record.perros) ? record.perros : [],
+    notes: record.notas || "",
+    conflicts,
+    reason: record.medida || "",
+  };
 }
 
-function saveRoutes(routes) {
-  writeJSON(KEYS.routes, routes);
-}
-
-function routesFor(day, shiftKey) {
-  return getRoutes().filter((route) => route.day === day && route.shift === shiftKey);
+function routesFor(fecha, shiftKey) {
+  return records("rutas")
+    .filter((record) => record.fecha === fecha && shiftKeyOf(record.turno) === shiftKey)
+    .sort((a, b) => String(a.ruta || "").localeCompare(String(b.ruta || "")) || String(a.creadoEn || "").localeCompare(String(b.creadoEn || "")))
+    .map(normalizeRoute);
 }
 
 function emptyRouteDraft(view) {
   return {
     day: view.day,
+    fecha: view.fecha,
     shift: view.shift,
     route: shiftRoutes(view.shift)[0],
     walker: WALKER_OPTIONS[0],
@@ -330,11 +803,13 @@ function emptyRouteDraft(view) {
 function getRouteDraft(view) {
   const stored = readJSON(KEYS.routeDraft, {});
   // El borrador pertenece a un día y turno: si cambiás de turno, empieza uno nuevo.
-  if (stored.day !== view.day || stored.shift !== view.shift) return emptyRouteDraft(view);
-  const draft = { ...emptyRouteDraft(view), ...stored };
+  if (stored.day !== view.day || stored.shift !== view.shift || (stored.fecha && stored.fecha !== view.fecha)) return emptyRouteDraft(view);
+  const draft = { ...emptyRouteDraft(view), ...stored, fecha: view.fecha };
   draft.dogIds = Array.isArray(draft.dogIds) ? draft.dogIds.filter((id) => dogById(id)) : [];
   if (!shiftRoutes(view.shift).includes(draft.route)) draft.route = shiftRoutes(view.shift)[0];
   if (!WALKER_OPTIONS.includes(draft.walker)) draft.walker = WALKER_OPTIONS[0];
+  // Si la ruta que se editaba ya no existe (la borraron o era de la versión anterior), pasa a ser nueva.
+  if (draft.editingId && !routesFor(view.fecha, view.shift).some((route) => route.id === draft.editingId)) draft.editingId = null;
   return draft;
 }
 
@@ -346,7 +821,7 @@ function routeCheck(draft) {
   const dogs = draft.dogIds.map(dogById).filter(Boolean);
   const risk = analyzeDogs(dogs);
   const inShift = new Set(shiftDogs(draft.day, draft.shift).map((dog) => dog.id));
-  const otherRoutes = routesFor(draft.day, draft.shift).filter((route) => route.id !== draft.editingId);
+  const otherRoutes = routesFor(draft.fecha, draft.shift).filter((route) => route.id !== draft.editingId);
   const conflicts = [];
   const warnings = [];
 
@@ -388,58 +863,86 @@ function getObservationDraft(view) {
   return { ...emptyObservation(view), ...readJSON(KEYS.observationDraft, {}) };
 }
 
+// Observaciones compartidas de los últimos días, de la más nueva a la más vieja.
 function getObservations() {
-  return readJSON(KEYS.observations, []);
+  const desde = watchOpts("observaciones").desde;
+  return records("observaciones")
+    .filter((record) => String(record.fecha || "") >= desde)
+    .sort((a, b) => `${b.fecha || ""} ${b.hora || ""} ${b.creadoEn || ""}`.localeCompare(`${a.fecha || ""} ${a.hora || ""} ${a.creadoEn || ""}`));
+}
+
+function observationAuthor(obs) {
+  if (obs.migrado && obs.autorAnterior) return `${obs.autorAnterior} (versión anterior; la subió ${obs.creadoPorNombre || PENDIENTE})`;
+  if (obs.pendiente && !obs.creadoPorNombre) return `${currentUser().nombre || PENDIENTE} (se enviará cuando haya señal)`;
+  return obs.creadoPorNombre || PENDIENTE;
 }
 
 function observationText(obs) {
-  const dog = dogById(obs.dogId);
   return [
     `Observación de conducta — ${BUSINESS_INFO.name}`,
-    `Perro: ${dog ? dog.name : PENDIENTE}`,
-    `Fecha: ${obs.fecha}${obs.hora ? ` · ${obs.hora} hs` : ""}`,
-    `Lugar: ${obs.lugar}`,
-    `Estímulo: ${obs.estimulo}`,
-    `Reacción: ${obs.reaccion}`,
-    `Acción: ${obs.accion}`,
-    `Resultado: ${obs.resultado}`,
+    `Perro: ${obs.perroNombre || dogById(obs.perroId)?.name || PENDIENTE}`,
+    `Fecha: ${isoToLabel(obs.fecha)}${obs.hora ? ` · ${obs.hora} hs` : ""}`,
+    `Lugar: ${obs.lugar || PENDIENTE}`,
+    `Estímulo: ${obs.estimulo || PENDIENTE}`,
+    `Reacción: ${obs.reaccion || PENDIENTE}`,
+    `Acción: ${obs.accion || PENDIENTE}`,
+    `Resultado: ${obs.resultado || PENDIENTE}`,
     `Seguimiento: ${obs.seguimiento ? "Sí, requiere seguimiento" : "No"}`,
-    `Registró: ${obs.autor || PENDIENTE}`,
+    `Registró: ${observationAuthor(obs)}`,
   ].join("\n");
 }
 
 // ---------- Cierre ----------
 
-function closureSummary(view, dogs) {
+function closureId(view) {
+  return `${view.fecha}_${view.shift}`;
+}
+
+function getClosure(view) {
+  return records("cierres").find((record) => record.id === closureId(view)) || null;
+}
+
+function closureNotes(view) {
+  if (closureDraft && closureDraft.id === closureId(view)) return closureDraft.notas;
+  return getClosure(view)?.notas || "";
+}
+
+function closureSummary(view, dogs, closureOverride) {
   const shift = SHIFTS[view.shift];
-  const control = getControl(view);
-  const closure = getClosure(view);
+  const control = controlFor(view, dogs);
+  const closure = closureOverride || getClosure(view);
   const risk = analyzeDogs(dogs);
-  const routes = routesFor(view.day, view.shift);
-  const goingDogs = dogs.filter((dog) => !control[dog.id]?.ausente);
-  const pickedUp = goingDogs.filter((dog) => control[dog.id]?.retiro);
-  const delivered = goingDogs.filter((dog) => control[dog.id]?.entrega);
-  const absent = dogs.filter((dog) => control[dog.id]?.ausente);
-  const notDelivered = goingDogs.filter((dog) => !control[dog.id]?.entrega);
-  const observations = getObservations().filter((obs) => obs.fecha === view.now.label && obs.shift === view.shift);
+  const routes = routesFor(view.fecha, view.shift);
+  const goingDogs = dogs.filter((dog) => !control[dog.id].noSale);
+  const pickedUp = goingDogs.filter((dog) => control[dog.id].retirado);
+  const delivered = goingDogs.filter((dog) => control[dog.id].entregado);
+  const absent = dogs.filter((dog) => control[dog.id].noSale);
+  const notDelivered = goingDogs.filter((dog) => !control[dog.id].entregado);
+  const observations = getObservations().filter((obs) => obs.fecha === view.fecha && shiftKeyOf(obs.turno) === view.shift);
+  const incidents = incidentsFor(view.fecha);
+  const checklists = checklistsFor(view.fecha, view.shift).map(checklistInfo);
+  const notes = closureNotes(view);
+  const user = currentUser();
 
   const lines = [
     `Cierre de turno — ${BUSINESS_INFO.name}`,
-    `Fecha: ${view.now.label} (${view.day})`,
-    `Turno: ${shift.label} (${shift.from} a ${shift.to} hs) · Supervisa: ${shift.supervisor}`,
+    `Fecha: ${view.fechaLabel} (${view.day})`,
+    `Turno: ${shift.label} (${shift.from} a ${shift.to} hs) · Supervisó: ${user.nombre || PENDIENTE}${user.nombre !== shift.supervisor ? ` (según planilla: ${shift.supervisor})` : ""}`,
     `Rutas: ${shiftRoutes(view.shift).join(" y ")}`,
-    ...routes.map((route) => `- ${route.route} (${route.walker}): ${route.dogIds.map((id) => dogById(id)?.name).filter(Boolean).join(", ")}`),
+    ...routes.map((route) => `- ${route.route} (${route.walker}): ${route.dogIds.map((id) => dogById(id)?.name).filter(Boolean).join(", ")}${route.conflicts.length ? ` · conflicto confirmado, medida: ${route.reason || PENDIENTE}` : ""}`),
     `Perros previstos: ${dogs.length}`,
     `Retirados: ${pickedUp.length} de ${goingDogs.length} · Entregados: ${delivered.length} de ${goingDogs.length}`,
     `No salieron: ${absent.length ? absent.map((dog) => dog.name).join(", ") : "ninguno"}`,
     `Sin entrega marcada: ${notDelivered.length ? notDelivered.map((dog) => dog.name).join(", ") : "ninguno"}`,
+    `Checklist del paseador: ${checklists.length ? checklists.map((item) => `${item.who}: ${item.complete ? "equipo completo" : `incompleto${item.missing.length ? ` (falta ${item.missing.join(", ")})` : ""}`}`).join("; ") : "sin cargar"}`,
+    `Incidentes del día: ${incidents.length ? incidents.map((item) => `${item.hora || "sin hora"} ${item.titulo || incidentDogs(item)}`).join("; ") : "ninguno cargado"}`,
     "Seguridad del turno:",
     `- No juntar: ${risk.pairs.length ? pairText(risk.pairs).join("; ") : "sin incompatibles en el turno"}`,
     `- Bozal: ${risk.muzzle.length ? risk.muzzle.map((dog) => dog.name).join(", ") : "nadie en este turno"}`,
     `Observaciones de conducta registradas hoy en este turno: ${observations.length}`,
-    `Notas del supervisor: ${closure.notas?.trim() || "sin notas"}`,
+    `Notas del supervisor: ${notes.trim() || "sin notas"}`,
   ];
-  if (closure.cerrado) lines.push(`Turno cerrado a las ${closure.cerrado} hs.`);
+  if (closure?.cerrado) lines.push(`Turno cerrado a las ${closure.horaCierre || timeOf(closure.actualizadoEn) || PENDIENTE} hs por ${personName(closure.actualizadoPor, closure) || PENDIENTE}.`);
   return lines.join("\n");
 }
 
@@ -455,6 +958,7 @@ export function supervisorShell(content) {
 }
 
 function SupervisorHeader() {
+  const user = currentUser();
   return `
     <header class="sv-header">
       <a class="sv-brand" href="/supervisor" data-link aria-label="Paseos Juan, panel de supervisión">
@@ -467,19 +971,28 @@ function SupervisorHeader() {
           <small>Supervisión de turno</small>
         </span>
       </a>
-      <button class="sv-button sv-button-quiet" type="button" id="sv-logout" data-sv-logout>
-        ${icon("logOut", "sv-icon")}
-        Salir
-      </button>
+      <div class="sv-header-end">
+        <p class="sv-user">
+          <strong>${esc(user.nombre || PENDIENTE)}</strong>
+          <small>${esc(ROLE_LABELS[user.rol] || user.rol || "")}</small>
+        </p>
+        <button class="sv-button sv-button-quiet" type="button" id="sv-logout" data-sv-logout>
+          ${icon("logOut", "sv-icon")}
+          Salir
+        </button>
+      </div>
     </header>
   `;
 }
 
 export function supervisorDashboard() {
+  startWatching();
   const view = getView();
   const dogs = shiftDogs(view.day, view.shift);
   const content = `
     <main class="sv-main" id="sv-main">
+      ${SyncBar()}
+      ${IncidentsPanel(view)}
       ${ShiftPanel(view, dogs)}
       ${SafetyPanel(view, dogs)}
       ${DogControl(view, dogs)}
@@ -490,17 +1003,107 @@ export function supervisorDashboard() {
     </main>
   `;
   flash = null;
+  if (migrationState === "idle" && legacyPending()) setTimeout(migrateLegacy, 0);
   return content;
+}
+
+// ---------- 0. Estado de los datos compartidos ----------
+
+function SyncBar() {
+  const pending = registros.pendingCount();
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  const tone = offline || pending ? "warn" : "ok";
+  const waiting = `${pending} cambio${pending === 1 ? " espera" : "s esperan"} señal para enviarse.`;
+  const text = offline
+    ? `Sin señal: ves lo último guardado en este teléfono.${pending ? ` ${waiting}` : ""}`
+    : pending
+      ? waiting
+      : "Datos compartidos con el equipo. Se actualizan solos cada minuto.";
+  return `
+    <section class="sv-sync is-${tone}" aria-label="Estado de los datos">
+      <p class="sv-sync-text">${icon(offline || pending ? "uploadCloud" : "radio", "sv-icon")} <span>${esc(text)}</span></p>
+      <button type="button" class="sv-button sv-button-quiet" id="sv-refresh" data-sv-refresh>Actualizar ahora</button>
+      ${statusRegion("sync")}
+    </section>
+  `;
+}
+
+// ---------- Incidentes del día (los carga el paseador) ----------
+
+function IncidentsPanel(view) {
+  const today = view.now.iso;
+  const incidents = incidentsFor(today);
+  if (!incidents.length) return "";
+  return `
+    <section class="sv-card sv-incidents" aria-labelledby="sv-incidents-title">
+      <div class="sv-section-head">
+        <h2 id="sv-incidents-title" class="sv-title">${icon("alertTriangle", "sv-icon")} ${incidents.length === 1 ? "Hay 1 incidente cargado hoy" : `Hay ${incidents.length} incidentes cargados hoy`}</h2>
+        <p>${view.isToday ? "" : `Son de hoy, ${view.now.label}. `}${incidents.length === 1 ? "Revisalo" : "Revisalos"} antes de seguir con el turno.</p>
+      </div>
+      <ul class="sv-incident-list">
+        ${incidents.map((item) => `
+          <li class="sv-incident">
+            <div class="sv-saved-head">
+              <strong>${esc(item.titulo || "Incidente")}</strong>
+              <span>${item.hora ? `${esc(item.hora)} hs · ` : ""}${esc(incidentDogs(item))}${item.lugar ? ` · ${esc(item.lugar)}` : ""}</span>
+            </div>
+            ${item.riesgo || item.lesiones ? `
+              <p class="sv-chips">
+                ${item.riesgo ? `<span class="sv-tag is-danger">Riesgo: ${esc(item.riesgo)}</span>` : ""}
+                ${item.lesiones ? `<span class="sv-tag is-warn">Lesiones: ${esc(item.lesiones)}</span>` : ""}
+              </p>
+            ` : ""}
+            <dl class="sv-obs-detail">
+              ${[["Antes", item.antes], ["Conducta", item.conducta], ["Acción", item.accion], ["Después", item.despues], ["Protocolo", item.protocolo]]
+                .filter(([, value]) => value)
+                .map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`)
+                .join("")}
+            </dl>
+            <p class="sv-source">${esc(lastMark(item, "Cargó"))}</p>
+          </li>
+        `).join("")}
+      </ul>
+    </section>
+  `;
 }
 
 // ---------- 1. Panel del turno ----------
 
+function TeamCheck(view) {
+  if (!view.isToday) return "";
+  const list = checklistsFor(view.fecha, view.shift);
+  if (!list.length) {
+    const started = view.now.minutes >= toMinutes(SHIFTS[view.shift].from);
+    return `
+      <div class="sv-team-check sv-note ${started ? "is-warn" : "is-info"}">
+        <strong>Checklist de salida:</strong> el paseador todavía no lo cargó para este turno.
+      </div>
+    `;
+  }
+  return `
+    <div class="sv-team-check">
+      ${list.map((record) => {
+        const info = checklistInfo(record);
+        return `
+          <p class="sv-note ${record.pendiente ? "is-info" : info.complete ? "is-ok" : "is-danger"}">
+            ${icon(info.complete ? "checkCircle" : "alertTriangle", "sv-icon")}
+            <strong>Checklist de ${esc(info.who || PENDIENTE)}:</strong>
+            ${info.complete ? "salió con el equipo completo." : `equipo incompleto${info.missing.length ? `. Falta: ${esc(info.missing.join(", "))}` : ""}.`}
+            ${info.at ? `<small>(${esc(info.at)} hs)</small>` : ""}
+          </p>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function ShiftPanel(view, dogs) {
   const shift = SHIFTS[view.shift];
+  const user = currentUser();
   const moment = view.isToday ? shiftMoment(view.shift, view.now) : null;
   const otherKey = view.shift === "manana" ? "tarde" : "manana";
   const otherCount = shiftDogs(view.day, otherKey).length;
-  const savedRoutes = routesFor(view.day, view.shift);
+  const savedRoutes = routesFor(view.fecha, view.shift);
   const routes = shiftRoutes(view.shift);
   const activeCount = dogs.filter((dog) => dog.status === "Activo").length;
 
@@ -508,12 +1111,13 @@ function ShiftPanel(view, dogs) {
     <section class="sv-hero" aria-labelledby="sv-hero-title">
       <div class="sv-hero-top">
         <div class="sv-hero-copy">
-          <p class="sv-eyebrow">${view.isToday ? `Hoy · ${esc(view.day)} ${view.now.label}` : `Planificación · ${esc(view.day)}`}</p>
+          <p class="sv-eyebrow">${view.isToday ? `Hoy · ${esc(view.day)} ${view.now.label}` : `Planificación · ${esc(view.day)} ${view.fechaLabel}`}</p>
           <h1 id="sv-hero-title">Turno ${shift.label.toLowerCase()}</h1>
           <p class="sv-hero-sub">
-            ${shift.from} a ${shift.to} hs · Supervisa <strong>${shift.supervisor}</strong>
+            ${shift.from} a ${shift.to} hs · Supervisa <strong>${esc(user.nombre || PENDIENTE)}</strong>
             ${moment ? `<span class="sv-moment is-${moment.tone}">${moment.label}</span>` : ""}
           </p>
+          ${user.nombre !== shift.supervisor ? `<p class="sv-source">Según la planilla, este turno lo supervisa ${esc(shift.supervisor)}.</p>` : ""}
         </div>
         <div class="sv-picker">
           <div class="sv-segment" role="group" aria-label="Turno">
@@ -534,8 +1138,10 @@ function ShiftPanel(view, dogs) {
       </div>
 
       ${view.isToday ? "" : `
-        <p class="sv-note is-info">Estás mirando ${esc(view.day)} para planificar. El control de retiro y entrega se usa solo el día de hoy.</p>
+        <p class="sv-note is-info">Estás mirando ${esc(view.day)} ${view.fechaLabel} para planificar. El control de retiro y entrega se usa solo el día de hoy.</p>
       `}
+
+      ${TeamCheck(view)}
 
       <dl class="sv-stats">
         <div><dt>Perros en el turno</dt><dd>${dogs.length}${activeCount !== dogs.length ? ` <small>(${activeCount} activos)</small>` : ""}</dd></div>
@@ -632,10 +1238,10 @@ function safetyChips(dog) {
 
 function DogControl(view, dogs) {
   const open = isFoldOpen("perros", true);
-  const control = getControl(view);
-  const going = dogs.filter((dog) => !control[dog.id]?.ausente);
-  const picked = going.filter((dog) => control[dog.id]?.retiro).length;
-  const delivered = going.filter((dog) => control[dog.id]?.entrega).length;
+  const control = controlFor(view, dogs);
+  const going = dogs.filter((dog) => !control[dog.id].noSale);
+  const picked = going.filter((dog) => control[dog.id].retirado).length;
+  const delivered = going.filter((dog) => control[dog.id].entregado).length;
   const absent = dogs.length - going.length;
   const allUnevaluated = dogs.length && dogs.every((dog) => dog.category === "SIN EVALUAR");
 
@@ -649,11 +1255,11 @@ function DogControl(view, dogs) {
         ${dogs.length ? `
           ${view.isToday ? `
             <div class="sv-progress" aria-hidden="true"><span style="width:${going.length ? Math.round((delivered / going.length) * 100) : 0}%"></span></div>
-            <p class="sv-hint">Tocá «Retirado» al levantar a cada perro y «Entregado» al dejarlo. Se guarda la hora en este dispositivo.${absent ? ` No salen hoy: ${absent}.` : ""}</p>
+            <p class="sv-hint">Tocá «Retirado» al levantar a cada perro y «Entregado» al dejarlo. Es el mismo registro que marca el paseador desde su celular: lo que marca uno lo ve el otro.${absent ? ` No salen hoy: ${absent}.` : ""}</p>
           ` : ""}
           ${allUnevaluated ? `<p class="sv-hint">Categoría de todos: <strong>SIN EVALUAR</strong> · Fuente: Registro maestro de perros, 14/08/2026.</p>` : ""}
           <ul class="sv-dog-list">
-            ${dogs.map((dog) => DogRow(dog, control[dog.id] || {}, view.isToday)).join("")}
+            ${dogs.map((dog) => DogRow(dog, control[dog.id], view)).join("")}
           </ul>
           ${statusRegion("control")}
         ` : `<p class="sv-empty">No hay perros para este día y turno.</p>`}
@@ -662,31 +1268,47 @@ function DogControl(view, dogs) {
   `;
 }
 
-function DogRow(dog, state, isToday) {
-  const absent = Boolean(state.ausente);
+function DogRow(dog, state, view) {
+  const isToday = view.isToday;
+  const absent = state.noSale;
+  const busy = inFlight.has(paseoId(view.fecha, dog.id, view.shift));
+  const marks = [
+    state.horaRetiro ? `Retiro ${state.horaRetiro} hs` : "",
+    state.horaPaseo ? `Paseo ${state.horaPaseo} hs` : "",
+    state.horaEntrega ? `Entrega ${state.horaEntrega} hs` : "",
+  ].filter(Boolean);
+  const meta = isToday && state.record ? `
+    <div class="sv-dog-meta">
+      ${state.paseando ? `<p class="sv-tag is-info">Paseando ahora</p>` : ""}
+      ${marks.length ? `<p>${esc(marks.join(" · "))}</p>` : ""}
+      ${state.nota ? `<p><b>Nota:</b> ${esc(state.nota)}</p>` : ""}
+      <p class="sv-source">${esc(lastMark(state.record))}</p>
+    </div>
+  ` : "";
   return `
-    <li class="sv-dog ${absent ? "is-absent" : ""} ${state.entrega ? "is-done" : ""}">
+    <li class="sv-dog ${absent ? "is-absent" : ""} ${state.entregado ? "is-done" : ""}">
       <div class="sv-dog-info">
         <div class="sv-dog-head">
           <h3>${esc(dog.name)}</h3>
-          ${isToday && !absent && !state.retiro ? `<button type="button" class="sv-link" id="sv-absent-${dog.id}" data-sv-absent="${dog.id}" aria-label="${esc(dog.name)} no sale hoy">No sale hoy</button>` : ""}
+          ${isToday && !absent && !state.retirado ? `<button type="button" class="sv-link" id="sv-absent-${dog.id}" data-sv-absent="${dog.id}" aria-label="${esc(dog.name)} no sale hoy">No sale hoy</button>` : ""}
         </div>
         <p>${esc(dog.size)} · ${dog.minutes ? `${dog.minutes} min` : PENDIENTE} · ${esc(dog.plan)}</p>
         ${safetyChips(dog)}
       </div>
       ${isToday ? `
-        <div class="sv-dog-actions">
+        <div class="sv-dog-actions" ${busy ? `aria-busy="true"` : ""}>
           ${absent ? `
             <p class="sv-dog-state">No sale hoy</p>
             <button type="button" class="sv-button sv-button-quiet" id="sv-absent-${dog.id}" data-sv-absent="${dog.id}" aria-label="Deshacer: ${esc(dog.name)} sí sale hoy">Deshacer</button>
           ` : `
-            <button type="button" class="sv-button ${state.retiro ? "is-checked" : "sv-button-primary"}" id="sv-pickup-${dog.id}" data-sv-pickup="${dog.id}" aria-pressed="${Boolean(state.retiro)}" aria-label="${state.retiro ? `Desmarcar retiro de ${esc(dog.name)}` : `Marcar a ${esc(dog.name)} como retirado`}">
-              ${state.retiro ? `${icon("checkCircle", "sv-icon")} Retirado ${state.retiro}` : "Retirado"}
+            <button type="button" class="sv-button ${state.retirado ? "is-checked" : "sv-button-primary"}" id="sv-pickup-${dog.id}" data-sv-pickup="${dog.id}" aria-pressed="${state.retirado}" aria-label="${state.retirado ? `Desmarcar retiro de ${esc(dog.name)}` : `Marcar a ${esc(dog.name)} como retirado`}">
+              ${state.retirado ? `${icon("checkCircle", "sv-icon")} Retirado ${esc(state.horaRetiro)}` : "Retirado"}
             </button>
-            <button type="button" class="sv-button ${state.entrega ? "is-checked" : ""}" id="sv-deliver-${dog.id}" data-sv-deliver="${dog.id}" aria-pressed="${Boolean(state.entrega)}" ${state.retiro ? "" : "disabled"} aria-label="${state.entrega ? `Desmarcar entrega de ${esc(dog.name)}` : `Marcar a ${esc(dog.name)} como entregado`}">
-              ${state.entrega ? `${icon("checkCircle", "sv-icon")} Entregado ${state.entrega}` : "Entregado"}
+            <button type="button" class="sv-button ${state.entregado ? "is-checked" : ""}" id="sv-deliver-${dog.id}" data-sv-deliver="${dog.id}" aria-pressed="${state.entregado}" ${state.retirado ? "" : "disabled"} aria-label="${state.entregado ? `Desmarcar entrega de ${esc(dog.name)}` : `Marcar a ${esc(dog.name)} como entregado`}">
+              ${state.entregado ? `${icon("checkCircle", "sv-icon")} Entregado ${esc(state.horaEntrega)}` : "Entregado"}
             </button>
           `}
+          ${meta}
         </div>
       ` : ""}
     </li>
@@ -699,11 +1321,12 @@ function RouteBuilder(view) {
   const open = isFoldOpen("rutas");
   const draft = getRouteDraft(view);
   const check = routeCheck(draft);
-  const saved = routesFor(view.day, view.shift);
+  const saved = routesFor(view.fecha, view.shift);
   const shiftIds = new Set(shiftDogs(view.day, view.shift).map((dog) => dog.id));
   const candidates = draft.showAll ? REAL_DOGS : REAL_DOGS.filter((dog) => shiftIds.has(dog.id) || draft.dogIds.includes(dog.id));
   const otherRoutes = saved.filter((route) => route.id !== draft.editingId);
   const hasConflict = check.conflicts.length > 0;
+  const when = `${esc(view.day)} ${view.fechaLabel} · ${SHIFTS[view.shift].label.toLowerCase()}`;
 
   return `
     <details class="sv-fold" data-sv-fold="rutas" ${open ? "open" : ""}>
@@ -713,14 +1336,14 @@ function RouteBuilder(view) {
       </summary>
       <div class="sv-fold-body">
         ${saved.length ? `
-          <h3 class="sv-subtitle">Rutas guardadas · ${esc(view.day)} ${SHIFTS[view.shift].label.toLowerCase()}</h3>
+          <h3 class="sv-subtitle">Rutas guardadas · ${when}</h3>
           <ul class="sv-saved-routes">
             ${saved.map((route) => SavedRoute(route)).join("")}
           </ul>
         ` : ""}
 
         <form class="sv-builder" data-sv-route-form novalidate>
-          <h3 class="sv-subtitle">${draft.editingId ? "Editar ruta" : "Nueva ruta"} · ${esc(view.day)} ${SHIFTS[view.shift].label.toLowerCase()}</h3>
+          <h3 class="sv-subtitle">${draft.editingId ? "Editar ruta" : "Nueva ruta"} · ${when}</h3>
           <div class="sv-form-grid">
             <label class="sv-field" for="sv-route-code">Ruta
               <select id="sv-route-code" data-sv-route-field="route">
@@ -750,7 +1373,7 @@ function RouteBuilder(view) {
                     dog.incompatibleWith?.length ? `<span class="sv-tag is-danger">No juntar con ${esc(listWithAnd(dog.incompatibleWith, "ni"))}</span>` : "",
                     dog.status !== "Activo" ? `<span class="sv-tag is-danger">${esc(dog.status)}</span>` : "",
                     !shiftIds.has(dog.id) ? `<span class="sv-tag is-info">Fuera de este turno</span>` : "",
-                    elsewhere ? `<span class="sv-tag is-neutral">Ya en ${elsewhere.route}</span>` : "",
+                    elsewhere ? `<span class="sv-tag is-neutral">Ya en ${esc(elsewhere.route)}</span>` : "",
                   ].join("");
                   return `
                     <li>
@@ -821,29 +1444,33 @@ function RouteBuilder(view) {
 function SavedRoute(route) {
   const names = route.dogIds.map((id) => dogById(id)?.name).filter(Boolean);
   const confirmingDelete = pendingRouteDelete === route.id;
+  const record = route.record;
+  const author = record.pendiente
+    ? "Se enviará cuando haya señal."
+    : `Armó ${record.creadoPorNombre || PENDIENTE}${record.creadoEn ? ` a las ${timeOf(record.creadoEn)} hs` : ""}${record.actualizadoPor && record.actualizadoPor !== record.creadoPor ? ` · Cambió ${personName(record.actualizadoPor, record)} a las ${timeOf(record.actualizadoEn)} hs` : ""}.`;
   return `
-    <li class="sv-saved ${route.conflicts?.length ? "has-conflict" : ""}">
+    <li class="sv-saved ${route.conflicts.length ? "has-conflict" : ""}">
       <div class="sv-saved-head">
         <strong>${esc(route.route)}</strong>
         <span>${esc(route.walker)} · ${names.length} perros</span>
       </div>
       <p>${names.map((name, index) => `${index + 1}. ${esc(name)}`).join(" · ")}</p>
-      ${route.conflicts?.length ? `
+      ${route.conflicts.length ? `
         <div class="sv-note is-warn">
           <strong>Guardada con conflicto confirmado.</strong>
           <ul>${route.conflicts.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>
-          <span>Medida: ${esc(route.reason)}</span>
+          <span>Medida: ${esc(route.reason || PENDIENTE)}</span>
         </div>
       ` : ""}
       ${route.notes ? `<p class="sv-hint">Notas: ${esc(route.notes)}</p>` : ""}
-      <p class="sv-source">Guardada ${esc(route.savedAt)}</p>
+      <p class="sv-source">${esc(author)}</p>
       <div class="sv-actions">
         ${confirmingDelete ? `
           <button type="button" class="sv-button sv-button-danger" id="sv-route-del-ok-${route.id}" data-sv-route-delete-ok="${route.id}">Sí, borrar ${esc(route.route)}</button>
           <button type="button" class="sv-button" id="sv-route-del-no-${route.id}" data-sv-route-delete-cancel>No borrar</button>
         ` : `
           <button type="button" class="sv-button" id="sv-route-edit-${route.id}" data-sv-route-edit="${route.id}">Editar</button>
-          <button type="button" class="sv-button" id="sv-route-del-${route.id}" data-sv-route-delete="${route.id}">Borrar</button>
+          ${canDelete(record) ? `<button type="button" class="sv-button" id="sv-route-del-${route.id}" data-sv-route-delete="${route.id}">Borrar</button>` : ""}
         `}
       </div>
     </li>
@@ -863,7 +1490,7 @@ function ObservationLog(view, dogs) {
     <details class="sv-fold" data-sv-fold="observaciones" ${open ? "open" : ""}>
       <summary>
         <span class="sv-fold-title">${icon("eye", "sv-icon")} Registrar observación de conducta</span>
-        <span class="sv-fold-meta">${saved.length ? `${saved.length} registrada${saved.length === 1 ? "" : "s"}` : "Sin registros"}</span>
+        <span class="sv-fold-meta">${saved.length ? `${saved.length} en ${OBS_DAYS} días` : "Sin registros"}</span>
       </summary>
       <div class="sv-fold-body">
         <p class="sv-note is-info">Describí lo que se vio y se oyó, no lo que creés que siente el perro. No uses etiquetas como «agresivo», «malo» o «dominante». Sin datos de tutores.</p>
@@ -902,7 +1529,7 @@ function ObservationLog(view, dogs) {
         </form>
 
         ${saved.length ? `
-          <h3 class="sv-subtitle">Registradas en este dispositivo</h3>
+          <h3 class="sv-subtitle">Registradas por el equipo · últimos ${OBS_DAYS} días</h3>
           <ul class="sv-obs-list">
             ${saved.map((obs) => ObservationCard(obs)).join("")}
           </ul>
@@ -913,29 +1540,29 @@ function ObservationLog(view, dogs) {
 }
 
 function ObservationCard(obs) {
-  const dog = dogById(obs.dogId);
   const confirming = pendingObservationDelete === obs.id;
+  const name = obs.perroNombre || dogById(obs.perroId)?.name || PENDIENTE;
   return `
     <li class="sv-obs ${obs.seguimiento ? "needs-follow" : ""}">
       <div class="sv-saved-head">
-        <strong>${esc(dog ? dog.name : PENDIENTE)}</strong>
-        <span>${esc(obs.fecha)}${obs.hora ? ` · ${esc(obs.hora)} hs` : ""} · ${esc(obs.lugar)}</span>
+        <strong>${esc(name)}</strong>
+        <span>${esc(isoToLabel(obs.fecha))}${obs.hora ? ` · ${esc(obs.hora)} hs` : ""}${obs.lugar ? ` · ${esc(obs.lugar)}` : ""}</span>
       </div>
       ${obs.seguimiento ? `<p class="sv-tag is-warn">Requiere seguimiento</p>` : ""}
       <dl class="sv-obs-detail">
-        <div><dt>Estímulo</dt><dd>${esc(obs.estimulo)}</dd></div>
-        <div><dt>Reacción</dt><dd>${esc(obs.reaccion)}</dd></div>
-        <div><dt>Acción</dt><dd>${esc(obs.accion)}</dd></div>
-        <div><dt>Resultado</dt><dd>${esc(obs.resultado)}</dd></div>
+        <div><dt>Estímulo</dt><dd>${esc(obs.estimulo || PENDIENTE)}</dd></div>
+        <div><dt>Reacción</dt><dd>${esc(obs.reaccion || PENDIENTE)}</dd></div>
+        <div><dt>Acción</dt><dd>${esc(obs.accion || PENDIENTE)}</dd></div>
+        <div><dt>Resultado</dt><dd>${esc(obs.resultado || PENDIENTE)}</dd></div>
       </dl>
-      <p class="sv-source">Registró: ${esc(obs.autor || PENDIENTE)}</p>
+      <p class="sv-source">Registró: ${esc(observationAuthor(obs))}</p>
       <div class="sv-actions">
         ${confirming ? `
           <button type="button" class="sv-button sv-button-danger" id="sv-obs-del-ok-${obs.id}" data-sv-obs-delete-ok="${obs.id}">Sí, borrar</button>
           <button type="button" class="sv-button" id="sv-obs-del-no-${obs.id}" data-sv-obs-delete-cancel>No borrar</button>
         ` : `
           <button type="button" class="sv-button" id="sv-obs-copy-${obs.id}" data-sv-obs-copy="${obs.id}">${icon("copy", "sv-icon")} Copiar texto</button>
-          <button type="button" class="sv-button" id="sv-obs-del-${obs.id}" data-sv-obs-delete="${obs.id}">Borrar</button>
+          ${canDelete(obs) ? `<button type="button" class="sv-button" id="sv-obs-del-${obs.id}" data-sv-obs-delete="${obs.id}">Borrar</button>` : ""}
         `}
       </div>
     </li>
@@ -963,23 +1590,25 @@ function ShiftClosure(view, dogs) {
   }
 
   const summary = closureSummary(view, dogs);
+  const closedAt = closure?.cerrado ? closure.horaCierre || timeOf(closure.actualizadoEn) : "";
   return `
     <details class="sv-fold" data-sv-fold="cierre" ${open ? "open" : ""}>
       <summary>
         <span class="sv-fold-title">${icon("flag", "sv-icon")} Cerrar el turno</span>
-        <span class="sv-fold-meta">${closure.cerrado ? `Cerrado ${closure.cerrado} hs` : "Abierto"}</span>
+        <span class="sv-fold-meta">${closure?.cerrado ? `Cerrado ${esc(closedAt)} hs` : "Abierto"}</span>
       </summary>
       <div class="sv-fold-body">
+        ${closure ? `<p class="sv-source">${esc(closure.cerrado ? lastMark(closure, "Lo cerró") : lastMark(closure, "Última nota de"))}</p>` : ""}
         <label class="sv-field" for="sv-close-notes">Notas del supervisor (opcional)
-          <span class="sv-field-hint" id="sv-close-notes-hint">Novedades del turno, sin datos de tutores. Se suman al resumen.</span>
-          <textarea id="sv-close-notes" rows="3" data-sv-close-notes aria-describedby="sv-close-notes-hint">${esc(closure.notas || "")}</textarea>
+          <span class="sv-field-hint" id="sv-close-notes-hint">Novedades del turno, sin datos de tutores. Se guardan al salir del campo y se suman al resumen.</span>
+          <textarea id="sv-close-notes" rows="3" data-sv-close-notes aria-describedby="sv-close-notes-hint">${esc(closureNotes(view))}</textarea>
         </label>
         <label class="sv-field" for="sv-close-summary">Resumen para copiar
           <textarea id="sv-close-summary" class="sv-summary" rows="14" readonly>${esc(summary)}</textarea>
         </label>
         <div class="sv-actions">
           <button type="button" class="sv-button sv-button-primary" id="sv-close-copy" data-sv-close-copy>${icon("copy", "sv-icon")} Copiar resumen</button>
-          ${closure.cerrado
+          ${closure?.cerrado
             ? `<button type="button" class="sv-button" id="sv-close-reopen" data-sv-close-reopen>Reabrir turno</button>`
             : `<button type="button" class="sv-button" id="sv-close-done" data-sv-close-done>${icon("flag", "sv-icon")} Marcar turno cerrado</button>`}
         </div>
@@ -1010,7 +1639,7 @@ function ReferencePanel() {
           <li>Rutas, días y turnos: ${BUSINESS_INFO.officialSources.routes}, leída el ${DATA_UPDATED}.</li>
           <li>Perros: ${BUSINESS_INFO.officialSources.dogs}.</li>
           <li>Qué perros van en PJ_1T y en PJ_2T: ${PENDIENTE}.</li>
-          <li>Lo que cargás en esta pantalla se guarda solo en este dispositivo.</li>
+          <li>Retiros, rutas, observaciones y cierres se comparten con el equipo (paseador, coordinación y Juan, según permisos). Incidentes y checklist los carga el paseador.</li>
         </ul>
       </div>
     </details>
@@ -1020,6 +1649,7 @@ function ReferencePanel() {
 // ---------- Eventos ----------
 
 function rerender(focusId) {
+  if (!focusId) return renderKeepingFocus();
   render();
   if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
 }
@@ -1047,33 +1677,65 @@ async function copyText(text, fallbackId) {
   }
 }
 
-function toggleControl(dogId, field, focusId) {
+// Retiro, entrega y "no sale": actualiza el MISMO registro de paseos que usa el paseador.
+async function markWalk(dogId, action, focusId) {
   const view = getView();
   if (!view.isToday) return;
-  const control = getControl(view);
-  const current = { ...(control[dogId] || {}) };
   const dog = dogById(dogId);
-  if (field === "ausente") {
-    current.ausente = !current.ausente;
-    if (current.ausente) {
-      delete current.retiro;
-      delete current.entrega;
+  if (!dog) return;
+  const id = paseoId(view.fecha, dogId, view.shift);
+  if (inFlight.has(id)) return;
+  const state = paseoState(paseosById().get(id));
+  const hora = timeNow();
+  const clearTimes = { horaRetiro: "", horaPaseo: "", horaEntrega: "" };
+  let changes = null;
+  let text = "";
+  let tone = "ok";
+
+  if (action === "retiro") {
+    if (state.retirado) {
+      changes = { estado: "pendiente", ...clearTimes };
+      text = `${dog.name}: retiro desmarcado.`;
+      tone = "info";
+    } else {
+      changes = { estado: "retirado", horaRetiro: hora };
+      text = `${dog.name}: retirado a las ${hora} hs.`;
     }
-    setFlash("control", current.ausente ? `${dog.name}: no sale hoy.` : `${dog.name}: vuelve a la lista.`);
-  } else if (current[field]) {
-    delete current[field];
-    if (field === "retiro") delete current.entrega;
-    setFlash("control", `${dog.name}: ${field === "retiro" ? "retiro" : "entrega"} desmarcado.`, "info");
-  } else {
-    current[field] = timeNow();
-    setFlash("control", `${dog.name}: ${field === "retiro" ? "retirado" : "entregado"} a las ${current[field]} hs.`);
+  } else if (action === "entrega") {
+    if (!state.retirado) return;
+    if (state.entregado) {
+      changes = { estado: state.horaPaseo ? "paseando" : "retirado", horaEntrega: "" };
+      text = `${dog.name}: entrega desmarcada.`;
+      tone = "info";
+    } else {
+      changes = { estado: "entregado", horaEntrega: hora };
+      text = `${dog.name}: entregado a las ${hora} hs.`;
+    }
+  } else if (action === "no-sale") {
+    if (state.noSale) {
+      changes = { estado: "pendiente" };
+      text = `${dog.name}: vuelve a la lista.`;
+    } else {
+      if (state.retirado) return;
+      changes = { estado: "no-sale", ...clearTimes };
+      text = `${dog.name}: no sale hoy.`;
+    }
   }
-  control[dogId] = current;
-  saveControl(view, control);
+  if (!changes) return;
+
+  inFlight.add(id);
+  await persist(
+    "paseos",
+    { id, fecha: view.fecha, perroId: dog.id, perroNombre: dog.name, turno: SHIFTS[view.shift].label, ...changes },
+    "control",
+    text,
+    tone,
+  );
+  inFlight.delete(id);
   rerender(focusId);
 }
 
-function saveRoute() {
+async function saveRoute() {
   const view = getView();
   const draft = getRouteDraft(view);
   const check = routeCheck(draft);
@@ -1091,30 +1753,31 @@ function saveRoute() {
     return rerender("sv-route-reason");
   }
 
-  const now = nowInArgentina();
-  const route = {
-    id: draft.editingId || `ruta-${Date.now()}`,
-    day: draft.day,
-    shift: draft.shift,
-    route: draft.route,
-    walker: draft.walker,
-    dogIds: check.dogs.map((dog) => dog.id),
-    notes: draft.notes.trim(),
-    conflicts: check.conflicts.map((item) => item.text),
-    reason: check.conflicts.length ? draft.reason.trim() : "",
-    savedAt: `${now.label} ${now.time} hs`,
+  const turno = SHIFTS[view.shift].label;
+  const conflictos = check.conflicts.map((item) => item.text);
+  const record = {
+    fecha: view.fecha,
+    turno,
+    ruta: draft.route,
+    paseador: draft.walker,
+    perros: check.dogs.map((dog) => dog.id),
+    conflictos,
+    medida: conflictos.length ? draft.reason.trim() : "",
+    notas: draft.notes.trim(),
+    titulo: `Ruta ${draft.route} · ${turno} · ${view.fechaLabel}${conflictos.length ? " · con conflicto confirmado" : ""}`,
   };
-  const routes = getRoutes();
-  const index = routes.findIndex((item) => item.id === route.id);
-  if (index >= 0) routes[index] = route;
-  else routes.push(route);
-  saveRoutes(routes);
-  saveRouteDraft(emptyRouteDraft(view));
-  setFlash("route", `Ruta ${route.route} guardada con ${route.dogIds.length} perros${route.conflicts.length ? " (conflicto confirmado)" : ""}.`);
+  if (draft.editingId) record.id = draft.editingId;
+  const result = await persist(
+    "rutas",
+    record,
+    "route",
+    `Ruta ${draft.route} guardada con ${record.perros.length} perros${conflictos.length ? " (conflicto confirmado)" : ""}. La ve el equipo.`,
+  );
+  if (result) saveRouteDraft(emptyRouteDraft(view));
   return rerender("sv-route-save");
 }
 
-function saveObservation(form) {
+async function saveObservation(form) {
   const view = getView();
   const draft = getObservationDraft(view);
   form.querySelectorAll("[data-sv-obs]").forEach((field) => {
@@ -1128,8 +1791,13 @@ function saveObservation(form) {
   OBSERVATION_FIELDS.forEach((field) => {
     if (!String(draft[field.key]).trim()) missing.push(field.label.split(":")[0].toLowerCase());
   });
-  if (!missing.length && !/^\d{2}\/\d{2}\/\d{4}$/.test(draft.fecha.trim())) {
-    setFlash("observation", "Escribí la fecha como DD/MM/AAAA, por ejemplo 12/11/2026.", "error");
+  const fechaIso = labelToIso(draft.fecha);
+  if (!missing.length && !fechaIso) {
+    setFlash("observation", `Escribí una fecha real como DD/MM/AAAA, por ejemplo ${view.now.label}.`, "error");
+    return rerender("sv-obs-fecha");
+  }
+  if (!missing.length && fechaIso > view.now.iso) {
+    setFlash("observation", "La fecha no puede ser posterior a hoy.", "error");
     return rerender("sv-obs-fecha");
   }
   if (missing.length) {
@@ -1145,16 +1813,46 @@ function saveObservation(form) {
     return rerender(`sv-obs-${labelled.key}`);
   }
 
-  const observation = {
-    ...draft,
-    id: `obs-${Date.now()}`,
-    shift: view.shift,
-    autor: `Supervisión turno ${SHIFTS[view.shift].label.toLowerCase()}`,
-  };
-  writeJSON(KEYS.observations, [observation, ...getObservations()]);
-  writeJSON(KEYS.observationDraft, emptyObservation(view));
-  setFlash("observation", `Observación de ${dogById(draft.dogId)?.name} guardada en este dispositivo.`);
+  const dog = dogById(draft.dogId);
+  const result = await persist(
+    "observaciones",
+    {
+      fecha: fechaIso,
+      hora: draft.hora || "",
+      perroId: draft.dogId,
+      perroNombre: dog?.name || "",
+      lugar: draft.lugar.trim(),
+      estimulo: draft.estimulo.trim(),
+      reaccion: draft.reaccion.trim(),
+      accion: draft.accion.trim(),
+      resultado: draft.resultado.trim(),
+      seguimiento: Boolean(draft.seguimiento),
+      turno: SHIFTS[view.shift].label,
+      titulo: `Observación: ${dog?.name || PENDIENTE}${draft.seguimiento ? " (requiere seguimiento)" : ""}`,
+    },
+    "observation",
+    `Observación de ${dog?.name || PENDIENTE} guardada. La ve el equipo.`,
+  );
+  if (result) writeJSON(KEYS.observationDraft, emptyObservation(view));
   return rerender("sv-obs-save");
+}
+
+async function saveClosure(view, changes, text, focusId) {
+  const id = closureId(view);
+  const notas = closureNotes(view);
+  const user = currentUser();
+  // El resumen se guarda con el estado ya actualizado (cerrado o no, con las notas nuevas).
+  const next = { ...(getClosure(view) || {}), ...changes, notas, actualizadoPor: user.usuario, actualizadoEn: new Date().toISOString(), pendiente: false };
+  const resumen = closureSummary(view, shiftDogs(view.day, view.shift), next);
+  const result = await persist(
+    "cierres",
+    { id, fecha: view.fecha, turno: SHIFTS[view.shift].label, notas, resumen, ...changes },
+    "closure",
+    text,
+    changes.cerrado === false ? "info" : "ok",
+  );
+  if (result && closureDraft?.id === id && closureDraft.notas === notas) closureDraft = null;
+  rerender(focusId);
 }
 
 function handleSupervisorClick(event) {
@@ -1162,7 +1860,12 @@ function handleSupervisorClick(event) {
   if (!target.closest?.(".sv-shell")) return false;
 
   if (target.closest("[data-sv-logout]")) {
-    navigate("/login");
+    navigate("/salir");
+    return true;
+  }
+
+  if (target.closest("[data-sv-refresh]")) {
+    refreshAll(true);
     return true;
   }
 
@@ -1183,21 +1886,22 @@ function handleSupervisorClick(event) {
 
   const pickup = target.closest("[data-sv-pickup]");
   if (pickup) {
-    toggleControl(pickup.dataset.svPickup, "retiro", pickup.id);
+    markWalk(pickup.dataset.svPickup, "retiro", pickup.id);
     return true;
   }
 
   const deliver = target.closest("[data-sv-deliver]");
   if (deliver) {
-    toggleControl(deliver.dataset.svDeliver, "entrega", deliver.id);
+    markWalk(deliver.dataset.svDeliver, "entrega", deliver.id);
     return true;
   }
 
   const absent = target.closest("[data-sv-absent]");
   if (absent) {
     const dogId = absent.dataset.svAbsent;
-    const wasAbsent = getControl(getView())[dogId]?.ausente;
-    toggleControl(dogId, "ausente", wasAbsent ? `sv-pickup-${dogId}` : `sv-absent-${dogId}`);
+    const view = getView();
+    const wasAbsent = paseoState(paseosById().get(paseoId(view.fecha, dogId, view.shift))).noSale;
+    markWalk(dogId, "no-sale", wasAbsent ? `sv-pickup-${dogId}` : `sv-absent-${dogId}`);
     return true;
   }
 
@@ -1229,11 +1933,13 @@ function handleSupervisorClick(event) {
 
   const routeEdit = target.closest("[data-sv-route-edit]");
   if (routeEdit) {
-    const route = getRoutes().find((item) => item.id === routeEdit.dataset.svRouteEdit);
+    const view = getView();
+    const route = routesFor(view.fecha, view.shift).find((item) => item.id === routeEdit.dataset.svRouteEdit);
     if (route) {
       saveRouteDraft({
-        day: route.day,
-        shift: route.shift,
+        day: view.day,
+        fecha: view.fecha,
+        shift: view.shift,
         route: route.route,
         walker: route.walker,
         dogIds: [...route.dogIds],
@@ -1259,13 +1965,13 @@ function handleSupervisorClick(event) {
   const routeDeleteOk = target.closest("[data-sv-route-delete-ok]");
   if (routeDeleteOk) {
     const id = routeDeleteOk.dataset.svRouteDeleteOk;
-    const route = getRoutes().find((item) => item.id === id);
-    saveRoutes(getRoutes().filter((item) => item.id !== id));
     const view = getView();
-    if (getRouteDraft(view).editingId === id) saveRouteDraft(emptyRouteDraft(view));
+    const route = routesFor(view.fecha, view.shift).find((item) => item.id === id);
     pendingRouteDelete = null;
-    setFlash("route", `Ruta ${route?.route || ""} borrada.`, "info");
-    rerender("sv-route-code");
+    removeRecord("rutas", id, "route", `Ruta ${route?.route || ""} borrada.`).then((ok) => {
+      if (ok && getRouteDraft(view).editingId === id) saveRouteDraft(emptyRouteDraft(view));
+      rerender("sv-route-code");
+    });
     return true;
   }
 
@@ -1297,10 +2003,8 @@ function handleSupervisorClick(event) {
 
   const obsDeleteOk = target.closest("[data-sv-obs-delete-ok]");
   if (obsDeleteOk) {
-    writeJSON(KEYS.observations, getObservations().filter((item) => item.id !== obsDeleteOk.dataset.svObsDeleteOk));
     pendingObservationDelete = null;
-    setFlash("observation", "Observación borrada.", "info");
-    rerender("sv-obs-save");
+    removeRecord("observaciones", obsDeleteOk.dataset.svObsDeleteOk, "observation", "Observación borrada.").then(() => rerender("sv-obs-save"));
     return true;
   }
 
@@ -1323,20 +2027,13 @@ function handleSupervisorClick(event) {
 
   if (target.closest("[data-sv-close-done]")) {
     const view = getView();
-    const closure = getClosure(view);
-    saveClosure(view, { ...closure, cerrado: timeNow() });
-    setFlash("closure", "Turno marcado como cerrado. No te olvides de copiar el resumen.");
-    rerender("sv-close-copy");
+    saveClosure(view, { cerrado: true, horaCierre: timeNow() }, "Turno marcado como cerrado. No te olvides de copiar el resumen.", "sv-close-copy");
     return true;
   }
 
   if (target.closest("[data-sv-close-reopen]")) {
     const view = getView();
-    const closure = getClosure(view);
-    delete closure.cerrado;
-    saveClosure(view, closure);
-    setFlash("closure", "Turno reabierto.", "info");
-    rerender("sv-close-done");
+    saveClosure(view, { cerrado: false, horaCierre: "" }, "Turno reabierto.", "sv-close-done");
     return true;
   }
 
@@ -1398,8 +2095,15 @@ function handleSupervisorChange(event) {
     return true;
   }
 
+  // Las notas del cierre se guardan en el servidor al salir del campo (no en cada tecla).
   if (target.matches("[data-sv-close-notes]")) {
-    saveClosure(view, { ...getClosure(view), notas: target.value });
+    if (!view.isToday) return true;
+    closureDraft = { id: closureId(view), notas: target.value };
+    if (target.value === (getClosure(view)?.notas || "")) {
+      closureDraft = null;
+      return true;
+    }
+    saveClosure(view, {}, "Notas del cierre guardadas.");
     return true;
   }
 
@@ -1421,7 +2125,7 @@ function handleSupervisorInput(event) {
     draft[target.dataset.svObs] = target.value;
     writeJSON(KEYS.observationDraft, draft);
   } else if (target.matches("[data-sv-close-notes]")) {
-    saveClosure(view, { ...getClosure(view), notas: target.value });
+    closureDraft = { id: closureId(view), notas: target.value };
     const summary = document.getElementById("sv-close-summary");
     if (summary) summary.value = closureSummary(view, shiftDogs(view.day, view.shift));
   }
@@ -1454,4 +2158,5 @@ export function registerSupervisorEvents() {
   document.addEventListener("input", handleSupervisorInput);
   document.addEventListener("submit", handleSupervisorSubmit);
   document.addEventListener("toggle", handleSupervisorToggle, true);
+  registerLive();
 }
