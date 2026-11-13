@@ -138,6 +138,20 @@ test("archivos: subir carnet, abrirlo y bloquear lo que no corresponde", async (
   assert.equal(web.body.carnet, true);
 });
 
+test("fotos de perros: todo el equipo las ve, carnets no", async () => {
+  const foto = await call("archivos", { method: "POST", token: admin, body: { tipo: "foto", perroId: "PJ-001", perroNombre: "Pistacho", archivo: { nombre: "p.png", mime: "image/png", base64: PNG } } });
+  assert.equal(foto.status, 201);
+  const mini = await call("registros", { method: "POST", token: paseador, body: { col: "fotos", id: "PJ-001", perroId: "PJ-001", miniatura: `data:image/png;base64,${PNG}`, archivoId: foto.body.registro.id } });
+  assert.equal(mini.status, 201);
+  const mala = await call("registros", { method: "POST", token: paseador, body: { col: "fotos", id: "PJ-002", miniatura: "javascript:alert(1)" } });
+  assert.equal(mala.status, 400);
+  const lista = await call("registros", { url: "/?col=archivos", token: paseador });
+  assert.ok(lista.body.registros.length >= 1);
+  assert.ok(lista.body.registros.every((r) => r.tipo === "foto"));
+  const abre = await callRaw("archivos", { url: `/?id=${foto.body.registro.id}`, token: paseador });
+  assert.equal(abre.status, 200);
+});
+
 test("bloqueo después de 5 intentos fallidos", async () => {
   for (let i = 0; i < 5; i += 1) await call("login", { method: "POST", body: { usuario: "sebastian", pin: "999990" } });
   const locked = await call("login", { method: "POST", body: { usuario: "sebastian", pin: "730264" } });

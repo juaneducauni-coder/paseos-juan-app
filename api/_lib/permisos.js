@@ -41,7 +41,10 @@ export const COLECCIONES = {
   resueltos: { leer: ["admin", "coordinador"], escribir: ["admin", "coordinador"] },
   // Archivos que manda la gente (carnet de vacunas, documentos, fotos, comprobantes) con a qué perro,
   // cliente o pedido corresponden. Los comprobantes de pago solo los abre el admin.
-  archivos: { leer: ["admin", "coordinador"], escribir: EQUIPO },
+  // Todo el equipo puede ver las FOTOS de los perros; carnets y documentos solo admin y coordinador.
+  archivos: { leer: EQUIPO, escribir: EQUIPO },
+  // Foto de perfil de cada perro: miniatura liviana para mostrar en todas las listas. id = PJ-001
+  fotos: { leer: EQUIPO, escribir: EQUIPO, maxBytes: 48 * 1024 },
   // Registro de apoyo de pagos: SOLO admin (la fuente oficial es el Libro contable).
   pagos: { leer: ["admin"], escribir: ["admin"] },
 };
@@ -56,4 +59,13 @@ export function puedeLeer(rol, nombre) {
 
 export function puedeEscribir(rol, nombre) {
   return Boolean(coleccion(nombre)?.escribir.includes(rol));
+}
+
+// Qué archivos ve cada rol: admin todo; coordinador todo menos comprobantes de pago;
+// supervisor, paseador y ayudante solo las fotos de los perros.
+export function puedeVerArchivo(rol, archivo) {
+  if (rol === "admin") return true;
+  if (archivo?.tipo === "comprobante de pago") return false;
+  if (rol === "coordinador") return true;
+  return archivo?.tipo === "foto";
 }

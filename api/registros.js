@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { coleccion, puedeLeer, puedeEscribir } from "./_lib/permisos.js";
+import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/permisos.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -19,14 +19,14 @@ export function nuevoId(fecha) {
   return `${fecha || now.toISOString().slice(0, 10)}_${stamp}_${randomBytes(3).toString("hex")}`;
 }
 
-function limpiar(datos) {
+function limpiar(datos, max) {
   const out = {};
   for (const [key, value] of Object.entries(datos || {})) {
     if (RESERVADOS.includes(key)) continue;
     if (!/^[a-zA-Z][a-zA-Z0-9_]{0,40}$/.test(key)) continue;
     out[key] = value;
   }
-  if (JSON.stringify(out).length > MAX_RECORD) throw new HttpError(413, "El registro es demasiado grande.");
+  if (JSON.stringify(out).length > (max || MAX_RECORD)) throw new HttpError(413, "El registro es demasiado grande.");
   return out;
 }
 
@@ -44,7 +44,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (prefijo && !ID.test(prefijo)) throw new HttpError(400, "Prefijo no válido.");
     let registros = await store.list(col, prefijo);
     // Los comprobantes de pago son solo del admin: los demás ni siquiera ven que existen.
-    if (col === "archivos" && user.rol !== "admin") registros = registros.filter((r) => r.tipo !== "comprobante de pago");
+    if (col === "archivos") registros = registros.filter((r) => puedeVerArchivo(user.rol, r));
     if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
     registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
     return send(res, 200, { ok: true, registros });
@@ -56,6 +56,10 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
     // Los archivos solo se crean subiéndolos por /api/archivos (así nadie inventa a qué archivo apunta).
     if (col === "archivos") throw new HttpError(400, "Los archivos se suben desde /api/archivos.");
+    // Miniatura de la foto del perro: solo una imagen embebida, nada más.
+    if (col === "fotos" && body.miniatura && !/^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/.test(String(body.miniatura))) {
+      throw new HttpError(400, "La miniatura no es una imagen válida.");
+    }
     if (!puedeEscribir(user.rol, col)) throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
     if (body.fecha && !FECHA.test(body.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
     if (coleccion(col).porFecha && !body.fecha) throw new HttpError(400, "Falta la fecha.");
@@ -66,7 +70,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     const previo = body.id ? await store.get(col, id) : null;
     const registro = {
       ...(previo || {}),
-      ...limpiar(body),
+      ...limpiar(body, coleccion(col).maxBytes),
       id,
       col,
       creadoPor: previo?.creadoPor || user.usuario,

@@ -6,7 +6,7 @@
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { puedeLeer, puedeEscribir } from "./_lib/permisos.js";
+import { puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/permisos.js";
 import { guardarArchivo } from "./_lib/archivos.js";
 
 export default handler({ GET: 1, POST: 1 }, async (req, res) => {
@@ -24,8 +24,8 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   if (!id) throw new HttpError(400, "Falta el identificador del archivo.");
   const meta = await store.get("archivos", id);
   if (!meta) throw new HttpError(404, "Ese archivo no existe.");
-  if (meta.tipo === "comprobante de pago" && user.rol !== "admin") {
-    throw new HttpError(403, "Los comprobantes de pago los ve solo el admin.");
+  if (!puedeVerArchivo(user.rol, meta)) {
+    throw new HttpError(403, meta.tipo === "comprobante de pago" ? "Los comprobantes de pago los ve solo el admin." : "Tu usuario no puede ver este archivo.");
   }
   const buffer = await store.readFile(id, meta);
   if (!buffer) throw new HttpError(404, "No se encontró el archivo guardado.");

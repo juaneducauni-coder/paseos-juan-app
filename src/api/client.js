@@ -408,3 +408,34 @@ export const archivos = {
     }
   },
 };
+
+// ---------- Fotos de los perros ----------
+// Cada perro tiene una foto de perfil: la grande queda en archivos (Drive), y una miniatura
+// liviana (~15 KB) en la colección "fotos" (id = id del perro) para mostrar en todas las listas.
+async function miniaturaDe(file, lado = 240) {
+  const bitmap = await createImageBitmap(file);
+  const min = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = lado;
+  canvas.height = lado;
+  // Recorte cuadrado al centro.
+  canvas.getContext("2d").drawImage(bitmap, (bitmap.width - min) / 2, (bitmap.height - min) / 2, min, min, 0, 0, lado, lado);
+  return canvas.toDataURL("image/jpeg", 0.72);
+}
+
+export const fotosPerros = {
+  // Devuelve la miniatura (data URL) del perro o null.
+  de(perroId) {
+    if (!perroId) return null;
+    const foto = registros.cached("fotos").find((f) => f.id === perroId || f.perroId === perroId);
+    return foto?.miniatura || null;
+  },
+  // Saca/elige foto → sube la grande (necesita señal) y guarda la miniatura.
+  async subir(perroId, perroNombre, file) {
+    if (!perroId) throw new ApiError(400, "Falta el perro.");
+    if (!file || !/^image\//.test(file.type)) throw new ApiError(400, "Elegí una foto.");
+    const miniatura = await miniaturaDe(file);
+    const grande = await archivos.subir("foto", file, { perroId, perroNombre, nota: "Foto de perfil" });
+    return registros.save("fotos", { id: perroId, perroId, perroNombre, miniatura, archivoId: grande.id });
+  },
+};

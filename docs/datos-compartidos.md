@@ -63,6 +63,7 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 | `fichas` | admin, coordinador, supervisor | admin, coordinador | automático | `fecha`, `perroNombre`, `datos`, `categoria`, `estado` |
 | `resueltos` | admin, coordinador | admin, coordinador | id del perro | `perroId`, `perroNombre`, `resuelto`, `nota` |
 | `archivos` | admin, coordinador (comprobantes: solo admin) | se crean solo con `archivos.subir()` / `POST /api/archivos` (equipo) o desde el formulario web | automático | `fecha`, `tipo` ("carnet de vacunas", "comprobante de pago", "documento", "foto"), `titulo`, `nombreArchivo`, `mime`, `tamano`, `perroId`, `perroNombre`, `clienteId`, `pedidoId`, `nota`, `ubicacion` ("drive", "vercel" o "local"), `driveUrl` (si está en Drive) |
+| `fotos` | equipo* | equipo* | id del perro (`PJ-001`) | `perroId`, `perroNombre`, `miniatura` (data URL JPG ~15 KB, cuadrada 240 px), `archivoId` (foto grande en `archivos`, tipo "foto") |
 | `pagos` | **solo admin** | **solo admin** | automático | `fecha`, `concepto`, `monto`, `medio`, `pasadoAlLibro` |
 
 \* equipo = admin, coordinador, supervisor, paseador y ayudante.
@@ -86,3 +87,16 @@ const lista = registros.cached("archivos"); // y registros.watch("archivos")
 - Las fotos se achican en el celular antes de subir. Máximo 3,5 MB. Solo JPG, PNG, WEBP o PDF.
 - Con la planilla conectada se guardan en Google Drive, en "Paseos Juan — Archivos de la app/<tipo>". Si no, en Vercel privado.
 - El formulario de la página pública puede mandar el carnet: queda en el pedido como `carnet: { id, nombre }` y en `archivos` con `pedidoId`.
+
+## Fotos de los perros
+
+```js
+import { fotosPerros, registros } from "../api/client.js";
+registros.watch("fotos");                      // una vez
+const src = fotosPerros.de("PJ-001");          // miniatura o null (mostrar inicial del nombre si es null)
+await fotosPerros.subir("PJ-001", "Pistacho", input.files[0]); // necesita señal
+```
+
+- Cualquiera del equipo puede sacar la foto (input `type="file" accept="image/*" capture="environment"`).
+- La miniatura se ve en todas las listas; la grande se abre con `archivos.abrir(foto.archivoId)`.
+- Supervisor, paseador y ayudante solo ven fotos; carnets y documentos siguen siendo de admin y coordinador.
