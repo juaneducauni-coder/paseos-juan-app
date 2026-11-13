@@ -16,6 +16,7 @@ import {
   MULTI_DOG_DISCOUNTS,
   CATEGORIES,
   formatPeso,
+  goesOn,
 } from "../data/realData.js";
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
@@ -101,8 +102,8 @@ function activeDogs() {
 function weeklyLoad() {
   const dogs = activeDogs();
   const rows = WEEK_DAYS.map((day) => {
-    const morning = dogs.filter((dog) => dog.days.includes(day) && dog.shifts.includes(SHIFT_MORNING)).length;
-    const afternoon = dogs.filter((dog) => dog.days.includes(day) && dog.shifts.includes(SHIFT_AFTERNOON)).length;
+    const morning = dogs.filter((dog) => goesOn(dog, day, SHIFT_MORNING)).length;
+    const afternoon = dogs.filter((dog) => goesOn(dog, day, SHIFT_AFTERNOON)).length;
     const distinct = dogs.filter((dog) => dog.days.includes(day)).length;
     return { day, morning, afternoon, total: morning + afternoon, distinct };
   });
@@ -138,8 +139,7 @@ function safetyConflicts() {
         return;
       }
       [SHIFT_MORNING, SHIFT_AFTERNOON].forEach((shift) => {
-        if (!dog.shifts.includes(shift) || !other.shifts.includes(shift)) return;
-        const days = WEEK_DAYS.filter((day) => dog.days.includes(day) && other.days.includes(day));
+        const days = WEEK_DAYS.filter((day) => goesOn(dog, day, shift) && goesOn(other, day, shift));
         if (days.length) conflicts.push({ a: dog.name, b: other.name, shift, days });
       });
     });
@@ -312,8 +312,8 @@ export function adminDashboard() {
 function TodayHero(priorities, done) {
   const { dayName, date } = todayInfo();
   const dogs = activeDogs();
-  const morning = dogs.filter((dog) => dog.days.includes(dayName) && dog.shifts.includes(SHIFT_MORNING)).length;
-  const afternoon = dogs.filter((dog) => dog.days.includes(dayName) && dog.shifts.includes(SHIFT_AFTERNOON)).length;
+  const morning = dogs.filter((dog) => goesOn(dog, dayName, SHIFT_MORNING)).length;
+  const afternoon = dogs.filter((dog) => goesOn(dog, dayName, SHIFT_AFTERNOON)).length;
   const next = priorities.find((priority) => !done.includes(priority.id));
   const todayLine = morning + afternoon
     ? `Hoy salen ${plural(morning, "perro", "perros")} a la mañana y ${plural(afternoon, "perro", "perros")} a la tarde.`
