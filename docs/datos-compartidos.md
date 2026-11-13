@@ -49,7 +49,7 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 
 | Colección | Quién lee | Quién escribe | id | Campos |
 |---|---|---|---|---|
-| `paseos` | equipo* | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_PJ-001_manana` (o `_tarde`) | `fecha`, `perroId`, `perroNombre`, `turno` ("Mañana"/"Tarde"), `ruta`, `estado` ("pendiente", "retirado", "paseando", "entregado", "no-sale"), `horaRetiro`, `horaPaseo`, `horaEntrega`, `nota` |
+| `paseos` | equipo* | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_PJ-001_manana` (o `_tarde`) | `fecha`, `perroId`, `perroNombre`, `turno` ("Mañana"/"Tarde"), `ruta`, `estado` ("pendiente", "retirado", "paseando", "entregado", "no-sale"), `horaRetiro`, `horaPaseo`, `horaEntrega` (y quién marcó cada paso: `horaRetiroPor`/`horaRetiroPorNombre`, `horaPaseoPor`/`horaPaseoPorNombre`, `horaEntregaPor`/`horaEntregaPorNombre`), `nota` |
 | `checklists` | admin, supervisor, paseador, ayudante | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_usuario_manana` | `fecha`, `turno`, `items`, `completo` |
 | `incidentes` | equipo* | admin, supervisor, paseador, ayudante | automático | `fecha`, `hora`, `perros`, `perroNombre`, `lugar`, `barrio`, `antes`, `conducta`, `accion`, `despues`, `riesgo`, `lesiones`, `protocolo`, `titulo` |
 | `observaciones` | equipo* | equipo* | automático | `fecha`, `hora`, `perroId`, `perroNombre`, `lugar`, `estimulo`, `reaccion`, `accion`, `resultado`, `titulo` |
