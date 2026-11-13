@@ -39,6 +39,9 @@ export const COLECCIONES = {
   fichas: { leer: ["admin", "coordinador", "supervisor"], escribir: ["admin", "coordinador"] },
   // Datos a confirmar marcados como resueltos. id = PJ-003
   resueltos: { leer: ["admin", "coordinador"], escribir: ["admin", "coordinador"] },
+  // Archivos que manda la gente (carnet de vacunas, documentos, fotos, comprobantes) con a qué perro,
+  // cliente o pedido corresponden. Los comprobantes de pago solo los abre el admin.
+  archivos: { leer: ["admin", "coordinador"], escribir: EQUIPO },
   // Registro de apoyo de pagos: SOLO admin (la fuente oficial es el Libro contable).
   pagos: { leer: ["admin"], escribir: ["admin"] },
 };

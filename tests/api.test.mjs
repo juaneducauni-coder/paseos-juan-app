@@ -21,6 +21,7 @@ const routes = {
   usuarios: (await import("../api/usuarios.js")).default,
   registros: (await import("../api/registros.js")).default,
   evaluacion: (await import("../api/publico/evaluacion.js")).default,
+  archivos: (await import("../api/archivos.js")).default,
 };
 
 async function call(route, { method = "GET", url = "/", body, token } = {}) {
@@ -39,6 +40,20 @@ async function call(route, { method = "GET", url = "/", body, token } = {}) {
     routes[route](req, res);
   });
 }
+
+async function callRaw(route, { url = "/", token } = {}) {
+  const req = Readable.from([]);
+  req.method = "GET";
+  req.url = url;
+  req.headers = token ? { authorization: `Bearer ${token}` } : {};
+  return new Promise((resolve) => {
+    const res = { statusCode: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, end(body) { resolve({ status: this.statusCode, headers: this.headers, body }); } };
+    routes[route](req, res);
+  });
+}
+
+// PNG de 1x1 válido.
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 let admin;
 let paseador;
@@ -97,6 +112,24 @@ test("formulario público crea un pedido que ve el admin", async () => {
   const pedidos = await call("registros", { url: "/?col=pedidos", token: admin });
   assert.equal(pedidos.body.registros.length, 1);
   assert.equal(pedidos.body.registros[0].estado, "nuevo");
+});
+
+test("archivos: subir carnet, abrirlo y bloquear lo que no corresponde", async () => {
+  const sube = await call("archivos", { method: "POST", token: admin, body: { tipo: "carnet de vacunas", perroNombre: "Kiara", perroId: "PJ-002", archivo: { nombre: "carnet.png", mime: "image/png", base64: PNG } } });
+  assert.equal(sube.status, 201);
+  assert.equal(sube.body.registro.tipo, "carnet de vacunas");
+  const baja = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: admin });
+  assert.equal(baja.status, 200);
+  assert.equal(baja.headers["Content-Type"], "image/png");
+  const falso = await call("archivos", { method: "POST", token: admin, body: { tipo: "foto", archivo: { nombre: "x.png", mime: "image/png", base64: Buffer.from("no soy png").toString("base64") } } });
+  assert.equal(falso.status, 400);
+  const forjado = await call("registros", { method: "POST", token: admin, body: { col: "archivos", id: "x", driveId: "otro" } });
+  assert.equal(forjado.status, 400);
+  const paseadorVe = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: paseador });
+  assert.equal(paseadorVe.status, 403);
+  const web = await call("evaluacion", { method: "POST", body: { perro: "Toby", responsable: "Ana", telefono: "1100000001", carnet: { nombre: "c.png", mime: "image/png", base64: PNG } } });
+  assert.equal(web.status, 201);
+  assert.equal(web.body.carnet, true);
 });
 
 test("bloqueo después de 5 intentos fallidos", async () => {

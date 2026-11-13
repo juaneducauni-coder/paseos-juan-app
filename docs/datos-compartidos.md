@@ -62,6 +62,7 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 | `pedidos` | admin, coordinador, marketing | admin, coordinador, marketing | automático | `fecha`, `tipo`, `estado` ("nuevo", "en-curso", "resuelto"), `titulo`, `detalle`, `datos`, `origen` |
 | `fichas` | admin, coordinador, supervisor | admin, coordinador | automático | `fecha`, `perroNombre`, `datos`, `categoria`, `estado` |
 | `resueltos` | admin, coordinador | admin, coordinador | id del perro | `perroId`, `perroNombre`, `resuelto`, `nota` |
+| `archivos` | admin, coordinador (comprobantes: solo admin) | se crean solo con `archivos.subir()` / `POST /api/archivos` (equipo) o desde el formulario web | automático | `fecha`, `tipo` ("carnet de vacunas", "comprobante de pago", "documento", "foto"), `titulo`, `nombreArchivo`, `mime`, `tamano`, `perroId`, `perroNombre`, `clienteId`, `pedidoId`, `nota`, `ubicacion` ("drive", "vercel" o "local"), `driveUrl` (si está en Drive) |
 | `pagos` | **solo admin** | **solo admin** | automático | `fecha`, `concepto`, `monto`, `medio`, `pasadoAlLibro` |
 
 \* equipo = admin, coordinador, supervisor, paseador y ayudante.
@@ -72,3 +73,16 @@ Reglas:
 - El `paseos` de un perro es UNO por día y turno: paseador y supervisor actualizan el mismo registro (mismo id). Así el supervisor ve en vivo lo que marca el paseador.
 - Nada de datos de tutores (teléfono, dirección) salvo en `pedidos` (los deja el propio tutor) y `fichas` (los carga el coordinador).
 - Borrar: solo admin, o quien lo cargó en las últimas 24 horas.
+
+## Archivos (carnet de vacunas, comprobantes, documentos, fotos)
+
+```js
+import { archivos } from "../api/client.js";
+const registro = await archivos.subir("carnet de vacunas", input.files[0], { perroId, perroNombre, clienteId });
+await archivos.abrir(registro.id); // abre en una pestaña nueva, con la sesión (no queda público)
+const lista = registros.cached("archivos"); // y registros.watch("archivos")
+```
+
+- Las fotos se achican en el celular antes de subir. Máximo 3,5 MB. Solo JPG, PNG, WEBP o PDF.
+- Con la planilla conectada se guardan en Google Drive, en "Paseos Juan — Archivos de la app/<tipo>". Si no, en Vercel privado.
+- El formulario de la página pública puede mandar el carnet: queda en el pedido como `carnet: { id, nombre }` y en `archivos` con `pedidoId`.

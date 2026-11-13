@@ -333,3 +333,76 @@ export function hoyAR(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
   return parts;
 }
+
+// ---------- Archivos (carnet de vacunas, comprobantes, documentos, fotos) ----------
+// Las fotos se achican en el celular antes de subir (máx. 1600 px, JPG): un carnet pesa ~300 KB.
+const MAX_LADO = 1600;
+
+async function achicarImagen(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const escala = Math.min(1, MAX_LADO / Math.max(bitmap.width, bitmap.height));
+    if (escala === 1 && file.size < 900 * 1024) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * escala);
+    canvas.height = Math.round(bitmap.height * escala);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    return blob ? new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+  } catch {
+    return file;
+  }
+}
+
+function aBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new ApiError(400, "No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Prepara un archivo del <input type="file"> para mandarlo al servidor.
+export async function prepararArchivo(file) {
+  if (!file) throw new ApiError(400, "Elegí un archivo.");
+  if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.type)) {
+    throw new ApiError(400, "Solo se aceptan fotos (JPG, PNG, WEBP) o PDF.");
+  }
+  const listo = await achicarImagen(file);
+  if (listo.size > 3.5 * 1024 * 1024) throw new ApiError(413, "El archivo es muy pesado (máximo 3,5 MB).");
+  return { nombre: listo.name, mime: listo.type, base64: await aBase64(listo) };
+}
+
+export const archivos = {
+  // tipo: "carnet de vacunas" | "comprobante de pago" | "documento" | "foto"
+  // datos: { perroId, perroNombre, clienteId, pedidoId, nota }
+  async subir(tipo, file, datos = {}) {
+    const archivo = await prepararArchivo(file);
+    const result = await request("/api/archivos", { method: "POST", body: { tipo, archivo, ...datos } });
+    updateCaches("archivos", result.registro);
+    emit("archivos");
+    return result.registro;
+  },
+  // Abre el archivo en una pestaña nueva (lo baja con la sesión, no queda público).
+  async abrir(id) {
+    const ventana = window.open("", "_blank");
+    try {
+      const response = await fetch(`/api/archivos?id=${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${session.token()}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new ApiError(response.status, data.error || "No se pudo abrir el archivo.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      if (ventana) ventana.location.href = url;
+      else window.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+    } catch (error) {
+      ventana?.close();
+      throw error;
+    }
+  },
+};

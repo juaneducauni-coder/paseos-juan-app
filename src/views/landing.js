@@ -1,7 +1,7 @@
 // Página pública (landing) y pantallas de ingreso/registro.
 import { BUSINESS, PROMO, PLAN_SIZES, PLANS, DISCOUNTS, SINGLE_WALK_PRICES } from "../data/mock.js";
 import { whatsappLink, icon, shell, priceCard, faqItem } from "../ui/shared.js";
-import { enviarEvaluacion } from "../api/client.js";
+import { enviarEvaluacion, prepararArchivo } from "../api/client.js";
 
 function isPromoActive(now = new Date()) {
   return now <= new Date(`${PROMO.until}T23:59:59-03:00`);
@@ -119,6 +119,10 @@ function CTASection() {
               </select>
             </label>
             <label>Raza o cruza <input name="raza" placeholder="Ej. Mestizo" /></label>
+            <label class="span-2">Carnet de vacunas (opcional)
+              <input name="carnet" type="file" accept="image/*,application/pdf" capture="environment" />
+              <small class="field-help">Sacale una foto o subí el PDF. Lo guardamos privado y solo lo ve el equipo.</small>
+            </label>
           </div>
         </fieldset>
 
@@ -296,6 +300,7 @@ function buildEvaluationMessage(data) {
     "",
     "*Preferencias*",
     line("Tipo", "tipo"), line("Horario", "horario"), line("Días", "dias"), line("Comentario", "comentario"),
+    data.get("carnet")?.size ? "Carnet de vacunas: lo adjunté en el formulario de la página." : null,
   ].filter((item) => item !== null).join("\n");
 }
 
@@ -336,9 +341,22 @@ function handleEvaluationSubmit(event) {
   window.open(whatsappLink(buildEvaluationMessage(formData)), "_blank", "noopener");
   status.textContent = "Se abrió WhatsApp con tus respuestas: solo falta tocar Enviar.";
   // Además, el pedido queda guardado en la app para que el equipo lo vea.
-  enviarEvaluacion(Object.fromEntries(formData))
+  const archivo = formData.get("carnet");
+  const datos = Object.fromEntries([...formData.entries()].filter(([key]) => key !== "carnet"));
+  (async () => {
+    if (archivo && archivo.size) {
+      try {
+        datos.carnet = await prepararArchivo(archivo);
+      } catch (error) {
+        status.textContent = `${error.message} Tu pedido igual se envía; el carnet mandalo por WhatsApp.`;
+      }
+    }
+    await enviarEvaluacion(datos);
+  })()
     .then(() => {
-      status.textContent = "Listo: recibimos tu pedido y se abrió WhatsApp con tus respuestas. Solo falta tocar Enviar.";
+      status.textContent = datos.carnet
+        ? "Listo: recibimos tu pedido y el carnet. Se abrió WhatsApp con tus respuestas: solo falta tocar Enviar."
+        : "Listo: recibimos tu pedido y se abrió WhatsApp con tus respuestas. Solo falta tocar Enviar.";
     })
     .catch(() => {
       status.textContent = "Se abrió WhatsApp con tus respuestas: tocá Enviar para que nos llegue.";

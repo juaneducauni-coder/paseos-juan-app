@@ -3,6 +3,7 @@
 import { handler, send, readJson, clientIp, HttpError } from "../_lib/http.js";
 import { store } from "../_lib/store.js";
 import { nuevoId } from "../registros.js";
+import { guardarArchivo } from "../_lib/archivos.js";
 
 const CAMPOS = ["perro", "edad", "tamano", "raza", "energia", "perros", "mordida", "conducta",
   "responsable", "telefono", "zona", "referencia", "tipo", "horario", "dias", "comentario"];
@@ -17,7 +18,7 @@ function limitar(ip) {
 }
 
 export default handler({ POST: 1 }, async (req, res) => {
-  const body = await readJson(req);
+  const body = await readJson(req, 5 * 1024 * 1024);
   // Campo trampa para robots: una persona no lo completa.
   if (body.sitio) return send(res, 201, { ok: true });
   limitar(clientIp(req));
@@ -47,6 +48,15 @@ export default handler({ POST: 1 }, async (req, res) => {
     actualizadoPor: "web",
     actualizadoEn: ahora,
   };
+  // Carnet de vacunas opcional: queda en Drive (o Vercel privado) vinculado al pedido.
+  if (body.carnet && body.carnet.base64) {
+    const archivo = await guardarArchivo(
+      { archivo: body.carnet, tipo: "carnet de vacunas", perroNombre: datos.perro, pedidoId: registro.id },
+      { usuario: "web", nombre: "Formulario de la página" },
+    );
+    registro.archivos = [archivo.id];
+    registro.carnet = { id: archivo.id, nombre: archivo.nombreArchivo };
+  }
   await store.put("pedidos", registro);
-  send(res, 201, { ok: true });
+  send(res, 201, { ok: true, carnet: Boolean(registro.carnet) });
 });

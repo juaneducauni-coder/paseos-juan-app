@@ -33,7 +33,9 @@ function doPost(e) {
       get: function () { return obtener(body.col, body.id); },
       put: function () { return guardar(body.col, body.record); },
       list: function () { return listar(body.col, body.prefix || ""); },
-      remove: function () { return borrarFila(nombreHoja(body.col), body.id); }
+      remove: function () { return borrarFila(nombreHoja(body.col), body.id); },
+      uploadFile: function () { return subirArchivo(body); },
+      getFile: function () { return leerArchivo(body.fileId); }
     };
     if (!acciones[body.action]) return responder({ ok: false, error: "Acción desconocida." });
     return responder({ ok: true, result: acciones[body.action]() });
@@ -161,4 +163,59 @@ function listarUsuarios() {
   return h.getRange(2, COLUMNAS_USUARIOS.length, h.getLastRow() - 1, 1).getValues()
     .map(function (f) { try { return JSON.parse(f[0]); } catch (e) { return null; } })
     .filter(function (x) { return x; });
+}
+
+// ---------- Archivos en Google Drive ----------
+// Todo queda dentro de la carpeta "Paseos Juan — Archivos de la app", junto a esta planilla.
+// Los archivos son privados (solo Juan). La app los muestra a quien tiene permiso, a través de este script.
+var CARPETA_RAIZ = "Paseos Juan — Archivos de la app";
+var CARPETAS_PERMITIDAS = ["Carnets de vacunas", "Comprobantes de pago", "Documentos", "Fotos"];
+
+function carpetaRaiz() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty("CARPETA_RAIZ_ID");
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (e) {}
+  }
+  var archivoPlanilla = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId());
+  var padres = archivoPlanilla.getParents();
+  var donde = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
+  var existentes = donde.getFoldersByName(CARPETA_RAIZ);
+  var raiz = existentes.hasNext() ? existentes.next() : donde.createFolder(CARPETA_RAIZ);
+  props.setProperty("CARPETA_RAIZ_ID", raiz.getId());
+  return raiz;
+}
+
+function subcarpeta(nombre) {
+  if (CARPETAS_PERMITIDAS.indexOf(nombre) === -1) nombre = "Documentos";
+  var raiz = carpetaRaiz();
+  var it = raiz.getFoldersByName(nombre);
+  return it.hasNext() ? it.next() : raiz.createFolder(nombre);
+}
+
+function subirArchivo(b) {
+  var tipos = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+  if (tipos.indexOf(b.mime) === -1) throw new Error("Tipo de archivo no permitido.");
+  var blob = Utilities.newBlob(Utilities.base64Decode(b.base64), b.mime, String(b.nombre || b.id).slice(0, 150));
+  var archivo = subcarpeta(b.carpeta).createFile(blob);
+  archivo.setDescription("Subido desde la app de Paseos Juan. Id: " + b.id);
+  return { fileId: archivo.getId(), url: archivo.getUrl() };
+}
+
+// Solo devuelve archivos que estén dentro de la carpeta de la app (nunca otro archivo del Drive).
+function leerArchivo(fileId) {
+  var archivo = DriveApp.getFileById(String(fileId));
+  var raizId = carpetaRaiz().getId();
+  var padres = archivo.getParents();
+  var dentro = false;
+  while (padres.hasNext() && !dentro) {
+    var padre = padres.next();
+    if (padre.getId() === raizId) dentro = true;
+    var abuelos = padre.getParents();
+    while (abuelos.hasNext() && !dentro) {
+      if (abuelos.next().getId() === raizId) dentro = true;
+    }
+  }
+  if (!dentro) throw new Error("Ese archivo no es de la app.");
+  return { base64: Utilities.base64Encode(archivo.getBlob().getBytes()) };
 }

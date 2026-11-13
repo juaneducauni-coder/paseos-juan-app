@@ -52,6 +52,8 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     const body = await readJson(req);
     const col = body.col;
     if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
+    // Los archivos solo se crean subiéndolos por /api/archivos (así nadie inventa a qué archivo apunta).
+    if (col === "archivos") throw new HttpError(400, "Los archivos se suben desde /api/archivos.");
     if (!puedeEscribir(user.rol, col)) throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
     if (body.fecha && !FECHA.test(body.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
     if (coleccion(col).porFecha && !body.fecha) throw new HttpError(400, "Falta la fecha.");

@@ -17,13 +17,13 @@ export function query(req) {
 
 const MAX_BODY = 64 * 1024;
 
-export async function readJson(req) {
+export async function readJson(req, maxBytes = MAX_BODY) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
   if (typeof req.body === "string") return parse(req.body);
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > MAX_BODY) throw new HttpError(413, "El pedido es demasiado grande.");
+    if (raw.length > maxBytes) throw new HttpError(413, "El pedido es demasiado grande.");
   }
   return parse(raw);
 }

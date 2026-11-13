@@ -325,3 +325,14 @@
     animation: none;
   }
 }
+
+.field-help {
+  color: var(--text);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.evaluation-form input[type="file"] {
+  padding: 10px;
+  background: var(--card, #fff);
+}

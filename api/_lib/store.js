@@ -61,6 +61,20 @@ function fileStore() {
       return records.filter(Boolean);
     },
     remove: (col, id) => fs.rm(file(check(col, "Colección"), `${check(id, "Identificador")}.json`), { force: true }),
+    async saveFile(id, buffer) {
+      const target = file("_archivos", check(id, "Archivo"));
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, buffer);
+      return { ubicacion: "local" };
+    },
+    async readFile(id) {
+      try {
+        return await fs.readFile(file("_archivos", check(id, "Archivo")));
+      } catch (error) {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    },
   };
 }
 
@@ -118,6 +132,17 @@ function blobStore() {
       return (await Promise.all(blobs.map((b) => readJson(b.pathname)))).filter(Boolean);
     },
     remove: (col, id) => remove(key(check(col, "Colección"), check(id, "Identificador"))),
+    async saveFile(id, buffer, mime) {
+      const { put } = await load();
+      await put(`app/_archivos/${check(id, "Archivo")}`, buffer, { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: mime });
+      return { ubicacion: "vercel" };
+    },
+    async readFile(id) {
+      const { get } = await load();
+      const result = await get(`app/_archivos/${check(id, "Archivo")}`, { access: "private", useCache: false });
+      if (!result) return null;
+      return Buffer.from(await new Response(result.stream).arrayBuffer());
+    },
   };
 }
 
@@ -155,6 +180,16 @@ function sheetsStore() {
     put: (col, record) => call("put", { col: check(col, "Colección"), record }),
     list: (col, prefix = "") => call("list", { col: check(col, "Colección"), prefix }),
     remove: (col, id) => call("remove", { col: check(col, "Colección"), id: check(id, "Identificador") }),
+    // Los archivos van a Google Drive, en "Paseos Juan — Archivos de la app/<carpeta>".
+    async saveFile(id, buffer, mime, meta = {}) {
+      const result = await call("uploadFile", { id: check(id, "Archivo"), mime, base64: buffer.toString("base64"), nombre: meta.nombre || id, carpeta: meta.carpeta || "Documentos" });
+      return { ubicacion: "drive", driveId: result.fileId, driveUrl: result.url };
+    },
+    async readFile(id, meta = {}) {
+      if (!meta.driveId) return null;
+      const result = await call("getFile", { fileId: meta.driveId });
+      return result ? Buffer.from(result.base64, "base64") : null;
+    },
   };
 }
 
