@@ -43,6 +43,8 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (desde && !FECHA.test(desde)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
     if (prefijo && !ID.test(prefijo)) throw new HttpError(400, "Prefijo no válido.");
     let registros = await store.list(col, prefijo);
+    // Los comprobantes de pago son solo del admin: los demás ni siquiera ven que existen.
+    if (col === "archivos" && user.rol !== "admin") registros = registros.filter((r) => r.tipo !== "comprobante de pago");
     if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
     registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
     return send(res, 200, { ok: true, registros });

@@ -125,6 +125,12 @@ test("archivos: subir carnet, abrirlo y bloquear lo que no corresponde", async (
   assert.equal(falso.status, 400);
   const forjado = await call("registros", { method: "POST", token: admin, body: { col: "archivos", id: "x", driveId: "otro" } });
   assert.equal(forjado.status, 400);
+  await call("archivos", { method: "POST", token: admin, body: { tipo: "comprobante de pago", archivo: { nombre: "c.png", mime: "image/png", base64: PNG } } });
+  await call("usuarios", { method: "POST", token: admin, body: { usuario: "coordina", nombre: "Coordinación", rol: "coordinador", pin: "736195", crear: true } });
+  const coord = (await call("login", { method: "POST", body: { usuario: "coordina", pin: "736195" } })).body.token;
+  const listaCoord = await call("registros", { url: "/?col=archivos", token: coord });
+  assert.equal(listaCoord.body.registros.some((r) => r.tipo === "comprobante de pago"), false);
+  assert.equal(listaCoord.body.registros.some((r) => r.tipo === "carnet de vacunas"), true);
   const paseadorVe = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: paseador });
   assert.equal(paseadorVe.status, 403);
   const web = await call("evaluacion", { method: "POST", body: { perro: "Toby", responsable: "Ana", telefono: "1100000001", carnet: { nombre: "c.png", mime: "image/png", base64: PNG } } });
