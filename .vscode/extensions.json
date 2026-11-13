@@ -1,0 +1,8 @@
+{
+  // Extensiones recomendadas: VS Code las ofrece al abrir el proyecto.
+  "recommendations": [
+    "anthropic.claude-code",
+    "openai.chatgpt",
+    "google.geminicodeassist"
+  ]
+}
