@@ -81,7 +81,7 @@
 .precios-table th,
 .precios-table td {
   border-top: 1px solid var(--line);
-  padding: 12px 4px;
+  padding: 14px 8px;
   text-align: right;
 }
 
@@ -134,13 +134,16 @@
 
 .precios-descuentos strong {
   color: var(--green);
-  font-size: 1.6rem;
+  font-size: 1.35rem;
   font-weight: 950;
+  line-height: 1.1;
+  text-align: center;
 }
 
 .precios-descuentos span {
   color: var(--ink);
   font-weight: 700;
+  text-align: center;
 }
 
 .precios-consultar {
@@ -254,4 +257,19 @@ html[data-theme="dark"] .precios-cta .secondary-button {
   .precios-cta-actions {
     grid-template-columns: repeat(2, max-content);
   }
+}
+
+/* Más aire entre columnas de precios; la primera columna (plan) queda pegada al borde */
+.precios-table th:first-child {
+  padding-left: 0;
+}
+
+.precios-table th:last-child,
+.precios-table td:last-child {
+  padding-right: 0;
+}
+
+.precios-table tbody tr th,
+.precios-table tbody tr td {
+  padding-block: 16px;
 }

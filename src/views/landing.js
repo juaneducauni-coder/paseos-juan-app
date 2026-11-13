@@ -39,7 +39,7 @@ export function publicShell(content, current = "/") {
         </span>
       </a>
       <div class="header-actions">
-        <a class="header-link ${current === "/precios" ? "is-current" : ""}" href="/precios" data-link ${current === "/precios" ? 'aria-current="page"' : ""}>Precios</a>
+        <a class="header-link header-link--precios ${current === "/precios" ? "is-current" : ""}" href="/precios" data-link ${current === "/precios" ? 'aria-current="page"' : ""}>Precios</a>
         <a class="header-link" href="/tienda" data-link>Tienda</a>
         <a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>
         <button class="menu-button ${state.menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${state.menuOpen}" aria-label="Abrir menú">
@@ -115,11 +115,11 @@ function HeroSection() {
     <section class="hero" id="inicio">
       <div class="hero-pattern" aria-hidden="true"></div>
       <div class="hero-copy reveal">
-        <p class="eyebrow">Paseos · Baños · Estadía · Tienda</p>
-        <h1>
-          <span>Disciplina.</span>
-          <span>Libertad.</span>
-          <span>Bienestar.</span>
+        <p class="eyebrow">Disciplina. Libertad. Bienestar.</p>
+        <h1 class="hero-title">
+          <span>Paseos grupales</span>
+          <span>seguros para</span>
+          <span>tu perro.</span>
         </h1>
         <p>
           Paseos grupales organizados por conducta, energía y compatibilidad. Cuidado y confianza
@@ -141,7 +141,7 @@ function HeroSection() {
         </div>
       </div>
       <a class="scroll-indicator" href="#servicios" data-link aria-label="Bajar a servicios">
-        <span>Scroll</span>
+        <span>Bajar</span>
         <b>${icon("chevronDown")}</b>
       </a>
     </section>
@@ -178,14 +178,14 @@ function ServicesSection() {
       <span class="anchor-alias" id="sobre-nosotros" aria-hidden="true"></span>
       <div class="services-heading">
         <p class="eyebrow">Servicios</p>
-        <h2 id="servicios-titulo">Todo para tu perro, en un solo lugar.</h2>
+        <h2 id="servicios-titulo">Qué ofrecemos</h2>
       </div>
       <div class="services-grid">
         ${serviceCard({
           iconName: "pawPrint",
           title: "Paseos grupales",
           text: "Grupos armados por conducta, energía y compatibilidad. Antes de sumarlo al grupo, hacemos una evaluación inicial.",
-          action: consultButton("Hola, quiero consultar por los paseos grupales de Paseos Juan."),
+          action: `<a class="primary-button service-button" href="#evaluacion" data-link>Pedir evaluación</a>`,
         })}
         ${serviceCard({
           iconName: "droplets",
@@ -287,12 +287,27 @@ function joinWithY(items) {
   return items.length > 1 ? `${items.slice(0, -1).join(", ")} y ${items.at(-1)}` : items[0] || "";
 }
 
+// WhatsApp válido: al menos 8 números (sin contar espacios, guiones ni el +).
+const MIN_PHONE_DIGITS = 8;
+const PHONE_ERROR = "Revisá tu WhatsApp: tiene que tener al menos 8 números (ej. 11 5555 5555).";
+
+function phoneDigits(value) {
+  return String(value || "").replace(/\D/g, "").length;
+}
+
+function fieldMissing(key, value) {
+  const text = String(value || "").trim();
+  if (key === "telefono") return phoneDigits(text) < MIN_PHONE_DIGITS;
+  return !text;
+}
+
 function missingRequired(values) {
-  return REQUIRED_FIELDS.filter(([key]) => !String(values[key] || "").trim()).map(([, label]) => label);
+  return REQUIRED_FIELDS.filter(([key]) => fieldMissing(key, values[key])).map(([key, label]) =>
+    key === "telefono" && String(values[key] || "").trim() ? "WhatsApp completo (al menos 8 números)" : label);
 }
 
 function missingText(missing) {
-  return missing.length ? `Falta: ${joinWithY(missing)}` : "Listo para enviar";
+  return missing.length ? `Falta: ${joinWithY(missing)}` : "Listo: tocá Enviar";
 }
 
 // Solo para mostrar nombre y correo: el servidor es el que verifica el token con Google.
@@ -307,7 +322,7 @@ function decodeGooglePayload(credential) {
     return { email: "", nombre: "" };
   }
 }
-const DAYS = [["L", "Lunes"], ["M", "Martes"], ["X", "Miércoles"], ["J", "Jueves"], ["V", "Viernes"], ["S", "Sábado"], ["D", "Domingo"]];
+const DAYS = [["Lun", "Lunes"], ["Mar", "Martes"], ["Mié", "Miércoles"], ["Jue", "Jueves"], ["Vie", "Viernes"], ["Sáb", "Sábado"], ["Dom", "Domingo"]];
 
 function readDraft() {
   try {
@@ -344,16 +359,18 @@ const MIC_SVG = `<svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" fi
 
 function micMini(field, what, voice) {
   if (!voice) return "";
-  return `<button class="mic-mini" type="button" data-dictar="${field}" aria-pressed="false" aria-label="Dictar ${what}" title="Dictar ${what}">${MIC_SVG}</button>`;
+  return `<button class="mic-mini" type="button" data-dictar="${field}" aria-pressed="false" aria-label="Dictar ${what}" title="Dictar ${what} con la voz">${MIC_SVG}<span class="mic-mini-text" aria-hidden="true">Dictar</span></button>`;
 }
 
-function textField({ name, label, draft, voice, required = false, placeholder = "", autocomplete = "off", type = "text", inputmode = "", what = "" }) {
+function textField({ name, label, draft, voice, required = false, placeholder = "", autocomplete = "off", type = "text", inputmode = "", what = "", help = "" }) {
+  const helpId = help ? `ayuda-${name}` : "";
   return `
     <label class="quick-field"><span>${label}${required ? ' <span class="req" aria-hidden="true">*</span>' : ""}</span>
       <span class="field-with-mic">
-        <input name="${name}" type="${type}" ${required ? "required" : ""} autocomplete="${autocomplete}" ${inputmode ? `inputmode="${inputmode}"` : ""} placeholder="${placeholder}" value="${esc(draft[name] || "")}" />
+        <input name="${name}" type="${type}" ${required ? "required" : ""} autocomplete="${autocomplete}" ${inputmode ? `inputmode="${inputmode}"` : ""} placeholder="${placeholder}" value="${esc(draft[name] || "")}" ${helpId ? `aria-describedby="${helpId}"` : ""} />
         ${what ? micMini(name, what, voice) : ""}
       </span>
+      ${help ? `<small class="field-help" id="${helpId}">${help}</small>` : ""}
     </label>
   `;
 }
@@ -379,16 +396,19 @@ function choiceGroup({ name, legend, options, draft, multiple = false }) {
 function CTASection() {
   const draft = readDraft();
   const voice = speechSupported();
-  const foldedOpen = OPTIONAL_FOLDED.some((key) => String(draft[key] || "").trim());
+  const hasValue = (key) => (Array.isArray(draft[key]) ? draft[key].length : String(draft[key] || "").trim());
+  const optionalOpen = DRAFT_FIELDS.filter((key) => !REQUIRED_FIELDS.some(([req]) => req === key)).some(hasValue);
+  const foldedOpen = OPTIONAL_FOLDED.some(hasValue);
   const missing = missingRequired(draft);
   return `
-    <section class="contact-section reveal" id="contacto">
+    <section class="contact-section" id="evaluacion" aria-labelledby="evaluacion-titulo">
+      <span class="anchor-alias" id="contacto" aria-hidden="true"></span>
       <div class="evaluation-heading">
         <p class="eyebrow">Evaluación inicial</p>
-        <h2>Pedí tu evaluación en 1 minuto</h2>
-        <p>Con 3 datos alcanza. Lo demás, si querés, lo dictás o nos lo contás por WhatsApp.</p>
+        <h2 id="evaluacion-titulo">Pedí tu evaluación en 1 minuto</h2>
+        <p>Con 3 datos alcanza. Lo demás, si querés, lo sumás abajo o nos lo contás por WhatsApp.</p>
       </div>
-      <form class="evaluation-form quick-form" id="evaluacion" data-evaluation-form novalidate>
+      <form class="evaluation-form quick-form" data-evaluation-form novalidate>
         <label class="visually-hidden" aria-hidden="true">No completar <input name="sitio" tabindex="-1" autocomplete="off" /></label>
         <input type="hidden" name="tipo" value="Grupal" />
 
@@ -404,57 +424,60 @@ function CTASection() {
           </div>
           ${textField({ name: "perro", label: "Nombre del perro", draft, voice, required: true, placeholder: "Ej. Luna", what: "el nombre del perro" })}
           ${textField({ name: "responsable", label: "Tu nombre", draft, voice, required: true, placeholder: "Tu nombre", autocomplete: "name", what: "tu nombre" })}
-          ${textField({ name: "telefono", label: "Tu WhatsApp", draft, voice, required: true, placeholder: "11 0000 0000", autocomplete: "tel", type: "tel", inputmode: "tel" })}
+          ${textField({ name: "telefono", label: "Tu WhatsApp", draft, voice, required: true, placeholder: "Ej. 11 5555 5555", autocomplete: "tel", type: "tel", inputmode: "tel", help: "Con característica, sin 0 ni 15." })}
         </fieldset>
 
-        <fieldset class="evaluation-board quick-optional">
-          <legend>Si querés, sumá más (opcional)</legend>
-          ${choiceGroup({ name: "tamano", legend: "Tamaño", draft, options: [["Chico", "Pequeño"], ["Mediano", "Mediano"], ["Grande", "Grande"]] })}
-          ${choiceGroup({ name: "energia", legend: "Energía", draft, options: [["Baja", "Baja"], ["Media", "Media"], ["Alta", "Alta"]] })}
-          ${choiceGroup({ name: "perros", legend: "¿Se lleva bien con otros perros?", draft, options: [["Sí", "Sí"], ["No", "No"], ["Depende", "Depende"]] })}
-          ${choiceGroup({ name: "mordida", legend: "¿Alguna vez mordió o intentó morder?", draft, options: [["No", "No"], ["Sí", "Sí"], ["No sé", "No estoy seguro"]] })}
-          ${choiceGroup({ name: "horario", legend: "Turno", draft, options: [["Mañana", "Mañana"], ["Tarde", "Tarde"], ["Indistinto", "Indistinto"]] })}
-          ${choiceGroup({ name: "dias", legend: "Días (tocá todos los que quieras)", draft, multiple: true, options: DAYS.map(([short, long]) => [short, long, long]) })}
+        <details class="quick-optional-fold" ${optionalOpen ? "open" : ""}>
+          <summary class="quick-optional-toggle">Sumar más datos (opcional)</summary>
+          <div class="evaluation-board quick-optional">
+            ${choiceGroup({ name: "tamano", legend: "Tamaño", draft, options: [["Pequeño", "Pequeño"], ["Mediano", "Mediano"], ["Grande", "Grande"]] })}
+            ${choiceGroup({ name: "energia", legend: "Energía", draft, options: [["Baja", "Baja"], ["Media", "Media"], ["Alta", "Alta"]] })}
+            ${choiceGroup({ name: "perros", legend: "¿Se lleva bien con otros perros?", draft, options: [["Sí", "Sí"], ["No", "No"], ["Depende", "Depende"]] })}
+            ${choiceGroup({ name: "mordida", legend: "¿Alguna vez mordió o intentó morder?", draft, options: [["No", "No"], ["Sí", "Sí"], ["No sé", "No estoy seguro"]] })}
+            ${choiceGroup({ name: "horario", legend: "Turno", draft, options: [["Mañana", "Mañana"], ["Tarde", "Tarde"], ["Indistinto", "Indistinto"]] })}
+            ${choiceGroup({ name: "dias", legend: "Días (tocá todos los que quieras)", draft, multiple: true, options: DAYS.map(([short, long]) => [short, long, long]) })}
 
-          <div class="voice-field">
-            <label for="campo-conducta">Contanos de tu perro</label>
-            <textarea id="campo-conducta" name="conducta" placeholder="Miedos, si tira de la correa, cómo se porta con otros perros…">${esc(draft.conducta || "")}</textarea>
-            ${voice
-              ? `<button class="voice-button" type="button" data-dictar="conducta" aria-pressed="false">${MIC_SVG}<span data-voice-label>Hablar</span></button>`
-              : `<p class="voice-hint">Tocá el micrófono de tu teclado para dictar.</p>`}
-          </div>
-          <p class="visually-hidden" data-voice-status role="status" aria-live="polite"></p>
-
-          <details class="quick-more" ${foldedOpen ? "open" : ""}>
-            <summary>Contanos más (opcional)</summary>
-            <div class="form-grid">
-              ${textField({ name: "edad", label: "Edad", draft, voice, placeholder: "Ej. 4 años", what: "la edad" })}
-              ${textField({ name: "raza", label: "Raza o cruza", draft, voice, placeholder: "Ej. Mestizo", what: "la raza" })}
-              ${textField({ name: "zona", label: "Barrio o zona", draft, voice, placeholder: "Ej. Pilar", what: "el barrio" })}
-              ${textField({ name: "referencia", label: "Barrio privado o referencia", draft, voice, placeholder: "Ej. nombre del barrio", what: "la referencia" })}
-              ${textField({ name: "email", label: "Correo", draft, voice, placeholder: "Se completa solo con Google", autocomplete: "email", type: "email", inputmode: "email" })}
-              <label class="span-2">Carnet de vacunas
-                <input name="carnet" type="file" accept="image/*,application/pdf" capture="environment" />
-                <small class="field-help">Sacale una foto o subí el PDF. Lo guardamos privado y solo lo ve el equipo.</small>
-              </label>
-              <label class="span-2">Comentario
-                <span class="field-with-mic">
-                  <textarea name="comentario" placeholder="Algo más que quieras contarnos">${esc(draft.comentario || "")}</textarea>
-                  ${micMini("comentario", "un comentario", voice)}
-                </span>
-              </label>
+            <div class="voice-field">
+              <label for="campo-conducta">Contanos de tu perro</label>
+              <textarea id="campo-conducta" name="conducta" placeholder="Miedos, si tira de la correa, cómo se porta con otros perros…">${esc(draft.conducta || "")}</textarea>
+              ${voice
+                ? `<button class="voice-button" type="button" data-dictar="conducta" aria-pressed="false" title="Dictar con la voz">${MIC_SVG}<span data-voice-label>Hablar</span></button>`
+                : `<p class="voice-hint">Tocá el micrófono de tu teclado para dictar.</p>`}
             </div>
-          </details>
+            <p class="visually-hidden" data-voice-status role="status" aria-live="polite"></p>
 
-        </fieldset>
-        <p class="quick-note">Se abre WhatsApp con tus respuestas listas: solo tocás Enviar. Te contestamos para coordinar la evaluación.</p>
-
-        <div class="quick-submit-bar" data-submit-bar>
-          <div class="quick-submit-text">
-            <p class="quick-missing" data-missing aria-live="polite">${missingText(missing)}</p>
-            <p class="evaluation-status" data-evaluation-status role="status" aria-live="polite"></p>
+            <details class="quick-more" ${foldedOpen ? "open" : ""}>
+              <summary>Datos extras del perro y carnet (opcional)</summary>
+              <div class="form-grid">
+                ${textField({ name: "edad", label: "Edad", draft, voice, placeholder: "Ej. 4 años", what: "la edad" })}
+                ${textField({ name: "raza", label: "Raza o cruza", draft, voice, placeholder: "Ej. Mestizo", what: "la raza" })}
+                ${textField({ name: "zona", label: "Barrio o zona", draft, voice, placeholder: "Ej. Pilar", what: "el barrio" })}
+                ${textField({ name: "referencia", label: "Barrio privado o referencia", draft, voice, placeholder: "Ej. nombre del barrio", what: "la referencia" })}
+                ${textField({ name: "email", label: "Correo", draft, voice, placeholder: "Se completa solo con Google", autocomplete: "email", type: "email", inputmode: "email" })}
+                <label class="span-2">Carnet de vacunas
+                  <input name="carnet" type="file" accept="image/*,application/pdf" capture="environment" />
+                  <small class="field-help">Sacale una foto o subí el PDF. Lo guardamos privado y solo lo ve el equipo.</small>
+                </label>
+                <label class="span-2">Comentario
+                  <span class="field-with-mic">
+                    <textarea name="comentario" placeholder="Algo más que quieras contarnos">${esc(draft.comentario || "")}</textarea>
+                    ${micMini("comentario", "un comentario", voice)}
+                  </span>
+                </label>
+              </div>
+            </details>
           </div>
-          <button class="primary-button quick-submit" type="submit" data-quick-submit aria-disabled="${missing.length > 0}">Enviar</button>
+        </details>
+
+        <div class="quick-send">
+          <p class="quick-note">Al tocar Enviar se abre WhatsApp: apretá Enviar ahí para mandarnos el pedido.</p>
+          <div class="quick-submit-bar" data-submit-bar>
+            <div class="quick-submit-text">
+              <p class="quick-missing" data-missing aria-live="polite">${missingText(missing)}</p>
+              <p class="evaluation-status" data-evaluation-status role="status" aria-live="polite"></p>
+            </div>
+            <button class="primary-button quick-submit" type="submit" data-quick-submit aria-disabled="${missing.length > 0}">Enviar</button>
+          </div>
         </div>
       </form>
     </section>
@@ -512,9 +535,31 @@ function updateSubmitBar(form) {
 function handleEvaluationInput(event) {
   const form = event.target.closest?.("[data-evaluation-form]");
   if (!form || event.target.name === "carnet" || event.target.name === "sitio") return;
-  if (event.target.hasAttribute("aria-invalid") && event.target.value.trim()) event.target.removeAttribute("aria-invalid");
+  if (event.target.hasAttribute("aria-invalid") && !fieldMissing(event.target.name, event.target.value)) event.target.removeAttribute("aria-invalid");
   writeDraft(collectDraft(form));
   updateSubmitBar(form);
+  floatSubmitBar(form);
+}
+
+// La barra de "Enviar" queda en su lugar (al final del formulario) y recién flota abajo de la
+// pantalla cuando la persona empezó a completar. Así nunca tapa el primer campo al llegar.
+function floatSubmitBar(form) {
+  const bar = form?.querySelector("[data-submit-bar]");
+  if (bar && !bar.classList.contains("is-floating")) bar.classList.add("is-floating");
+}
+
+// Si el campo que se está completando queda debajo de la barra flotante, se sube un poco.
+function keepFieldAboveBar(event) {
+  const form = event.target.closest?.("[data-evaluation-form]");
+  if (!form || !event.target.matches("input:not([type=radio]):not([type=checkbox]):not([type=file]), textarea")) return;
+  floatSubmitBar(form);
+  requestAnimationFrame(() => {
+    const bar = form.querySelector("[data-submit-bar]");
+    if (!bar) return;
+    const field = event.target.getBoundingClientRect();
+    const barTop = bar.getBoundingClientRect().top;
+    if (field.bottom > barTop - 12 && field.top < barTop) window.scrollBy({ top: field.bottom - barTop + 24, behavior: "instant" });
+  });
 }
 
 // ---------- Continuar con Google ----------
@@ -577,11 +622,15 @@ function handleEvaluationSubmit(event) {
   stopDictation();
 
   const status = form.querySelector("[data-evaluation-status]");
-  const missing = [...form.querySelectorAll("[required]")].filter((field) => !field.value.trim());
+  const missing = [...form.querySelectorAll("[required]")].filter((field) => fieldMissing(field.name, field.value));
   form.querySelectorAll("[required]").forEach((field) => field.toggleAttribute("aria-invalid", missing.includes(field)));
   if (missing.length) {
-    status.textContent = "Completá el nombre del perro, tu nombre y tu WhatsApp para poder contactarte.";
+    const onlyPhone = missing.length === 1 && missing[0].name === "telefono" && missing[0].value.trim();
+    status.textContent = onlyPhone
+      ? PHONE_ERROR
+      : "Completá el nombre del perro, tu nombre y tu WhatsApp (al menos 8 números) para poder contactarte.";
     status.classList.add("is-error");
+    floatSubmitBar(form);
     missing[0].focus();
     return;
   }
@@ -639,7 +688,11 @@ function setListening(button, listening) {
   button.classList.toggle("is-listening", listening);
   const label = button.querySelector("[data-voice-label]");
   if (label) label.textContent = listening ? "Frenar" : "Hablar";
-  if (!label) button.setAttribute("aria-label", listening ? "Frenar el dictado" : button.title);
+  if (!label) {
+    button.setAttribute("aria-label", listening ? "Frenar el dictado" : button.title.replace(/ con la voz$/, ""));
+    const text = button.querySelector(".mic-mini-text");
+    if (text) text.textContent = listening ? "Frenar" : "Dictar";
+  }
 }
 
 function stopDictation() {
@@ -719,6 +772,7 @@ export function registerLandingEvents() {
   document.addEventListener("change", handleEvaluationInput);
   document.addEventListener("click", handleDictationClick);
   document.addEventListener("click", handleGoogleChange);
+  document.addEventListener("focusin", keepFieldAboveBar);
   // Después de cada dibujo de la página, se monta el botón de Google (si está activado).
   const app = document.getElementById("app");
   if (app) new MutationObserver(() => mountGoogle()).observe(app, { childList: true });

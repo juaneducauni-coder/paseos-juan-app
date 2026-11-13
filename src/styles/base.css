@@ -4025,6 +4025,15 @@ html[data-theme="dark"] select:focus {
     width: 44px;
     height: 44px;
   }
+
+  /* WhatsApp flotante: más chico y pegado a la esquina, a la altura del de accesibilidad */
+  .whatsapp {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    min-height: 44px;
+    padding: 0 16px;
+    font-size: 0.92rem;
+  }
 }
 
 /* Oculto a la vista pero presente (campo trampa para robots, textos para lectores) */

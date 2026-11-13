@@ -193,3 +193,61 @@ html[data-theme="dark"] .a11y-option.is-active {
     display: none;
   }
 }
+
+/* ---- Botones flotantes que no tapan contenido (accesibilidad y WhatsApp) ----
+   Mientras se hace scroll: más chicos y semitransparentes.
+   Si al frenar quedan sobre texto o un campo: se corren al borde y queda una pestaña de 14 px
+   (dentro del margen de la página). Tocarla o llegar con el teclado los muestra enteros. */
+.a11y-toggle,
+a.whatsapp {
+  transition: transform 260ms ease, opacity 260ms ease;
+}
+
+html.is-scrolling .a11y-toggle:not(:focus-visible) {
+  opacity: 0.45;
+  transform: scale(0.82);
+}
+
+html.is-scrolling a.whatsapp:not(:focus-visible) {
+  opacity: 0.45;
+  transform: scale(0.86);
+  transform-origin: right bottom;
+}
+
+.a11y-toggle.is-tucked {
+  --fab-left: 18px;
+  opacity: 0.9;
+  transform: translateX(calc(-100% - var(--fab-left) + 14px));
+}
+
+a.whatsapp.is-tucked {
+  --fab-right: 22px;
+  opacity: 0.9;
+  transform: translateX(calc(100% + var(--fab-right) - 14px));
+}
+
+html.is-scrolling .a11y-toggle.is-tucked:not(:focus-visible) {
+  opacity: 0.45;
+  transform: translateX(calc(-100% - var(--fab-left) + 14px));
+}
+
+html.is-scrolling a.whatsapp.is-tucked:not(:focus-visible) {
+  opacity: 0.45;
+  transform: translateX(calc(100% + var(--fab-right) - 14px));
+}
+
+/* En celular: más chicos y más pegados a las esquinas */
+@media (max-width: 760px) {
+  #a11y-root {
+    left: 10px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .a11y-toggle.is-tucked {
+    --fab-left: 10px;
+  }
+
+  a.whatsapp.is-tucked {
+    --fab-right: 12px;
+  }
+}

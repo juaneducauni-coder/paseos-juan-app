@@ -41,6 +41,10 @@ function cartCount(cart) {
   return Object.values(cart).reduce((total, qty) => total + qty, 0);
 }
 
+function hasPrice(product) {
+  return typeof product.precio === "number";
+}
+
 function priceLabel(product) {
   return typeof product.precio === "number" ? `$${product.precio.toLocaleString("es-AR")}` : PENDIENTE;
 }
@@ -69,7 +73,6 @@ function productCard(product, cart) {
       <div class="tienda-product-body">
         <p class="tienda-tag">${esc(product.para)}</p>
         <h2 id="producto-${product.id}">${esc(product.nombre)}</h2>
-        <p class="tienda-maker">Marca de ${esc(product.fabricante)}</p>
         <dl class="tienda-specs">
           <div><dt>Presentación</dt><dd>${esc(product.presentacion)}</dd></div>
           <div><dt>Precio</dt><dd>${esc(priceLabel(product))}</dd></div>
@@ -80,7 +83,7 @@ function productCard(product, cart) {
               <output aria-live="off">${qty}</output>
               <button type="button" data-tienda="sumar" data-id="${product.id}" aria-label="Sumar un ${esc(product.nombre)}" ${qty >= MAX_QTY ? "disabled" : ""}>+</button>
             </div>`
-          : `<button class="tienda-add" type="button" data-tienda="sumar" data-id="${product.id}">Sumar al pedido</button>`}
+          : `<button class="tienda-add" type="button" data-tienda="sumar" data-id="${product.id}">${hasPrice(product) ? "Sumar al pedido" : "Consultar este producto"}<span class="visually-hidden">: ${esc(product.nombre)}</span></button>`}
       </div>
     </article>
   `;
@@ -104,9 +107,9 @@ function cartPanel(cart) {
             </li>
           `).join("")}
         </ul>
-        <p class="tienda-cart-note">Sin pago online: te confirmamos presentación, precio y disponibilidad por WhatsApp.</p>
-        <button class="tienda-order" type="button" data-tienda="pedir">${icon("message")}<span>Pedir por WhatsApp</span></button>`
-      : `<p class="tienda-empty">Todavía no sumaste productos.</p>`}
+        <p class="tienda-cart-note">Te confirmamos presentación, precio y disponibilidad por WhatsApp.</p>
+        <button class="tienda-order" type="button" data-tienda="pedir">${icon("message")}<span>${items.every(hasPrice) ? "Pedir por WhatsApp" : "Consultar por WhatsApp"}</span></button>`
+      : `<p class="tienda-empty">Todavía no elegiste productos. Sumalos arriba para consultar precio y stock por WhatsApp.</p>`}
   `;
 }
 
@@ -115,6 +118,7 @@ export function tiendaPage() {
   return `
     <div class="tienda-page">
       <header class="tienda-bar">
+        <a class="tienda-home" href="/" data-link aria-label="Volver a Paseos Juan">← Paseos Juan</a>
         <a class="tienda-brand" href="/tienda" data-link aria-label="${esc(TIENDA.nombre)}, ${esc(TIENDA.aliado)}">
           <span class="tienda-logo" aria-hidden="true">${icon("shoppingBag")}</span>
           <span><strong>${esc(TIENDA.nombre)}</strong><small>${esc(TIENDA.aliado)}</small></span>
@@ -125,11 +129,11 @@ export function tiendaPage() {
       </header>
 
       <main class="tienda-main">
-        <a class="tienda-back" href="/" data-link>← Volver a Paseos Juan</a>
         <section class="tienda-hero" aria-labelledby="tienda-titulo">
           <p class="tienda-eyebrow">Alimento y productos</p>
           <h1 id="tienda-titulo">Para perros y gatos.</h1>
-          <p>DogPro y CatPro, de ${esc(TIENDA.fabricante)}. Armá tu pedido y mandalo por WhatsApp.</p>
+          <p>DogPro (perros) y CatPro (gatos), de ${esc(TIENDA.fabricante)}. Elegí lo que necesitás y consultalo por WhatsApp.</p>
+          <p class="tienda-aviso">${icon("message")}<span><strong>Sin pago online:</strong> consultá precio y stock por WhatsApp.</span></p>
         </section>
 
         <section class="tienda-grid" aria-label="Productos" data-tienda-productos>
@@ -147,7 +151,7 @@ export function tiendaPage() {
       <footer class="tienda-footer">
         <p><strong>${esc(TIENDA.nombre)}</strong> · ${esc(TIENDA.aliado)}</p>
         <p>DogPro y CatPro son marcas de ${esc(TIENDA.fabricante)}, usadas con su autorización.</p>
-        <a href="/" data-link>Volver a Paseos Juan</a>
+        <a href="/" data-link>← Volver a Paseos Juan</a>
       </footer>
     </div>
   `;
