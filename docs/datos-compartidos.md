@@ -62,7 +62,7 @@ Checklist del ayudante antes de salir (corto): botiquín (agua oxigenada y gasa)
 |---|---|---|---|---|
 | `paseos` | equipo* | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_PJ-001_manana` (o `_tarde`) | `fecha`, `perroId`, `perroNombre`, `turno` ("Mañana"/"Tarde"), `ruta`, `estado` ("pendiente", "retirado", "paseando", "entregado", "no-sale"), `horaRetiro`, `horaPaseo`, `horaEntrega` (y quién marcó cada paso: `horaRetiroPor`/`horaRetiroPorNombre`, `horaPaseoPor`/`horaPaseoPorNombre`, `horaEntregaPor`/`horaEntregaPorNombre`), `fotoPaseoId` (foto que marca el paseo), `fotoPendiente` (true si se sacó sin señal y todavía no se subió), `nota` |
 | `checklists` | admin, supervisor, paseador, ayudante | admin, supervisor, paseador, ayudante | `AAAA-MM-DD_usuario_manana` | `fecha`, `turno`, `items`, `completo` |
-| `incidentes` | equipo* | admin, supervisor, paseador, ayudante | automático | `fecha`, `hora`, `perros`, `perroNombre`, `lugar`, `barrio`, `antes`, `conducta`, `accion`, `despues`, `riesgo`, `lesiones`, `protocolo`, `titulo` |
+| `incidentes` | equipo* | admin, supervisor, paseador, ayudante | automático | `fecha`, `hora`, `perros`, `perroNombre`, `lugar`, `barrio`, `antes`, `conducta`, `accion`, `despues`, `riesgo`, `lesiones`, `protocolo`, `tipos` (chips elegidos), `tipo` ("curación leve" para el botiquín del ayudante), `titulo` |
 | `observaciones` | equipo* | equipo* | automático | `fecha`, `hora`, `perroId`, `perroNombre`, `lugar`, `estimulo`, `reaccion`, `accion`, `resultado`, `titulo` |
 | `plantillas` | equipo* | admin, coordinador | `PJ_1M_lunes` | ver "Rutas y horarios" |
 | `rutas` | equipo* | admin, coordinador | `AAAA-MM-DD_PJ_1M` | igual que plantilla + `fecha` |

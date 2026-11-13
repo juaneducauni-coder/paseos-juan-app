@@ -11,6 +11,7 @@ const listeners = new Set();
 
 let prefs = readPrefs();
 let panelOpen = false;
+let abridor = null; // elemento que abrió el panel, para devolverle el foco al cerrar
 
 function readPrefs() {
   try {
@@ -104,6 +105,20 @@ function renderControl() {
   `;
 }
 
+function volverFoco() {
+  const destino = abridor && document.contains(abridor) && abridor.offsetParent !== null ? abridor : document.querySelector(".a11y-toggle");
+  destino?.focus();
+  abridor = null;
+}
+
+// Abre el panel de accesibilidad desde cualquier botón de la página (por ejemplo, "Tema y movimiento").
+export function abrirAccesibilidad() {
+  abridor = document.activeElement;
+  panelOpen = true;
+  renderControl();
+  document.querySelector("#a11y-panel .a11y-option.is-active")?.focus();
+}
+
 export function initAccessibility() {
   if (!document.querySelector('meta[name="theme-color"]')) {
     const meta = document.createElement("meta");
@@ -113,10 +128,11 @@ export function initAccessibility() {
 
   document.addEventListener("click", (event) => {
     if (event.target.closest("[data-a11y-toggle]")) {
+      if (!panelOpen) abridor = document.activeElement;
       panelOpen = !panelOpen;
       renderControl();
       if (panelOpen) document.querySelector("#a11y-panel .a11y-option.is-active")?.focus();
-      else document.querySelector(".a11y-toggle")?.focus();
+      else volverFoco();
       return;
     }
     const setter = event.target.closest("[data-a11y-set]");
@@ -138,7 +154,7 @@ export function initAccessibility() {
     if (event.key === "Escape" && panelOpen) {
       panelOpen = false;
       renderControl();
-      document.querySelector(".a11y-toggle")?.focus();
+      volverFoco();
     }
   });
 
