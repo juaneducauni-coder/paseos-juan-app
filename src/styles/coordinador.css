@@ -2572,3 +2572,295 @@ html[data-theme="dark"] .coord-shell {
 .coord-shell .coord-form {
   scroll-margin-top: 84px;
 }
+
+/* ================================================================== */
+/* Archivos: carnet de vacunas y documentos (E-020)                    */
+/* ================================================================== */
+
+.coord-count {
+  display: inline-grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--c-green-soft);
+  color: var(--c-ok-ink);
+  font-size: 0.8rem;
+  font-weight: 900;
+  padding: 0 6px;
+}
+
+.coord-docs {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--c-line);
+  padding-top: 12px;
+}
+
+.coord-docs h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--c-ink);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.coord-docs h4 .coord-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--c-green);
+}
+
+.coord-docs > .coord-btn {
+  justify-self: start;
+}
+
+.coord-carnets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-carnets li {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-ink);
+  font-size: 0.92rem;
+}
+
+.coord-carnet {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.coord-carnet .coord-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.coord-carnet.is-ok {
+  border-color: var(--c-green);
+  background: var(--c-ok-bg);
+  color: var(--c-ok-ink);
+}
+
+.coord-carnet.is-missing {
+  border-color: var(--c-warn-line);
+  background: var(--c-warn-bg);
+  color: var(--c-warn-ink);
+}
+
+.coord-files {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-file {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-card-2);
+  padding: 8px 8px 8px 10px;
+}
+
+.coord-file-icon {
+  color: var(--c-green);
+}
+
+.coord-file-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coord-file-text b {
+  color: var(--c-ink);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.coord-file-text small {
+  color: var(--c-text);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.coord-shell .coord-file .coord-btn {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+.coord-attach {
+  display: grid;
+  gap: 8px;
+}
+
+.coord-shell .coord-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  border: 1px solid var(--c-green);
+  border-radius: 12px;
+  background: var(--c-ok-bg);
+  color: var(--c-ok-ink);
+  padding: 8px 10px;
+}
+
+.coord-attach-row > span {
+  display: grid;
+  flex: 1 1 150px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coord-attach-row b {
+  font-weight: 900;
+}
+
+.coord-attach-row small {
+  color: var(--c-text);
+  font-size: 0.82rem;
+}
+
+.coord-shell .coord-attach-row .coord-btn {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+.coord-upload {
+  display: grid;
+  gap: 12px;
+  border: 1px dashed var(--c-green);
+  border-radius: 14px;
+  background: var(--c-card-2);
+  padding: 12px;
+  scroll-margin-top: 84px;
+}
+
+.coord-shell .coord-upload-title {
+  color: var(--c-ink);
+  font-weight: 900;
+}
+
+.coord-file-pick {
+  position: relative;
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+
+.coord-file-pick:focus-within {
+  outline: 3px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* El <input type="file"> queda invisible dentro de su botón, pero sigue recibiendo el foco. */
+.coord-shell .coord-file-pick input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.coord-shell .coord-upload-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-ink);
+  font-weight: 800;
+}
+
+.coord-upload-status:empty {
+  display: none;
+}
+
+.coord-flash.is-small {
+  font-size: 0.9rem;
+  padding: 8px 12px;
+}
+
+.coord-stops-mini li {
+  padding: 2px 0;
+}
+
+.coord-stop-line {
+  margin-right: 6px;
+}
+
+.coord-stops-mini .coord-carnet {
+  vertical-align: middle;
+}
+
+.coord-nocarnet {
+  display: grid;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coord-nocarnet li {
+  border-bottom: 1px solid var(--c-line);
+  padding: 6px 0;
+}
+
+.coord-nocarnet small {
+  display: block;
+  color: var(--c-text);
+  font-size: 0.84rem;
+}
+
+@media (min-width: 720px) {
+  .coord-nocarnet {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .coord-upload .coord-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .coord-upload .coord-field.is-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1024px) {
+  .coord-nocarnet {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* El botón de elegir archivo es un <label>: no toma el display:block de las etiquetas. */
+.coord-shell .coord-field label.coord-file-pick {
+  display: flex;
+  color: var(--c-ink);
+  font-size: 0.95rem;
+}
