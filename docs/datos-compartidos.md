@@ -35,8 +35,19 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 | coordinador | Arma las rutas y los horarios (plantilla semanal y cambios del día), gestiona los clientes de los paseos, atiende pedidos y avisa lo que pasa en cada barrio. | `/coordinador` | **No** |
 | supervisor | Se asegura de que se cumplan los paseos del momento: quién falta retirar, atrasos contra el horario, entregas, incidentes, equipo. Mira las rutas y, si habló con alguien o pasó algo, **le pide el cambio al coordinador** (no edita la ruta él). | `/supervisor` (y `/paseador`) | No |
 | paseador | Hace su ruta del turno, en orden y con horario. | `/paseador` | No |
-| ayudante | Ayudante de paseador: acompaña al paseador en su ruta, marca pasos y reporta incidentes. Sin datos de clientes. | `/paseador` (modo ayudante) | No |
+| ayudante | Ayudante de paseador: acompaña al paseador en su ruta (ver "Tareas del ayudante"). Sin datos de clientes. | `/paseador` (modo ayudante) | No |
 | marketing | Mateo Pérez: pedidos y comunicación. | (en preparación) | No |
+
+## Tareas del ayudante de paseador (definidas por Juan, 13/11/2026)
+
+1. **Recibir perros e integrarlos a la manada**: dejar que se olfateen y caminar con el perro nuevo la primera cuadra.
+2. **Devolver perros**: de la forma que más agilice la ruta, para que el paseador siga buscando al resto. **Máximo 2 perros a la vez.**
+3. **Botiquín**: llevarlo y asistir al perro si se lastima un poco (agua oxigenada y gasa). Si es más que algo leve, se avisa y va al veterinario.
+4. **Hidratar** a los perros con la botella bebedero.
+5. **Levantar caca** (no todas: el paseador también levanta).
+6. **Prevenir accidentes**: si se cruza otra manada o un perro externo, dividir los perros con el paseador y pasar de a grupos; calmar a los perros alterados de la manada.
+
+Checklist del ayudante antes de salir (corto): botiquín (agua oxigenada y gasa) · botella bebedero · bolsas · celular cargado.
 
 ## Rutas y horarios
 
