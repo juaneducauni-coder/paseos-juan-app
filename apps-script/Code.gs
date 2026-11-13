@@ -91,8 +91,19 @@ function resumen(r) {
 function guardar(col, registro) {
   return conBloqueo(function () {
     var h = hoja(nombreHoja(col), COLUMNAS);
-    var valores = [[registro.id, registro.fecha || "", resumen(registro), registro.creadoPorNombre || registro.creadoPor || "", registro.actualizadoEn || "", JSON.stringify(registro)]];
     var fila = filaDe(h, registro.id);
+    // Si dos personas guardan el mismo registro a la vez, se combinan los campos (gana lo último)
+    // en lugar de que uno borre lo que cargó el otro.
+    if (fila) {
+      try {
+        var previo = JSON.parse(h.getRange(fila, COLUMNAS.length).getValue());
+        var combinado = {};
+        Object.keys(previo).forEach(function (k) { combinado[k] = previo[k]; });
+        Object.keys(registro).forEach(function (k) { combinado[k] = registro[k]; });
+        registro = combinado;
+      } catch (e) {}
+    }
+    var valores = [[registro.id, registro.fecha || "", resumen(registro), registro.creadoPorNombre || registro.creadoPor || "", registro.actualizadoEn || "", JSON.stringify(registro)]];
     if (fila) h.getRange(fila, 1, 1, COLUMNAS.length).setValues(valores);
     else h.appendRow(valores[0]);
     return true;
