@@ -4,6 +4,8 @@
 // - Gestiona los CLIENTES de los paseos (`clientes`) y los pedidos (`pedidos`, incluidos los de la web).
 // - AVISA lo que pasa en cada barrio (`avisos`).
 // - No ve plata: nada de pagos, montos ni precios por cliente (los pagos son solo del admin).
+// - ARCHIVOS: ve y sube el carnet de vacunas y documentos de cada cliente y perro (`archivos`).
+//   Los comprobantes de pago NO se muestran en esta página (los abre solo el admin).
 //
 // Los datos viven en el servidor (src/api/client.js, ver docs/datos-compartidos.md).
 // En este dispositivo solo quedan comodidades: qué secciones están abiertas y la vista de rutas elegida.
@@ -20,7 +22,7 @@ import {
   plantillasDesdePlanilla,
   sumarMinutos,
 } from "../data/realData.js";
-import { session, registros, onDataChange, hoyAR } from "../api/client.js";
+import { session, registros, onDataChange, hoyAR, archivos as archivosApi } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
 
@@ -304,6 +306,7 @@ const COLS = {
   resueltos: () => ({}),
   observaciones: () => ({ desde: haceDias(6) }),
   incidentes: () => ({ desde: haceDias(6) }),
+  archivos: () => ({}),
 };
 const COL_NAMES = Object.keys(COLS);
 const LEGACY_COLS = ["pedidos", "fichas", "resueltos"];
@@ -328,7 +331,14 @@ function wireData() {
     loadErrors.delete(col);
     scheduleRerender();
   });
-  window.addEventListener("online", scheduleRerender);
+  window.addEventListener("online", () => {
+    // Volvió la señal: el aviso de "no se subió por falta de señal" ya no corresponde.
+    if (subida?.errorSenal) {
+      subida.error = "";
+      subida.errorSenal = false;
+    }
+    scheduleRerender();
+  });
   window.addEventListener("offline", scheduleRerender);
 }
 
@@ -771,6 +781,7 @@ let editorConfirm = "";
 let cargaConfirm = false;
 let cargaProgreso = "";
 let rutasFecha = "";
+let soloSinCarnet = false;
 
 function rutasVista() {
   return readJSON(SECTIONS_KEY, {}).rutasVista === "dia" ? "dia" : "semana";
@@ -1104,6 +1115,156 @@ function parseDays(text) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Archivos: carnet de vacunas y documentos                            */
+/* ------------------------------------------------------------------ */
+
+const TIPO_CARNET = "carnet de vacunas";
+const TIPOS_SUBIDA = [
+  [TIPO_CARNET, "Carnet de vacunas"],
+  ["documento", "Otro documento"],
+];
+const TIPO_LABEL = { [TIPO_CARNET]: "Carnet de vacunas", documento: "Documento", foto: "Foto" };
+
+// Los comprobantes de pago son solo del admin: esta página no los muestra nunca (tampoco al admin).
+function esComprobante(a) {
+  return a?.tipo === "comprobante de pago";
+}
+
+function getArchivos() {
+  return cached("archivos").filter((a) => a?.id && !esComprobante(a)).sort(byNewest);
+}
+
+function archivoPorId(id) {
+  return getArchivos().find((a) => a.id === id) || null;
+}
+
+function esCarnet(a) {
+  return a?.tipo === TIPO_CARNET;
+}
+
+function tipoLabel(tipo) {
+  return TIPO_LABEL[tipo] || "Documento";
+}
+
+function fmtTamano(bytes) {
+  const n = Number(bytes) || 0;
+  if (!n) return "";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
+}
+
+function sinSenal() {
+  return navigator.onLine === false;
+}
+
+// Mensaje claro, en castellano, para un error al subir o abrir un archivo.
+function mensajeArchivo(error, accion) {
+  if (sinSenal() || error?.status === 0 || error?.name === "TypeError") {
+    return `Sin señal: para ${accion} archivos hace falta conexión. Probá de nuevo cuando vuelva.`;
+  }
+  return error?.message || `No se pudo ${accion} el archivo.`;
+}
+
+// Archivos de un pedido: el carnet del formulario web y los que se subieron con su id.
+function archivosDePedido(pedido) {
+  const ids = new Set([pedido.carnet?.id, ...(Array.isArray(pedido.archivos) ? pedido.archivos : [])].filter(Boolean));
+  getArchivos().filter((a) => a.pedidoId === pedido.id).forEach((a) => ids.add(a.id));
+  const crudos = new Map(cached("archivos").map((a) => [a.id, a]));
+  return [...ids]
+    .filter((id) => !esComprobante(crudos.get(id)))
+    .map((id) => crudos.get(id) || (id === pedido.carnet?.id
+      ? { id, tipo: TIPO_CARNET, nombreArchivo: pedido.carnet.nombre || "", perroNombre: pedido.datos?.perro || "" }
+      : { id, tipo: "documento" }));
+}
+
+// Archivos de un cliente: los vinculados a él, a sus perros o al pedido del que salió.
+function archivosDeCliente(c) {
+  const ids = new Set(Array.isArray(c.archivos) ? c.archivos : []);
+  const perros = new Set(Array.isArray(c.perros) ? c.perros : []);
+  return getArchivos().filter((a) => ids.has(a.id)
+    || (a.clienteId && a.clienteId === c.id)
+    || (a.perroId && perros.has(a.perroId))
+    || (c.pedidoId && a.pedidoId === c.pedidoId));
+}
+
+// Perro → carnets cargados. Cuenta el carnet con ese perroId y, si el carnet no dice de qué
+// perro es (ej.: el del formulario web), el que el cliente tiene asignado a ese perro
+// (`archivosPerro`) o el vinculado a un cliente que tiene ese único perro.
+let carnetIdx = new Map();
+
+function buildCarnetIndex() {
+  const idx = new Map();
+  const add = (dogId, a) => {
+    if (!DOG_BY_ID.has(dogId)) return;
+    if (!idx.has(dogId)) idx.set(dogId, []);
+    if (!idx.get(dogId).some((x) => x.id === a.id)) idx.get(dogId).push(a);
+  };
+  const clientes = getClientes();
+  getArchivos().filter(esCarnet).forEach((a) => {
+    if (a.perroId) {
+      add(a.perroId, a);
+      return;
+    }
+    clientes.forEach((c) => {
+      const asignado = c.archivosPerro?.[a.id];
+      if (asignado) {
+        add(asignado, a);
+        return;
+      }
+      const perros = Array.isArray(c.perros) ? c.perros : [];
+      if (perros.length !== 1) return;
+      const vinculado = (Array.isArray(c.archivos) && c.archivos.includes(a.id)) || (a.clienteId && a.clienteId === c.id) || (c.pedidoId && a.pedidoId === c.pedidoId);
+      if (vinculado) add(perros[0], a);
+    });
+  });
+  return idx;
+}
+
+function tieneCarnet(dog) {
+  return Boolean(dog && carnetIdx.get(dog.id)?.length);
+}
+
+/* ---------- Mensajes de archivos (dentro de la tarjeta donde se tocó) ---------- */
+
+let fileFlash = null;
+
+function setFileFlash(key, text, tone = "ok") {
+  fileFlash = { key, text, tone, until: Date.now() + 15000 };
+  if (tone === "error") announceError(text);
+  else announce(text);
+}
+
+function fileFeedback(key) {
+  if (!fileFlash || fileFlash.key !== key || Date.now() > fileFlash.until) return "";
+  return `<p class="coord-flash is-${fileFlash.tone} is-small">${icon(fileFlash.tone === "error" ? "alertCircle" : "checkCircle", "coord-icon")}<span>${esc(fileFlash.text)}</span></p>`;
+}
+
+// Abre el archivo en otra pestaña con la sesión (nunca un link público ni de Drive).
+function abrirArchivo(id, scope) {
+  if (sinSenal()) {
+    setFileFlash(scope, "Sin señal: para abrir archivos hace falta conexión. Probá de nuevo cuando vuelva.", "error");
+    scheduleRerender();
+    return;
+  }
+  announce("Abriendo el archivo en otra pestaña.");
+  archivosApi.abrir(id).catch((error) => {
+    setFileFlash(scope, mensajeArchivo(error, "abrir"), "error");
+    scheduleRerender();
+  });
+}
+
+/* ---------- Subida desde la ficha de un cliente ---------- */
+
+// Una sola subida abierta a la vez. El archivo elegido queda en memoria: el <input type="file">
+// se vacía cada vez que la página se vuelve a dibujar, pero lo elegido no se pierde.
+let subida = null;
+
+function abrirSubida(c) {
+  const perros = Array.isArray(c.perros) ? c.perros.filter((id) => DOG_BY_ID.has(id)) : [];
+  subida = { clienteId: c.id, tipo: TIPO_CARNET, perroId: perros.length === 1 ? perros[0] : "", nota: "", file: null, estado: "", error: "" };
+}
+
+/* ------------------------------------------------------------------ */
 /* Borradores de formularios (solo en memoria)                         */
 /* ------------------------------------------------------------------ */
 
@@ -1196,7 +1357,7 @@ function daysField(form, days) {
 
 function feedback(sectionKey) {
   if (!flash || flash.section !== sectionKey) return "";
-  const undo = flash.undo ? `<button class="coord-link" type="button" data-coord-undo>Deshacer</button>` : "";
+  const undo = flash.undo ? `<button class="coord-link" type="button" id="coord-undo-${sectionKey}" data-coord-undo>Deshacer</button>` : "";
   return `<p class="coord-flash is-${flash.tone}">${icon(flash.tone === "error" ? "alertCircle" : "checkCircle", "coord-icon")}<span>${esc(flash.text)}</span>${undo}</p>`;
 }
 
@@ -1207,7 +1368,7 @@ function button(label, attrs, variant = "secondary", iconName = "") {
 function section({ key, id, iconName, title, intro, badges = "", body, open = false }) {
   return `
     <details class="coord-section" id="${id}" ${isOpen(key, open) ? "open" : ""}>
-      <summary data-coord-toggle="${key}">
+      <summary id="${id}-summary" data-coord-toggle="${key}">
         <span class="coord-section-icon">${icon(iconName, "coord-icon")}</span>
         <span class="coord-section-title">
           <h2>${title}</h2>
@@ -1251,6 +1412,132 @@ function warnList(list, id) {
       <h3>${icon("alertTriangle", "coord-icon")}<span>${list.length === 1 ? "1 aviso para revisar" : `${list.length} avisos para revisar`}</span></h3>
       <ul>${list.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>
       <p>No bloquea el guardado: revisalo antes de mandar la ruta.</p>
+    </div>
+  `;
+}
+
+function carnetChip(dog) {
+  const ok = tieneCarnet(dog);
+  return `<span class="coord-carnet ${ok ? "is-ok" : "is-missing"}">${icon(ok ? "fileCheck" : "alertCircle", "coord-icon")}<span>Carnet: ${ok ? "cargado" : "falta"}</span></span>`;
+}
+
+function ArchivoItem(a, scope) {
+  const titulo = `${tipoLabel(a.tipo)}${a.perroNombre ? ` de ${a.perroNombre}` : ""}`;
+  const formato = a.mime === "application/pdf" ? "PDF" : a.mime ? "Foto" : "";
+  const meta = [
+    a.creadoPor === "web" ? "Llegó por la página web" : a.creadoPorNombre ? `Subido por ${a.creadoPorNombre}` : "",
+    a.creadoEn ? fmtStamp(a.creadoEn) : fmtDate(a.fecha),
+    [formato, fmtTamano(a.tamano)].filter(Boolean).join(", "),
+    a.ubicacion === "drive" ? "Guardado en Drive" : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <li class="coord-file">
+      <span class="coord-file-icon">${icon(esCarnet(a) ? "fileCheck" : "fileText", "coord-icon")}</span>
+      <span class="coord-file-text">
+        <b>${esc(titulo)}</b>
+        ${meta ? `<small>${esc(meta)}</small>` : ""}
+        ${a.nota ? `<small>${esc(a.nota)}</small>` : ""}
+      </span>
+      ${button(`Ver<span class="coord-sr-only"> ${esc(titulo.toLowerCase())} (se abre en otra pestaña)</span>`, `data-coord-archivo-abrir="${esc(a.id)}" data-scope="${esc(scope)}"`, "ghost", "eye")}
+    </li>
+  `;
+}
+
+// Archivos adjuntos a un pedido (el carnet del formulario web).
+function AdjuntosPedido(pedido) {
+  const adjuntos = archivosDePedido(pedido);
+  const scope = `pedido-${pedido.id}`;
+  if (!adjuntos.length) {
+    return pedido.origen === "web" && estadoDe(pedido) !== "resuelto"
+      ? `<p class="coord-meta">${icon("alertCircle", "coord-icon")}<span>No mandó el carnet de vacunas: pedíselo al tutor.</span></p>${fileFeedback(scope)}`
+      : fileFeedback(scope);
+  }
+  return `
+    <div class="coord-attach">
+      ${adjuntos.map((a) => {
+        const carnet = esCarnet(a);
+        const quien = a.creadoEn ? `Llegó el ${fmtStamp(a.creadoEn)}` : "";
+        return `
+          <p class="coord-attach-row">
+            ${icon(carnet ? "fileCheck" : "fileText", "coord-icon")}
+            <span><b>${carnet ? "Carnet de vacunas adjunto" : `${esc(tipoLabel(a.tipo))} adjunto`}</b>${quien ? `<small>${esc(quien)}</small>` : ""}</span>
+            ${button(`${carnet ? "Ver carnet" : "Ver"}<span class="coord-sr-only"> (se abre en otra pestaña)</span>`, `data-coord-archivo-abrir="${esc(a.id)}" data-scope="${esc(scope)}"`, "secondary", "eye")}
+          </p>`;
+      }).join("")}
+    </div>
+    ${fileFeedback(scope)}
+  `;
+}
+
+// Botón para elegir el archivo (foto o PDF). El <input> queda oculto pero con foco visible.
+function filePicker(id, text, attrs, hintId) {
+  return `
+    <label class="coord-btn is-secondary coord-file-pick" for="${id}">
+      ${icon("camera", "coord-icon")}<span>${text}</span>
+      <input id="${id}" type="file" accept="image/*,application/pdf" capture="environment" ${attrs} aria-describedby="${hintId}" />
+    </label>
+  `;
+}
+
+function SubidaForm(c, perros) {
+  const id = esc(c.id);
+  const s = subida;
+  const subiendo = s.estado === "subiendo";
+  const hintId = `coord-subida-hint-${id}`;
+  return `
+    <div class="coord-upload" id="coord-subida-${id}" role="group" aria-labelledby="coord-subida-title-${id}">
+      <p class="coord-upload-title" id="coord-subida-title-${id}">Subir carnet o documento de ${esc(c.nombre || "este cliente")}</p>
+      ${sinSenal() ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>Sin señal: los archivos no quedan en espera. Elegilo igual y tocá «Subir» cuando vuelva la señal.</span></p>` : ""}
+      <div class="coord-grid">
+        <div class="coord-field">
+          <label for="coord-subida-tipo-${id}">Qué es</label>
+          <select id="coord-subida-tipo-${id}" data-coord-subida-campo="tipo">
+            ${TIPOS_SUBIDA.map(([v, t]) => `<option value="${v}" ${v === s.tipo ? "selected" : ""}>${t}</option>`).join("")}
+          </select>
+        </div>
+        <div class="coord-field">
+          <label for="coord-subida-perro-${id}">De qué perro${s.tipo === TIPO_CARNET && perros.length > 1 ? ' <span class="coord-required">(obligatorio)</span>' : ""}</label>
+          <select id="coord-subida-perro-${id}" data-coord-subida-campo="perroId">
+            <option value="">${perros.length ? (s.tipo === TIPO_CARNET ? "Elegí el perro" : "De ninguno en especial") : "El cliente no tiene perros cargados"}</option>
+            ${perros.map((d) => `<option value="${d.id}" ${d.id === s.perroId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="coord-field is-wide">
+          <span class="coord-label">Foto o PDF <span class="coord-required">(obligatorio)</span></span>
+          ${filePicker(`coord-subida-archivo-${id}`, s.file ? "Cambiar el archivo" : "Sacar foto o elegir archivo", "data-coord-subida-archivo", hintId)}
+          <small id="${hintId}">${s.file ? `Elegiste <b>${esc(s.file.name)}</b> (${fmtTamano(s.file.size)}).` : "Foto clara o PDF, hasta 3,5 MB. Las fotos se achican solas."}</small>
+        </div>
+        <div class="coord-field is-wide">
+          <label for="coord-subida-nota-${id}">Nota (opcional)</label>
+          <input id="coord-subida-nota-${id}" type="text" value="${esc(s.nota)}" data-coord-subida-campo="nota" autocomplete="off" placeholder="Ej.: antirrábica hasta 03/2027" />
+        </div>
+      </div>
+      <p class="coord-upload-status" role="status">${subiendo ? `${icon("clock", "coord-icon")}<span>Subiendo… No cierres la página.</span>` : ""}</p>
+      ${s.error ? `<p class="coord-flash is-error is-small">${icon("alertCircle", "coord-icon")}<span>${esc(s.error)}</span></p>` : ""}
+      <div class="coord-actions">
+        ${button(subiendo ? "Subiendo…" : "Subir", `id="coord-subida-ok-${id}" data-coord-subida-ok="${id}" ${subiendo ? 'aria-disabled="true"' : ""}`, "primary", "uploadCloud")}
+        ${button("Cancelar", `id="coord-subida-cancel-${id}" data-coord-subida-cancel="${id}"`, "ghost")}
+      </div>
+    </div>
+  `;
+}
+
+function DocumentosCliente(c) {
+  const id = esc(c.id);
+  const docs = archivosDeCliente(c);
+  const perros = (Array.isArray(c.perros) ? c.perros : []).map((dogId) => DOG_BY_ID.get(dogId)).filter(Boolean);
+  const scope = `cliente-${c.id}`;
+  return `
+    <div class="coord-docs" role="group" aria-labelledby="coord-docs-${id}">
+      <h4 id="coord-docs-${id}">${icon("fileText", "coord-icon")}<span>Documentos</span> <span class="coord-count">${docs.length}</span></h4>
+      ${perros.length ? `<ul class="coord-carnets" aria-label="Carnet de vacunas por perro">${perros.map((d) => `<li><b>${esc(d.name)}</b> ${carnetChip(d)}</li>`).join("")}</ul>` : ""}
+      ${docs.length
+        ? `<ul class="coord-files">${docs.map((a) => ArchivoItem(a, scope)).join("")}</ul>`
+        : `<p class="coord-empty is-small">${loaded.has("archivos") ? "Todavía no hay documentos. Subí el carnet de vacunas de cada perro." : "Cargando documentos…"}</p>`}
+      ${fileFeedback(scope)}
+      ${subida?.clienteId === c.id
+        ? SubidaForm(c, perros)
+        : button("Subir carnet o documento", `id="coord-subir-${id}" data-coord-subir="${id}"`, "secondary", "fileUp")}
     </div>
   `;
 }
@@ -1302,6 +1589,7 @@ function CoordinatorHeader() {
 export function coordinatorDashboard() {
   wireData();
   ensureSync();
+  carnetIdx = buildCarnetIndex();
   const content = `
     <main class="coord-main" id="coord-main" tabindex="-1">
       ${SyncStrip()}
@@ -1317,7 +1605,7 @@ export function coordinatorDashboard() {
       ${ActivitySection()}
       <p class="coord-footnote">
         Rutas de partida: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Datos de perros: ${esc(BUSINESS_INFO.officialSources.dogs)}.
-        Rutas, clientes, avisos y pedidos se guardan en los datos compartidos del equipo. Los pagos los ve solo Juan.
+        Rutas, clientes, avisos y pedidos se guardan en los datos compartidos del equipo. Los carnets y documentos quedan privados: se abren solo con tu usuario. Los pagos los ve solo Juan.
       </p>
       ${TEAM_DATALIST}
     </main>
@@ -1335,9 +1623,9 @@ function SyncStrip() {
   const errors = [...new Set(loadErrors.values())];
   const items = [];
   if (pending) {
-    items.push(`<p class="coord-sync is-warn">${icon("clock", "coord-icon")}<span><b>${pending} ${pending === 1 ? "cambio pendiente" : "cambios pendientes"} sin señal.</b> Se ${pending === 1 ? "envía solo" : "envían solos"} cuando vuelva.</span></p>`);
+    items.push(`<p class="coord-sync is-warn">${icon("clock", "coord-icon")}<span><b>${pending} ${pending === 1 ? "cambio pendiente" : "cambios pendientes"} sin señal.</b> Se ${pending === 1 ? "envía solo" : "envían solos"} cuando vuelva.${offline ? " Los archivos (carnet y documentos) no quedan en espera: para subirlos hace falta señal." : ""}</span></p>`);
   } else if (offline) {
-    items.push(`<p class="coord-sync is-warn">${icon("clock", "coord-icon")}<span><b>Sin señal.</b> Lo que cargues queda guardado y se envía cuando vuelva.</span></p>`);
+    items.push(`<p class="coord-sync is-warn">${icon("clock", "coord-icon")}<span><b>Sin señal.</b> Lo que cargues queda guardado y se envía cuando vuelva. Los archivos (carnet y documentos) no: para subirlos o abrirlos hace falta señal.</span></p>`);
   }
   if (errors.length) {
     items.push(`<div class="coord-sync is-error">${icon("alertCircle", "coord-icon")}<span>${errors.map(esc).join(" ")}</span>${button("Reintentar", "data-coord-retry", "secondary")}</div>`);
@@ -1443,7 +1731,7 @@ function TodayPanel() {
           <span class="coord-priority-num" aria-hidden="true">1</span>
           <div>
             <h2>Pedidos nuevos de la web</h2>
-            <p class="coord-big"><b>${web.length}</b> <span>${web.length === 1 ? "sin responder" : "sin responder"}</span></p>
+            <p class="coord-big"><b>${web.length}</b> <span>sin responder</span></p>
             <p>${web.length ? esc(listJoin(web.slice(0, 3).map((p) => p.datos?.perro || PENDIENTE))) : loaded.has("pedidos") ? "No hay pedidos nuevos." : "Cargando pedidos…"}</p>
           </div>
           ${button("Ver pedidos", `data-coord-open="pedidos"`, "secondary")}
@@ -1463,7 +1751,7 @@ function TodayPanel() {
           <span class="coord-priority-num" aria-hidden="true">3</span>
           <div>
             <h2>Avisos de barrio vigentes</h2>
-            <p class="coord-big"><b>${vigentes.length}</b> <span>${barrios.length === 1 ? "en 1 barrio" : `en ${barrios.length} barrios`}</span></p>
+            <p class="coord-big"><b>${vigentes.length}</b> <span>${!vigentes.length ? "avisos" : barrios.length === 1 ? "en 1 barrio" : `en ${barrios.length} barrios`}</span></p>
             <p>${vigentes.length ? esc(listJoin(barrios.slice(0, 3))) : "Sin avisos vigentes."}</p>
           </div>
           ${button(vigentes.length ? "Ver avisos" : "Cargar un aviso", vigentes.length ? `data-coord-goto="coord-avisos-vigentes"` : `data-coord-open="avisos"`, "secondary")}
@@ -1621,6 +1909,13 @@ function DayView() {
   const fecha = currentRutasFecha();
   const routes = effectiveRoutes(fecha);
   const total = routes.reduce((sum, r) => sum + (r.paradas || []).length, 0);
+  // Perros del día sin carnet de vacunas (cada perro una vez, aunque salga mañana y tarde).
+  const sinCarnet = new Set();
+  routes.forEach((r) => (r.paradas || []).forEach((s) => {
+    const dog = dogOf(s);
+    if (!tieneCarnet(dog)) sinCarnet.add(dog?.id || normalize(s.perroNombre));
+  }));
+  const filtro = soloSinCarnet && routes.length > 0;
   return `
     <div class="coord-dayview">
       <div class="coord-day-pick">
@@ -1634,11 +1929,19 @@ function DayView() {
         </div>
       </div>
       <h3 class="coord-day-title">${esc(dayLabel(fecha))} · ${routes.length} ${routes.length === 1 ? "ruta" : "rutas"} · ${total} paseos</h3>
-      ${routes.length ? `<div class="coord-actions">${button("Copiar todas las rutas del día", `id="coord-copy-dia" data-coord-copy-dia="${fecha}"`, "ghost", "copy")}</div>` : `<p class="coord-empty is-small">No hay rutas para este día.</p>`}
+      ${routes.length ? `
+        <div class="coord-actions">
+          ${button(`Perros sin carnet <span class="coord-count">${sinCarnet.size}</span>`, `id="coord-filtro-carnet" data-coord-filtro-carnet aria-pressed="${filtro}"`, filtro ? "secondary" : "ghost", "fileText")}
+          ${button("Copiar todas las rutas del día", `id="coord-copy-dia" data-coord-copy-dia="${fecha}"`, "ghost", "copy")}
+        </div>
+        ${filtro ? `<p class="coord-note" role="status">${icon("fileText", "coord-icon")}<span>${sinCarnet.size ? `Mostrando solo los perros sin carnet de vacunas cargado: ${sinCarnet.size} de este día. El carnet se sube desde la ficha del cliente.` : "Todos los perros de este día tienen el carnet cargado."}</span></p>` : ""}`
+        : `<p class="coord-empty is-small">No hay rutas para este día. Si es un día de servicio, armá la semana en «Semana (se repite)» o sumá una ruta extra acá abajo.</p>`}
       <ul class="coord-dayroutes">
         ${routes.map((r) => {
           const w = warningsForDay(r, fecha);
-          const stops = (r.paradas || []).slice().sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
+          const todas = (r.paradas || []).slice().sort((a, b) => (minutesOf(a.hora) ?? 9999) - (minutesOf(b.hora) ?? 9999));
+          const stops = filtro ? todas.filter((s) => !tieneCarnet(dogOf(s))) : todas;
+          const memKey = `ruta-${fecha}-${r.ruta}`;
           return `
             <li class="coord-dayroute ${w.list.length ? "is-alert" : ""}">
               <div class="coord-card-head">
@@ -1647,9 +1950,11 @@ function DayView() {
               </div>
               <p>${stops.length} ${stops.length === 1 ? "perro" : "perros"} · ${esc(routeSpan(r))} · Paseador: ${esc(personName(r.paseador) || PENDIENTE)}${r.ayudante ? ` · Ayudante: ${esc(personName(r.ayudante))}` : ""}</p>
               ${w.list.length ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>${esc(w.list.slice(0, 2).join(" "))}${w.list.length > 2 ? ` Y ${w.list.length - 2} más.` : ""}</span></p>` : ""}
-              <details class="coord-card-more">
-                <summary>Ver paradas ${icon("chevronDown", "coord-icon")}</summary>
-                <ol class="coord-stops-mini">${stops.map((s, i) => `<li class="${w.byStop.has((r.paradas || []).indexOf(s)) ? "is-alert" : ""}"><b>${esc(padHora(s.hora) || "--:--")}</b> ${esc(s.perroNombre)} <small>${Number(s.minutos) || 45} min${s.nota ? ` · ${esc(s.nota)}` : ""}</small><span class="coord-sr-only"> (parada ${i + 1})</span></li>`).join("")}</ol>
+              <details class="coord-card-more" ${filtro || openCards.has(memKey) ? "open" : ""}>
+                <summary data-coord-mem-toggle="${esc(memKey)}">${filtro ? `Sin carnet (${stops.length})` : "Ver paradas"} ${icon("chevronDown", "coord-icon")}</summary>
+                ${stops.length
+                  ? `<ol class="coord-stops-mini">${stops.map((s) => `<li value="${todas.indexOf(s) + 1}" class="${w.byStop.has((r.paradas || []).indexOf(s)) ? "is-alert" : ""}"><span class="coord-stop-line"><b>${esc(padHora(s.hora) || "--:--")}</b> ${esc(s.perroNombre)} <small>${Number(s.minutos) || 45} min${s.nota ? ` · ${esc(s.nota)}` : ""}</small></span>${carnetChip(dogOf(s))}<span class="coord-sr-only"> (parada ${todas.indexOf(s) + 1})</span></li>`).join("")}</ol>`
+                  : `<p class="coord-meta">${filtro ? "Todos los perros de esta ruta tienen el carnet cargado." : "Esta ruta no tiene perros."}</p>`}
               </details>
               <div class="coord-actions">
                 ${button("Cambiar solo este día", `id="coord-ed-dia-${esc(r.ruta)}" data-coord-edit-dia="${esc(r.ruta)}" data-fecha="${fecha}"`, "primary", "sliders")}
@@ -1919,6 +2224,7 @@ function ClienteCard(c) {
         ${whatsappLinkTo(c.telefono, `Hola ${c.nombre || ""}, te escribo de Paseos Juan.`.replace(" ,", ","), "secondary", "WhatsApp")}
         ${button("Editar", `id="coord-cli-edit-${id}" data-coord-cliente-edit="${id}"`, "ghost", "sliders")}
       </div>
+      ${DocumentosCliente(c)}
     </li>
   `;
 }
@@ -1944,6 +2250,7 @@ function ClientesSection() {
   const editing = Boolean(draft.id);
   const perros = Array.isArray(draft.perros) ? draft.perros : [];
   const dias = Array.isArray(draft.dias) ? draft.dias : [];
+  const adjuntos = (Array.isArray(draft.archivos) ? draft.archivos : []).map((archivoId) => archivoPorId(archivoId) || { id: archivoId, tipo: TIPO_CARNET });
   const activos = clientes.filter((c) => (c.estado || "activo") === "activo").length;
   const dogOptions = REAL_DOGS.slice().sort((a, b) => a.name.localeCompare(b.name, "es"));
 
@@ -1958,11 +2265,12 @@ function ClientesSection() {
     <form class="coord-form" id="coord-cliente-form" data-coord-form="cliente" novalidate tabindex="-1">
       <h3>${editing ? `Editando a ${esc(draft.nombre || "un cliente")}` : "Cargar un cliente"}</h3>
       ${draft.pedidoId ? `<p class="coord-note">${icon("clipboardCheck", "coord-icon")}<span>Completado con los datos de un pedido. Revisalo antes de guardar.</span></p>` : ""}
+      ${!editing && adjuntos.length ? `<p class="coord-done">${icon("fileCheck", "coord-icon")}<span>${adjuntos.some(esCarnet) ? "El carnet de vacunas del pedido queda vinculado a este cliente." : "Los archivos del pedido quedan vinculados a este cliente."}</span></p>` : ""}
       <input type="hidden" name="id" value="${esc(draft.id || "")}" />
       <input type="hidden" name="pedidoId" value="${esc(draft.pedidoId || "")}" />
       <div class="coord-grid">
         ${field("cliente", "nombre", "Nombre del tutor", { value: draft.nombre, required: true, attrs: 'autocomplete="off"' })}
-        ${field("cliente", "telefono", "Teléfono", { value: draft.telefono, type: "tel", attrs: 'autocomplete="off" inputmode="tel"', hint: "Celular con código de área (ej.: 11 1234-5678)." })}
+        ${field("cliente", "telefono", "Teléfono", { value: draft.telefono, type: "tel", attrs: 'autocomplete="off" inputmode="tel"', hint: "Celular con código de área (ej.: 11\u00a01234\u20115678)." })}
         ${field("cliente", "barrio", "Barrio", { value: draft.barrio, attrs: 'list="coord-barrios" autocomplete="off"', hint: "Elegí uno o escribí otro." })}
         ${selectField("cliente", "plan", "Plan", CLIENTE_PLANES, { value: draft.plan || PENDIENTE })}
         ${selectField("cliente", "turno", "Turno", CLIENTE_TURNOS, { value: draft.turno || PENDIENTE })}
@@ -2080,6 +2388,7 @@ function PedidoCard(pedido, fichaPorPedido, clientePorPedido) {
       : webData(pedido)
     : `<p class="coord-card-dog">${icon("pawPrint", "coord-icon")}${esc(pedidoPerro(pedido) || PENDIENTE)}</p>${pedido.detalle ? `<p>${esc(pedido.detalle)}</p>` : ""}`;
   const saludo = d.responsable ? `Hola ${d.responsable}` : "Hola";
+  const pedirCarnet = archivosDePedido(pedido).some(esCarnet) ? "" : " Cuando puedas, mandanos una foto del carnet de vacunas.";
   return `
     <li class="coord-card ${isWeb ? "is-web" : ""}" id="coord-pedido-${id}" tabindex="-1">
       <div class="coord-card-head">
@@ -2088,11 +2397,12 @@ function PedidoCard(pedido, fichaPorPedido, clientePorPedido) {
       </div>
       ${isWeb ? `<p class="coord-badges">${badge("Formulario web", "warn")}</p>` : ""}
       ${details}
+      ${AdjuntosPedido(pedido)}
       ${whoLine(pedido, { web: isWeb })}
       ${ficha ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Ficha creada para ${esc(ficha.perroNombre)}</span></p>` : ""}
       ${cliente ? `<p class="coord-done">${icon("checkCircle", "coord-icon")}<span>Cliente cargado: ${esc(cliente.nombre)}</span></p>` : ""}
       <div class="coord-actions">
-        ${estado !== "resuelto" && isWeb ? whatsappLinkTo(d.telefono, `${saludo}, te escribo de Paseos Juan por el pedido de evaluación de ${d.perro || "tu perro"}.`, "primary") : ""}
+        ${estado !== "resuelto" && isWeb ? whatsappLinkTo(d.telefono, `${saludo}, te escribo de Paseos Juan por el pedido de evaluación de ${d.perro || "tu perro"}.${pedirCarnet}`, "primary") : ""}
         ${moves}
         ${!cliente && (isWeb || d.responsable) ? button("Convertir en cliente", `data-coord-pedido-cliente="${id}"`, "ghost", "userPlus") : ""}
         ${canFicha ? button("Armar ficha con estos datos", `data-coord-pedido-ficha="${id}"`, "ghost", "fileText") : ""}
@@ -2130,7 +2440,7 @@ function RequestsSection() {
       <h3>Cargar un pedido que llegó por otro lado</h3>
       <div class="coord-grid">
         ${selectField("pedido", "tipo", "Tipo de pedido", PEDIDO_TIPOS, { value: draft.tipo })}
-        ${field("pedido", "perro", "Perro", { value: draft.perro, placeholder: "Nombre del perro o «perro nuevo»", attrs: 'list="coord-dog-names" autocomplete="off"' })}
+        ${field("pedido", "perro", "Perro", { value: draft.perro, placeholder: "Nombre o «perro nuevo»", attrs: 'list="coord-dog-names" autocomplete="off"' })}
         ${selectField("pedido", "canal", "Llegó por", PEDIDO_CANALES, { value: draft.canal })}
         ${textArea("pedido", "detalle", "Qué hay que resolver", { value: draft.detalle, hint: "Sin teléfonos ni domicilios: solo lo necesario para resolverlo." })}
       </div>
@@ -2144,7 +2454,7 @@ function RequestsSection() {
     iconName: "clipboardCheck",
     title: "Pedidos y evaluaciones",
     intro: "Los del formulario de la web y los que cargás vos.",
-    badges: `${web ? badge(`${web} ${web === 1 ? "nuevo" : "nuevos"} de la web`, "alert") : ""}${open ? badge(`${open} abiertos`, "warn") : badge("Sin pedidos abiertos", "neutral")}`,
+    badges: `${web ? badge(`${web} ${web === 1 ? "nuevo" : "nuevos"} de la web`, "alert") : ""}${open ? badge(`${open} ${open === 1 ? "abierto" : "abiertos"}`, "warn") : badge("Sin pedidos abiertos", "neutral")}`,
     body,
     open: web > 0,
   });
@@ -2163,6 +2473,7 @@ function draftClienteFromPedido(pedido) {
     dias: parseDays(d.dias),
     turno: ["Mañana", "Tarde"].includes(d.horario) ? d.horario : PENDIENTE,
     estado: "activo",
+    archivos: archivosDePedido(pedido).map((a) => a.id),
     notas: [`Desde el pedido del ${fmtDate(pedido.fecha)}.`, !dog && d.perro ? `Perro: ${d.perro} (todavía sin ficha en el registro).` : ""].filter(Boolean).join(" "),
   };
 }
@@ -2178,6 +2489,7 @@ function ReviewCard(dog, record) {
         ${dog.status !== "Activo" ? badge(esc(dog.status), "alert") : badge("Activo", "neutral")}
       </div>
       <p class="coord-review-meta">${esc(dog.plan)} · ${esc(dog.size)} · ${esc(scheduleLabel(dog))}</p>
+      <p class="coord-badges">${carnetChip(dog)}</p>
       <p class="coord-review-what"><span>Qué confirmar</span>${esc(dog.review || `Estado "${dog.status}".`)}</p>
       ${safetyChips(dog)}
       ${record?.nota ? `<p class="coord-meta">${esc(record.nota)}</p>` : ""}
@@ -2204,6 +2516,7 @@ function ReviewSection() {
         <ul class="coord-review-list">${done.map((dog) => ReviewCard(dog, resolved[dog.id])).join("")}</ul>
       </details>` : ""}
     <p class="coord-note">${icon("fileText", "coord-icon")}<span>El cambio todavía debe incorporarse al ${esc(BUSINESS_INFO.officialSources.dogs.toLowerCase())}.</span></p>
+    ${SinCarnetBlock()}
   `;
   return section({
     key: "datos",
@@ -2211,14 +2524,64 @@ function ReviewSection() {
     iconName: "help",
     title: "Datos a confirmar",
     intro: `${done.length} de ${REVIEW_DOGS.length} resueltos.`,
-    badges: pending.length ? badge(`${pending.length} pendientes`, "warn") : badge("Todo confirmado", "ok"),
+    badges: pending.length ? badge(`${pending.length} ${pending.length === 1 ? "pendiente" : "pendientes"}`, "warn") : badge("Todo confirmado", "ok"),
     body,
   });
+}
+
+// Perros activos sin carnet de vacunas cargado en la app.
+function SinCarnetBlock() {
+  const activos = REAL_DOGS.filter((dog) => dog.status === "Activo");
+  const faltan = activos.filter((dog) => !tieneCarnet(dog)).sort((a, b) => a.name.localeCompare(b.name, "es"));
+  const listo = loaded.has("archivos") && loaded.has("clientes");
+  return `
+    <div class="coord-subblock" id="coord-sin-carnet">
+      <h3>Carnet de vacunas <span>${activos.length - faltan.length} de ${activos.length}</span></h3>
+      <p class="coord-meta">${!listo ? "Cargando carnets…" : faltan.length ? `${faltan.length} ${faltan.length === 1 ? "perro activo no tiene" : "perros activos no tienen"} el carnet cargado. Se sube desde la ficha del cliente (sección Clientes).` : "Todos los perros activos tienen el carnet cargado."}</p>
+      ${faltan.length && listo ? `
+        <details class="coord-more" ${isOpen("sinCarnet") ? "open" : ""}>
+          <summary data-coord-toggle="sinCarnet">Perros sin carnet (${faltan.length}) ${icon("chevronDown", "coord-icon")}</summary>
+          <ul class="coord-nocarnet">${faltan.map((dog) => `<li><b>${esc(dog.name)}</b> <small>${esc(scheduleLabel(dog))}</small></li>`).join("")}</ul>
+        </details>` : ""}
+    </div>
+  `;
 }
 
 /* ---------- 8. Alta de perro nuevo ---------- */
 
 const SI_NO = [PENDIENTE, "Sí", "No"];
+
+// Carnet elegido en el alta (queda en memoria hasta guardar la ficha) y, si ya se subió
+// pero la ficha no se pudo guardar, el registro subido (así no se sube dos veces).
+let altaCarnet = null;
+let altaCarnetSubido = null;
+let altaSubiendo = false;
+let altaVaciarConfirm = false;
+
+function CarnetAltaField(draft) {
+  const pedido = draft.pedidoId ? findIn(getPedidos(), draft.pedidoId) : null;
+  const delPedido = pedido ? archivosDePedido(pedido).filter(esCarnet) : [];
+  const hintId = "coord-alta-carnet-hint";
+  let hint = "Opcional. Se sube al guardar la ficha (hace falta señal). Foto clara o PDF, hasta 3,5 MB.";
+  if (altaCarnetSubido) hint = `Carnet ya subido (${esc(altaCarnetSubido.nombreArchivo || "archivo")}): queda vinculado al guardar la ficha.`;
+  else if (altaCarnet) hint = `Elegiste <b>${esc(altaCarnet.name)}</b> (${fmtTamano(altaCarnet.size)}). Se sube al guardar la ficha.`;
+  return `
+    <div class="coord-field is-wide">
+      <span class="coord-label">Carnet de vacunas</span>
+      ${delPedido.map((a) => `
+        <p class="coord-attach-row">
+          ${icon("fileCheck", "coord-icon")}
+          <span><b>El pedido web ya trae el carnet</b><small>Queda vinculado a esta ficha.</small></span>
+          ${button('Ver carnet<span class="coord-sr-only"> (se abre en otra pestaña)</span>', `data-coord-archivo-abrir="${esc(a.id)}" data-scope="alta"`, "secondary", "eye")}
+        </p>`).join("")}
+      ${altaCarnetSubido ? "" : filePicker("coord-alta-carnet", altaCarnet ? "Cambiar el archivo" : delPedido.length ? "Adjuntar otro carnet" : "Adjuntar foto o PDF del carnet", "data-coord-alta-carnet", hintId)}
+      <small id="${hintId}">${hint}</small>
+      ${altaCarnet && sinSenal() ? `<p class="coord-inline-alert is-strong">${icon("alertTriangle", "coord-icon")}<span>Sin señal: el carnet no se puede subir ahora. Esperá a tener señal o quitalo para guardar la ficha sin él.</span></p>` : ""}
+      ${altaCarnet || altaCarnetSubido ? `<div class="coord-actions">${button("Quitar el carnet", `id="coord-alta-carnet-quitar" data-coord-alta-carnet-quitar`, "ghost", "x")}</div>` : ""}
+      ${fileFeedback("alta")}
+    </div>
+  `;
+}
 
 function IntakeSection() {
   const draft = getDraft("alta");
@@ -2260,6 +2623,7 @@ function IntakeSection() {
         <div class="coord-grid">
           ${selectField("alta", "vacunas", "Vacunas al día", SI_NO, { value: draft.vacunas })}
           ${field("alta", "veterinario", "Veterinaria de referencia", { value: draft.veterinario })}
+          ${CarnetAltaField(draft)}
           ${textArea("alta", "salud", "Condiciones, alergias o medicación", { value: draft.salud, hint: "Lo que dice el tutor. Sin diagnósticos propios." })}
         </div>
       </fieldset>
@@ -2290,10 +2654,19 @@ function IntakeSection() {
           ${daysField("alta", days)}
         </div>
       </fieldset>
-      <div class="coord-actions">
-        ${button("Guardar ficha", "data-coord-alta-save", "primary", "plus")}
-        ${button("Vaciar formulario", "data-coord-alta-clear", "ghost")}
-      </div>
+      ${altaSubiendo ? `<p class="coord-upload-status" role="status">${icon("clock", "coord-icon")}<span>Subiendo el carnet… No cierres la página.</span></p>` : ""}
+      ${altaVaciarConfirm ? `
+        <div class="coord-confirm" role="group" aria-labelledby="coord-alta-vaciar-q">
+          <p id="coord-alta-vaciar-q"><b>¿Vaciar el formulario?</b> Se borra todo lo que escribiste en esta ficha.</p>
+          <div class="coord-actions">
+            ${button("Sí, vaciar", `id="coord-alta-vaciar-ok" data-coord-alta-clear-ok`, "primary")}
+            ${button("No, seguir", `id="coord-alta-vaciar-cancel" data-coord-alta-clear-cancel`, "ghost")}
+          </div>
+        </div>` : `
+        <div class="coord-actions">
+          ${button(altaSubiendo ? "Guardando…" : "Guardar ficha", `id="coord-alta-save" data-coord-alta-save ${altaSubiendo ? 'aria-disabled="true"' : ""}`, "primary", "plus")}
+          ${button("Vaciar formulario", `id="coord-alta-clear" data-coord-alta-clear`, "ghost")}
+        </div>`}
     </form>
     <div class="coord-subblock">
       <h3>Fichas cargadas <span>${fichas.length}</span></h3>
@@ -2302,6 +2675,9 @@ function IntakeSection() {
           ${fichas.map((ficha) => {
             const a = ficha.datos || {};
             const dias = Array.isArray(a.dias) ? a.dias : [];
+            const ids = [...new Set([ficha.carnet?.id, ...(Array.isArray(ficha.archivos) ? ficha.archivos : [])].filter(Boolean))];
+            const carnet = ids.map((archivoId) => archivoPorId(archivoId)).find(esCarnet) || (ficha.carnet?.id ? { id: ficha.carnet.id } : null);
+            const scope = `ficha-${ficha.id}`;
             return `
             <li class="coord-card">
               <div class="coord-card-head">
@@ -2310,6 +2686,10 @@ function IntakeSection() {
               </div>
               <p class="coord-badges">${badge(esc(ficha.categoria || "SIN EVALUAR"), "neutral")} ${badge("Primer paseo individual", "warn")}</p>
               <p>${esc(!a.tamano || a.tamano === PENDIENTE ? "Tamaño pendiente" : a.tamano)} · Días: ${dias.length ? esc(daysLabel(dias).toLowerCase()) : "pendientes"} · Turno: ${esc(!a.turno || a.turno === PENDIENTE ? "pendiente" : a.turno.toLowerCase())}</p>
+              ${carnet
+                ? `<p class="coord-attach-row">${icon("fileCheck", "coord-icon")}<span><b>Carnet de vacunas adjunto</b></span>${button('Ver carnet<span class="coord-sr-only"> (se abre en otra pestaña)</span>', `data-coord-archivo-abrir="${esc(carnet.id)}" data-scope="${esc(scope)}"`, "secondary", "eye")}</p>`
+                : `<p class="coord-badges"><span class="coord-carnet is-missing">${icon("alertCircle", "coord-icon")}<span>Carnet: falta</span></span></p>`}
+              ${fileFeedback(scope)}
               ${whoLine(ficha)}
               <div class="coord-actions">
                 ${button("Copiar ficha", `data-coord-alta-copy="${esc(ficha.id)}"`, "ghost", "copy")}
@@ -2525,6 +2905,46 @@ async function saveEditor(destino) {
   }
 }
 
+// Sube el carnet o documento elegido en la ficha de un cliente y lo deja vinculado a él.
+async function subirDocumento(c) {
+  const s = subida;
+  const id = c.id;
+  const perros = (Array.isArray(c.perros) ? c.perros : []).filter((dogId) => DOG_BY_ID.has(dogId));
+  const fallar = (text, focusId, senal = false) => {
+    s.error = text;
+    s.errorSenal = senal;
+    announceError(text);
+    render();
+    focusById(focusId);
+  };
+  if (!s.file) return fallar("Elegí la foto o el PDF.", `coord-subida-archivo-${id}`);
+  if (s.tipo === TIPO_CARNET && perros.length > 1 && !s.perroId) return fallar("Elegí de qué perro es el carnet.", `coord-subida-perro-${id}`);
+  if (sinSenal()) return fallar("No se subió porque no hay señal. Tocá «Subir» de nuevo cuando vuelva.", `coord-subida-ok-${id}`, true);
+  s.estado = "subiendo";
+  s.error = "";
+  announce("Subiendo el archivo.");
+  scheduleRerender();
+  const dog = DOG_BY_ID.get(s.perroId) || null;
+  try {
+    const registro = await archivosApi.subir(s.tipo, s.file, { perroId: dog?.id || "", perroNombre: dog?.name || "", clienteId: id, nota: s.nota.trim() });
+    // Queda vinculado por clienteId; además se anota en el cliente (como el carnet que llega por la web).
+    const actual = findIn(getClientes(), id) || c;
+    const vinculados = [...new Set([...(Array.isArray(actual.archivos) ? actual.archivos : []), registro.id])];
+    await registros.save("clientes", { id, archivos: vinculados }).catch(() => {});
+    if (subida === s) subida = null;
+    const que = registro.tipo === TIPO_CARNET ? "El carnet de vacunas" : "El documento";
+    setFileFlash(`cliente-${id}`, `Listo: ${que.toLowerCase()}${dog ? ` de ${dog.name}` : ""} quedó guardado${registro.ubicacion === "drive" ? " en Drive" : ""} y vinculado a ${c.nombre || "este cliente"}.`);
+  } catch (error) {
+    s.estado = "";
+    s.error = mensajeArchivo(error, "subir");
+    s.errorSenal = /^Sin señal/.test(s.error);
+    announceError(s.error);
+  } finally {
+    scheduleRerender();
+    focusById(subida === s ? `coord-subida-ok-${id}` : `coord-subir-${id}`);
+  }
+}
+
 function handleCoordinadorClick(event) {
   if (!event.target.closest(".coord-shell")) return false;
   const t = event.target;
@@ -2579,6 +2999,57 @@ function handleCoordinadorClick(event) {
       const { pendiente, ...record } = deleted.record;
       run("undo", () => guardar(deleted.col, record, { section: deleted.section, ok: "Listo, se recuperó." }));
     }
+    return true;
+  }
+
+  /* ---------- Archivos ---------- */
+
+  const abrir = t.closest("[data-coord-archivo-abrir]");
+  if (abrir) {
+    abrirArchivo(abrir.dataset.coordArchivoAbrir, abrir.dataset.scope || "");
+    return true;
+  }
+
+  const subir = t.closest("[data-coord-subir]");
+  if (subir) {
+    const c = findIn(getClientes(), subir.dataset.coordSubir);
+    if (c) {
+      if (subida?.estado === "subiendo") {
+        announceError("Esperá a que termine la subida que está en curso.");
+        return true;
+      }
+      abrirSubida(c);
+      render();
+      focusById(`coord-subida-tipo-${c.id}`);
+    }
+    return true;
+  }
+
+  const subidaCancel = t.closest("[data-coord-subida-cancel]");
+  if (subidaCancel) {
+    if (subida?.estado === "subiendo") {
+      announceError("La subida está en curso: esperá a que termine.");
+      return true;
+    }
+    const id = subidaCancel.dataset.coordSubidaCancel;
+    subida = null;
+    render();
+    focusById(`coord-subir-${id}`);
+    return true;
+  }
+
+  const subidaOk = t.closest("[data-coord-subida-ok]");
+  if (subidaOk) {
+    const c = findIn(getClientes(), subidaOk.dataset.coordSubidaOk);
+    if (c && subida?.clienteId === c.id) run(`subida-${c.id}`, () => subirDocumento(c));
+    return true;
+  }
+
+  if (t.closest("[data-coord-filtro-carnet]")) {
+    soloSinCarnet = !soloSinCarnet;
+    announce(soloSinCarnet ? "Mostrando solo los perros sin carnet de vacunas." : "Mostrando todos los perros.");
+    render();
+    focusById("coord-filtro-carnet");
     return true;
   }
 
@@ -2886,6 +3357,21 @@ function handleCoordinadorClick(event) {
     };
     if (values.id) data.id = values.id;
     if (values.pedidoId) data.pedidoId = values.pedidoId;
+    // Archivos vinculados (el carnet del pedido web y lo que se subió desde la ficha).
+    // Se suman a los que ya tiene: si mientras tanto alguien subió otro, no se pierde.
+    const previo = values.id ? findIn(getClientes(), values.id) : null;
+    const vinculados = [...new Set([...(Array.isArray(previo?.archivos) ? previo.archivos : []), ...(Array.isArray(values.archivos) ? values.archivos : [])])];
+    if (vinculados.length) data.archivos = vinculados;
+    // Un carnet que no dice de qué perro es (el de la web) queda asignado al perro del cliente
+    // mientras tenga uno solo; así no se pierde si después se le suma otro perro.
+    const asignados = { ...(previo?.archivosPerro || {}) };
+    if (data.perros.length === 1) {
+      vinculados.forEach((archivoId) => {
+        const a = archivoPorId(archivoId);
+        if (a && esCarnet(a) && !a.perroId && !asignados[archivoId]) asignados[archivoId] = data.perros[0];
+      });
+    }
+    if (Object.keys(asignados).length) data.archivosPerro = asignados;
     run("cliente-save", async () => {
       const saved = await guardar("clientes", data, { section: "clientes", ok: values.id ? `Cambios de ${data.nombre} guardados.` : `${data.nombre} quedó cargado como cliente.` });
       if (saved) {
@@ -2903,6 +3389,7 @@ function handleCoordinadorClick(event) {
     clearDraft("cliente");
     setFlash("clientes", "Formulario vacío.");
     render();
+    focusById("coord-cliente-nombre");
     return true;
   }
 
@@ -2910,7 +3397,7 @@ function handleCoordinadorClick(event) {
   if (clienteEdit) {
     const c = findIn(getClientes(), clienteEdit.dataset.coordClienteEdit);
     if (c) {
-      drafts.cliente = { id: c.id, pedidoId: c.pedidoId || "", nombre: c.nombre || "", telefono: c.telefono || "", barrio: c.barrio || "", perros: c.perros || [], plan: c.plan || PENDIENTE, dias: c.dias || [], turno: c.turno || PENDIENTE, estado: c.estado || "activo", notas: c.notas || "" };
+      drafts.cliente = { id: c.id, pedidoId: c.pedidoId || "", nombre: c.nombre || "", telefono: c.telefono || "", barrio: c.barrio || "", perros: c.perros || [], plan: c.plan || PENDIENTE, dias: c.dias || [], turno: c.turno || PENDIENTE, estado: c.estado || "activo", notas: c.notas || "", archivos: c.archivos || [] };
       clearedForms.delete("cliente");
       render();
       goTo("coord-cliente-form", "#coord-cliente-nombre");
@@ -2958,7 +3445,12 @@ function handleCoordinadorClick(event) {
   const avisoFin = t.closest("[data-coord-aviso-fin]");
   if (avisoFin) {
     const aviso = findIn(getAvisos(), avisoFin.dataset.coordAvisoFin);
-    if (aviso) run(`aviso-${aviso.id}`, () => guardar("avisos", { id: aviso.id, vigenteHasta: addDaysISO(hoyAR(), -1) }, { section: "avisos", ok: `Aviso de ${aviso.barrio || "barrio"} marcado como terminado.` }));
+    if (aviso) run(`aviso-${aviso.id}`, async () => {
+      // El aviso sale de la lista de vigentes: el mensaje y el foco quedan donde se puede seguir.
+      const quedan = avisosVigentes().length > 1;
+      const saved = await guardar("avisos", { id: aviso.id, vigenteHasta: addDaysISO(hoyAR(), -1) }, { section: quedan ? "avisosTop" : "avisos", ok: `Aviso de ${aviso.barrio || "barrio"} marcado como terminado.` });
+      if (saved) focusById(quedan ? "coord-avisos-vigentes" : "coord-avisos-summary");
+    });
     return true;
   }
 
@@ -2968,7 +3460,10 @@ function handleCoordinadorClick(event) {
   if (resolve) {
     const id = resolve.dataset.coordResolve;
     const dog = DOG_BY_ID.get(id);
-    run(`resuelto-${id}`, () => guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` }));
+    run(`resuelto-${id}`, async () => {
+      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: true, nota: "" }, { section: "datos", ok: `${dog?.name || id}: marcado como resuelto.` });
+      if (saved) focusById(`coord-dato-${id}`);
+    });
     return true;
   }
 
@@ -2976,7 +3471,10 @@ function handleCoordinadorClick(event) {
   if (unresolve) {
     const id = unresolve.dataset.coordUnresolve;
     const dog = DOG_BY_ID.get(id);
-    run(`resuelto-${id}`, () => guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, { section: "datos", ok: `${dog?.name || id}: volvió a pendientes.` }));
+    run(`resuelto-${id}`, async () => {
+      const saved = await guardar("resueltos", { id, perroId: id, perroNombre: dog?.name || id, resuelto: false, nota: "" }, { section: "datos", ok: `${dog?.name || id}: volvió a pendientes.` });
+      if (saved) focusById(`coord-dato-${id}`);
+    });
     return true;
   }
 
@@ -3005,14 +3503,20 @@ function handleCoordinadorClick(event) {
   if (move) {
     const id = move.dataset.coordPedidoMove;
     const estado = move.dataset.estado;
-    run(`pedido-${id}`, () => guardar("pedidos", { id, estado }, { section: "pedidos", ok: `Pedido movido a "${ESTADO_LABEL[estado]}".` }));
+    run(`pedido-${id}`, async () => {
+      const saved = await guardar("pedidos", { id, estado }, { section: "pedidos", ok: `Pedido movido a "${ESTADO_LABEL[estado]}".` });
+      // La tarjeta cambia de columna: el foco va a la tarjeta (si no, se perdería).
+      if (saved) focusById(`coord-pedido-${id}`);
+    });
     return true;
   }
 
   const pedidoDelete = t.closest("[data-coord-pedido-delete]");
   if (pedidoDelete) {
     const pedido = findIn(getPedidos(), pedidoDelete.dataset.coordPedidoDelete);
-    if (pedido) run(`pedido-${pedido.id}`, () => borrar("pedidos", pedido, { section: "pedidos", ok: "Pedido borrado." }));
+    if (pedido) run(`pedido-${pedido.id}`, async () => {
+      if (await borrar("pedidos", pedido, { section: "pedidos", ok: "Pedido borrado." })) focusById("coord-undo-pedidos");
+    });
     return true;
   }
 
@@ -3051,18 +3555,78 @@ function handleCoordinadorClick(event) {
       return true;
     }
     const nombre = values.nombre.trim();
-    const datos = { ...values, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Individual" };
+    const { archivos: delPedido, ...resto } = values;
+    const datos = { ...resto, nombre, dias: Array.isArray(values.dias) ? values.dias : [], primerPaseo: "Individual" };
+    if (altaCarnet && !altaCarnetSubido && sinSenal()) {
+      setFlash("alta", "Sin señal: el carnet no se puede subir sin conexión. Esperá a tener señal o quitá el carnet para guardar la ficha ahora (después lo subís desde Clientes).", "error");
+      render();
+      focusById("coord-alta-carnet-quitar");
+      return true;
+    }
     run("alta-save", async () => {
-      const saved = await guardar("fichas", { fecha: hoyAR(), perroNombre: nombre, datos, categoria: "SIN EVALUAR", estado: "lista" }, { section: "alta", ok: `Ficha de ${nombre} guardada. Arranca SIN EVALUAR y con primer paseo individual.` });
-      if (saved) clearDraft("alta");
+      // Primero el carnet (necesita señal); después la ficha, con el carnet vinculado.
+      if (altaCarnet && !altaCarnetSubido) {
+        altaSubiendo = true;
+        announce("Subiendo el carnet de vacunas.");
+        scheduleRerender();
+        try {
+          altaCarnetSubido = await archivosApi.subir(TIPO_CARNET, altaCarnet, { perroNombre: nombre, pedidoId: values.pedidoId || "", nota: "Alta de perro nuevo" });
+          altaCarnet = null;
+        } catch (error) {
+          setFlash("alta", `No se pudo subir el carnet: ${mensajeArchivo(error, "subir")} La ficha todavía no se guardó: probá de nuevo o quitá el carnet.`, "error");
+          return;
+        } finally {
+          altaSubiendo = false;
+          scheduleRerender();
+        }
+      }
+      const ids = [...new Set([...(Array.isArray(delPedido) ? delPedido : []), altaCarnetSubido?.id].filter(Boolean))];
+      const carnetId = altaCarnetSubido?.id || ids.find((archivoId) => esCarnet(archivoPorId(archivoId)));
+      const carnetReg = carnetId ? archivoPorId(carnetId) || altaCarnetSubido : null;
+      const ficha = { fecha: hoyAR(), perroNombre: nombre, datos, categoria: "SIN EVALUAR", estado: "lista" };
+      if (ids.length) ficha.archivos = ids;
+      if (carnetId) ficha.carnet = { id: carnetId, nombre: carnetReg?.nombreArchivo || "" };
+      const saved = await guardar("fichas", ficha, { section: "alta", ok: `Ficha de ${nombre} guardada${carnetId ? " con el carnet de vacunas" : ""}. Arranca SIN EVALUAR y con primer paseo individual.` });
+      if (saved) {
+        clearDraft("alta");
+        altaCarnet = null;
+        altaCarnetSubido = null;
+      }
     });
     return true;
   }
 
   if (t.closest("[data-coord-alta-clear]")) {
+    altaVaciarConfirm = true;
+    render();
+    focusById("coord-alta-vaciar-cancel");
+    return true;
+  }
+
+  if (t.closest("[data-coord-alta-clear-cancel]")) {
+    altaVaciarConfirm = false;
+    render();
+    focusById("coord-alta-clear");
+    return true;
+  }
+
+  if (t.closest("[data-coord-alta-clear-ok]")) {
+    altaVaciarConfirm = false;
+    altaCarnet = null;
+    altaCarnetSubido = null;
     clearDraft("alta");
     setFlash("alta", "Formulario vacío.");
     render();
+    focusById("coord-alta-nombre");
+    return true;
+  }
+
+  if (t.closest("[data-coord-alta-carnet-quitar]")) {
+    altaCarnet = null;
+    altaCarnetSubido = null;
+    announce("Carnet quitado de la ficha.");
+    render();
+    focusById("coord-alta-carnet");
     return true;
   }
 
@@ -3076,7 +3640,9 @@ function handleCoordinadorClick(event) {
   const altaDelete = t.closest("[data-coord-alta-delete]");
   if (altaDelete) {
     const ficha = findIn(getFichas(), altaDelete.dataset.coordAltaDelete);
-    if (ficha) run(`ficha-${ficha.id}`, () => borrar("fichas", ficha, { section: "alta", ok: "Ficha borrada." }));
+    if (ficha) run(`ficha-${ficha.id}`, async () => {
+      if (await borrar("fichas", ficha, { section: "alta", ok: "Ficha borrada." })) focusById("coord-undo-alta");
+    });
     return true;
   }
 
@@ -3118,6 +3684,11 @@ function handleCoordinadorInput(event) {
 
   if (target.matches("[data-coord-rechazo]")) {
     rechazos[target.dataset.coordRechazo] = target.value;
+    return;
+  }
+
+  if (subida && target.matches("[data-coord-subida-campo]")) {
+    subida[target.dataset.coordSubidaCampo] = target.value;
     return;
   }
 
@@ -3166,6 +3737,36 @@ function handleCoordinadorChange(event) {
 
   if (target.matches("[data-coord-ed-hora], [data-coord-ed-search], [data-coord-rechazo], [data-coord-clientes-buscar], [data-coord-filter-perros]")) return true;
 
+  // Archivo elegido: queda en memoria (el <input> se vacía al redibujar).
+  if (target.matches("[data-coord-subida-archivo]")) {
+    if (subida && target.files?.[0]) {
+      subida.file = target.files[0];
+      subida.error = "";
+      announce(`Elegiste ${subida.file.name}. Tocá «Subir» para guardarlo.`);
+      scheduleRerender();
+    }
+    return true;
+  }
+
+  if (subida && target.matches("[data-coord-subida-campo]")) {
+    subida[target.dataset.coordSubidaCampo] = target.value;
+    if (target.dataset.coordSubidaCampo !== "nota") {
+      subida.error = "";
+      scheduleRerender();
+    }
+    return true;
+  }
+
+  if (target.matches("[data-coord-alta-carnet]")) {
+    if (target.files?.[0]) {
+      altaCarnet = target.files[0];
+      altaCarnetSubido = null;
+      announce(`Elegiste ${altaCarnet.name}. Se sube al guardar la ficha.`);
+      scheduleRerender();
+    }
+    return true;
+  }
+
   const formEl = target.closest("[data-coord-form]");
   if (formEl) {
     saveDraft(formEl.dataset.coordForm, serializeForm(formEl));
@@ -3184,7 +3785,8 @@ function handleCoordinadorSubmit(event) {
   const form = event.target.closest?.(".coord-shell [data-coord-form]");
   if (!form) return;
   event.preventDefault();
-  form.querySelector(".coord-btn.is-primary")?.click();
+  // Solo el botón de guardar del formulario (nunca un "Sí, vaciar" que esté a la vista).
+  form.querySelector("[data-coord-cliente-save], [data-coord-aviso-save], [data-coord-pedido-save], [data-coord-alta-save]")?.click();
 }
 
 function handleCoordinadorKeydown(event) {
