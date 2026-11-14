@@ -43,7 +43,7 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 |---|---|---|
 | E-040 Arreglos chicos de paseador, ayudante y admin | Claude | A MEDIAS: se cortó la sesión; revisar qué quedó |
 | E-029 Investigación: chats de las IAs, Drive, tienda importada, diseño profesional | Claude | EN CURSO |
-| E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | EN CURSO |
+| E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | SERVIDOR Y `client.js` LISTOS (falta integrar): faltan las pantallas de chat, la de aprobar altas en el admin y el alias en el panel. Contrato en `docs/datos-compartidos.md` |
 | (Gemini: anotá acá lo que estás haciendo) | Gemini | — |
 
 ## Por hacer (del Plan maestro)

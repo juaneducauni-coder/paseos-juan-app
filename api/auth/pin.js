@@ -9,6 +9,7 @@ const BLOQUEADO = "Demasiados intentos con el PIN actual. Esperá 15 minutos y p
 
 export default handler({ POST: 1 }, async (req, res) => {
   const user = await requireUser(req);
+  if (user.rol === "cliente") throw new HttpError(403, "El acceso del cliente es por enlace, sin PIN.");
   const { actual, nuevo } = await readJson(req);
   validatePin(nuevo);
   if (estaBloqueado(user)) throw new HttpError(429, BLOQUEADO);

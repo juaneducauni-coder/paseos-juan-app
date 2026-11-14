@@ -1,11 +1,14 @@
 // Ingreso con usuario y PIN. Los PIN se guardan con scrypt + sal; la sesión es un token
 // firmado con HMAC (AUTH_SECRET). Sin dependencias externas.
-import { scryptSync, randomBytes, timingSafeEqual, createHmac } from "node:crypto";
+import { scryptSync, randomBytes, timingSafeEqual, createHmac, createHash } from "node:crypto";
 import { HttpError } from "./http.js";
 import { store } from "./store.js";
 
 export const ROLES = ["admin", "coordinador", "supervisor", "paseador", "ayudante", "marketing"];
 const SESSION_DAYS = 30;
+// Portal del cliente: entra por un enlace (sin PIN) y la sesión dura 90 días.
+export const ROL_CLIENTE = "cliente";
+const CLIENT_SESSION_DAYS = 90;
 const MAX_FAILS = 5;
 const LOCK_MINUTES = 15;
 
@@ -63,6 +66,45 @@ export function issueToken(user) {
   return `${payload}.${sign(payload)}`;
 }
 
+// Sesión del cliente (portal): lleva el id del cliente y la fecha en que se creó su enlace.
+// Si el enlace se revoca o se genera uno nuevo, la sesión deja de valer.
+export function issueClientToken(clienteId, acceso) {
+  const payload = b64(JSON.stringify({
+    c: clienteId,
+    r: ROL_CLIENTE,
+    v: acceso.creadoEn,
+    exp: Date.now() + CLIENT_SESSION_DAYS * 24 * 3600 * 1000,
+  }));
+  return `${payload}.${sign(payload)}`;
+}
+
+// Enlace del cliente: token aleatorio fuerte. En el servidor se guarda SOLO su hash.
+export function nuevoTokenCliente() {
+  return randomBytes(32).toString("base64url");
+}
+
+export function hashTokenCliente(token) {
+  return createHash("sha256").update(String(token)).digest("hex");
+}
+
+export const TOKEN_CLIENTE = /^[A-Za-z0-9_-]{43}$/;
+
+// Ids de los perros de un cliente (acepta ["PJ-001"] o [{ id: "PJ-001" }]).
+export function perrosDeCliente(cliente) {
+  const lista = Array.isArray(cliente?.perros) ? cliente.perros : [];
+  return lista.map((p) => String(p && typeof p === "object" ? p.id || p.perroId || "" : p || "").trim()).filter(Boolean);
+}
+
+export function usuarioCliente(cliente) {
+  return {
+    usuario: `cliente:${cliente.id}`,
+    nombre: String(cliente.nombre || "Cliente"),
+    rol: ROL_CLIENTE,
+    clienteId: cliente.id,
+    perros: perrosDeCliente(cliente),
+  };
+}
+
 function readToken(token) {
   const [payload, signature] = String(token || "").split(".");
   if (!payload || !signature) return null;
@@ -80,16 +122,30 @@ function readToken(token) {
 
 export function publicUser(user) {
   if (!user) return null;
+  if (user.rol === ROL_CLIENTE) {
+    const { usuario, nombre, rol, clienteId, perros } = user;
+    return { usuario, nombre, rol, clienteId, perros };
+  }
   const { usuario, nombre, rol, activo, creadoEn, ultimoIngreso, debeCambiarPin, google } = user;
   return { usuario, nombre, rol, activo, creadoEn, ultimoIngreso, debeCambiarPin: Boolean(debeCambiarPin), google: google || "" };
 }
 
 // Devuelve el usuario de la sesión o corta con 401/403.
+// Acepta también la sesión del cliente (portal): { usuario: "cliente:<id>", nombre, rol: "cliente", clienteId, perros }.
 export async function requireUser(req, roles = null) {
   const header = req.headers?.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
   const data = readToken(token);
   if (!data) throw new HttpError(401, "Tu sesión venció. Volvé a ingresar.");
+  if (data.r === ROL_CLIENTE) {
+    if (!data.c || !/^[a-z0-9][a-z0-9_.-]{0,100}$/i.test(String(data.c))) throw new HttpError(401, "Tu sesión ya no es válida.");
+    const cliente = await store.get("clientes", data.c);
+    if (!cliente || cliente.estado === "baja" || !cliente.acceso?.activo || cliente.acceso.creadoEn !== data.v) {
+      throw new HttpError(401, "Este enlace ya no está activo. Pedile uno nuevo a Paseos Juan.");
+    }
+    if (roles && !roles.includes(ROL_CLIENTE)) throw new HttpError(403, "Tu usuario no tiene permiso para esto.");
+    return usuarioCliente({ ...cliente, id: data.c });
+  }
   const user = await store.getUser(data.u);
   if (!user || !user.activo || (user.version || 1) !== data.v) {
     throw new HttpError(401, "Tu sesión ya no es válida. Volvé a ingresar.");

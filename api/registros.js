@@ -6,12 +6,15 @@ import { randomBytes } from "node:crypto";
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/permisos.js";
+import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo, CLIENTE_LEE, CAMPOS_CLIENTE, AJUSTES_CLIENTE } from "./_lib/permisos.js";
+import { avisosDePaseo } from "./_lib/mensajes.js";
+import { sinHash } from "./_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const PERRO_ID = /^[A-Za-z0-9_.-]{0,40}$/;
-const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre"];
+// avisosCliente: avisos automáticos ya enviados al cliente por ese paseo (lo maneja el servidor).
+const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre", "avisosCliente"];
 const MAX_RECORD = 20 * 1024;
 // Campos de autoría de `paseos` (quién marcó cada paso): los fija el servidor.
 const AUTORIA_PASEO = ["horaRetiroPor", "horaPaseoPor", "horaEntregaPor", "horaIntegradoPor", "devuelvePor"];
@@ -128,6 +131,46 @@ export function nuevoId(fecha) {
   return `${fecha || now.toISOString().slice(0, 10)}_${stamp}_${randomBytes(3).toString("hex")}`;
 }
 
+// El acceso del cliente (hash del enlace) no se devuelve ni se cambia por acá: solo por /api/clientes/*.
+const sinHashDeAcceso = sinHash;
+
+function soloCampos(registro, campos) {
+  const out = {};
+  for (const campo of campos) if (registro[campo] !== undefined) out[campo] = registro[campo];
+  return out;
+}
+
+// Portal del cliente: solo paseos y fotos de SUS perros, con los campos que le corresponden.
+async function listarParaCliente(user, col, desde) {
+  if (!CLIENTE_LEE.includes(col)) throw new HttpError(403, "Tu usuario no puede ver estos datos.");
+  const perros = new Set(user.perros || []);
+  const esDelCliente = col === "ajustes"
+    ? (r) => AJUSTES_CLIENTE.includes(r.id)
+    : (r) => perros.has(r.perroId || (col === "fotos" ? r.id : ""));
+  let registros = (await store.list(col)).filter(esDelCliente);
+  if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
+  registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
+  return registros.map((r) => soloCampos(r, CAMPOS_CLIENTE[col]));
+}
+
+// Ajustes del admin. "pagos": alias de transferencia (6 a 20 letras, números, punto o guion) e instrucciones.
+const ALIAS = /^[a-z0-9.-]{6,20}$/;
+function validarAjustes(id, datos) {
+  if (id !== "pagos") throw new HttpError(400, "Ajuste desconocido.");
+  const out = {};
+  if (datos.alias !== undefined) {
+    const alias = String(datos.alias ?? "").trim().toLowerCase();
+    if (alias && !ALIAS.test(alias)) throw new HttpError(400, "El alias tiene que tener de 6 a 20 letras, números, puntos o guiones.");
+    out.alias = alias;
+  }
+  if (datos.instrucciones !== undefined) {
+    const texto = String(datos.instrucciones ?? "").replace(/<[^>]*>/g, "").replace(/[<>]/g, "").trim();
+    if (texto.length > 400) throw new HttpError(400, "Las instrucciones son muy largas (máximo 400 letras).");
+    out.instrucciones = texto;
+  }
+  return out;
+}
+
 function limpiar(datos, max) {
   const out = {};
   for (const [key, value] of Object.entries(datos || {})) {
@@ -143,9 +186,13 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
   const user = await requireUser(req);
   const params = query(req);
 
+  if (user.rol === "cliente" && req.method !== "GET") throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
+
   if (req.method === "GET") {
     const col = params.get("col");
     if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
+    if (params.get("desde") && !FECHA.test(params.get("desde"))) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
+    if (user.rol === "cliente") return send(res, 200, { ok: true, registros: await listarParaCliente(user, col, params.get("desde")) });
     if (!puedeLeer(user.rol, col)) throw new HttpError(403, "Tu usuario no puede ver estos datos.");
     const desde = params.get("desde");
     const prefijo = params.get("prefijo") || "";
@@ -155,6 +202,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     // Los comprobantes de pago son solo del admin: los demás ni siquiera ven que existen.
     if (col === "archivos") registros = registros.filter((r) => puedeVerArchivo(user.rol, r));
     if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
+    if (col === "clientes") registros = registros.map(sinHashDeAcceso);
     registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
     return send(res, 200, { ok: true, registros });
   }
@@ -192,7 +240,13 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
 
     const ahora = new Date().toISOString();
     const previo = body.id ? await store.get(col, id) : null;
-    const datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
+    let datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
+    if (col === "ajustes") datos = validarAjustes(id, datos);
+    // El acceso del cliente (enlace) y la aprobación de Juan solo se cambian por /api/clientes/*.
+    if (col === "clientes") {
+      delete datos.acceso;
+      delete datos.aprobado;
+    }
     const registro = {
       ...(previo || {}),
       ...datos,
@@ -205,8 +259,17 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       actualizadoPorNombre: user.nombre,
       actualizadoEn: ahora,
     };
+    // Paseos: aviso automático al cliente (retiro, paseo con foto, entrega). Si falla, el paseo se guarda igual.
+    if (col === "paseos") {
+      try {
+        const enviados = await avisosDePaseo(previo, registro);
+        if (enviados.length) registro.avisosCliente = enviados;
+      } catch (error) {
+        console.error("[registros] no se pudo avisar al cliente", error);
+      }
+    }
     await store.put(col, registro);
-    return send(res, previo ? 200 : 201, { ok: true, registro });
+    return send(res, previo ? 200 : 201, { ok: true, registro: col === "clientes" ? sinHashDeAcceso(registro) : registro });
   }
 
   // DELETE

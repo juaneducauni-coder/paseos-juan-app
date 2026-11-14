@@ -2,11 +2,12 @@
 // POST { tipo, archivo: { nombre, mime, base64 }, perroId?, perroNombre?, clienteId?, pedidoId?, nota? }
 //   → sube el archivo (Drive o Vercel privado) y deja el registro en la colección "archivos".
 // GET ?id=...  → devuelve el archivo (solo para quien puede ver la colección "archivos").
+//   El cliente (portal) solo abre fotos de sus perros.
 // La lista se pide como cualquier colección: /api/registros?col=archivos
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { puedeLeer, puedeEscribir, puedeVerArchivo, puedeSubirArchivo } from "./_lib/permisos.js";
+import { puedeLeer, puedeEscribir, puedeVerArchivo, puedeSubirArchivo, puedeVerArchivoUsuario } from "./_lib/permisos.js";
 import { guardarArchivo, TIPOS } from "./_lib/archivos.js";
 
 export default handler({ GET: 1, POST: 1 }, async (req, res) => {
@@ -21,10 +22,13 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
     return send(res, 201, { ok: true, registro });
   }
 
-  if (!puedeLeer(user.rol, "archivos")) throw new HttpError(403, "Tu usuario no puede ver archivos.");
+  const esCliente = user.rol === "cliente";
+  if (!esCliente && !puedeLeer(user.rol, "archivos")) throw new HttpError(403, "Tu usuario no puede ver archivos.");
   const id = query(req).get("id");
   if (!id) throw new HttpError(400, "Falta el identificador del archivo.");
+  if (!/^[a-z0-9][a-z0-9_.-]{0,120}$/i.test(id)) throw new HttpError(400, "Identificador no válido.");
   const meta = await store.get("archivos", id);
+  if (esCliente && (!meta || !puedeVerArchivoUsuario(user, meta))) throw new HttpError(403, "Este archivo no es de tus perros.");
   if (!meta) throw new HttpError(404, "Ese archivo no existe.");
   if (!puedeVerArchivo(user.rol, meta)) {
     throw new HttpError(403, meta.tipo === "comprobante de pago" ? "Los comprobantes de pago los ve solo el admin." : "Tu usuario no puede ver este archivo.");
