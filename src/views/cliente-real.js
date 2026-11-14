@@ -8,7 +8,7 @@
 //   - el alias de pago (ajustes/pagos).
 // No inventa datos: lo que falta dice "Pendiente de confirmar".
 import { session, registros, mensajes, datosPago, archivos, onDataChange, hoyAR, PENDIENTE } from "../api/client.js";
-import { BUSINESS_INFO } from "../data/realData.js";
+import { BUSINESS_INFO, REAL_DOGS } from "../data/realData.js";
 import { icon } from "../ui/shared.js";
 import { isCalmMotion } from "../ui/accesibilidad.js";
 
@@ -128,7 +128,9 @@ function perrosDelCliente(user = session.user()) {
   return ids.map((id) => {
     const foto = fotos.find((f) => (f.perroId || f.id) === id);
     const propios = paseos.filter((p) => p.perroId === id && p.fecha >= hoy);
-    const nombre = foto?.perroNombre
+    // Primero el nombre de la planilla de perros; después lo que llegó con la foto o el paseo.
+    const nombre = REAL_DOGS.find((dog) => dog.id === id)?.name
+      || foto?.perroNombre
       || propios.find((p) => p.perroNombre)?.perroNombre
       || avisos.find((m) => m.perroId === id && m.perroNombre)?.perroNombre
       || "";
@@ -291,11 +293,24 @@ const ESTADOS = {
   "no-sale": { chip: "Hoy no sale", tono: "off", paso: -1 },
 };
 
+// Próximo paseo según el horario que asignó Juan al aprobar el alta (días y turno de la sesión).
+function proximoSegunHorario(desdeManana) {
+  const user = session.user() || {};
+  const dias = Array.isArray(user.dias) ? user.dias.map((d) => String(d).toLowerCase()) : [];
+  if (!dias.length) return null;
+  const hoy = hoyAR();
+  for (let i = desdeManana ? 1 : 0; i <= 7; i += 1) {
+    const fecha = sumarDias(hoy, i);
+    if (dias.includes(diaSemana(fecha).toLowerCase())) return { fecha, turno: user.turno || "", hora: user.hora || "" };
+  }
+  return null;
+}
+
 function tarjetaPerro(perro) {
   const nombre = nombrePerro(perro);
   const inicial = perro.nombre ? perro.nombre.charAt(0).toUpperCase() : "";
   const pendienteHoy = perro.paseosHoy.find((p) => (p.estado || "pendiente") === "pendiente");
-  const proximo = pendienteHoy ? null : perro.proximo;
+  const proximo = pendienteHoy ? null : perro.proximo || proximoSegunHorario(perro.paseosHoy.length > 0);
   return `
     <article class="cl-card cl-today-main clr-perro" aria-labelledby="clr-perro-${esc(perro.id)}">
       <p class="cl-eyebrow">Hoy</p>
@@ -311,7 +326,7 @@ function tarjetaPerro(perro) {
       ${pendienteHoy ? "" : `
         <p class="clr-proximo">
           <span>${icon("calendarCheck", "cl-icon-sm")} Próximo paseo</span>
-          <strong>${proximo ? `${esc(diaSemana(proximo.fecha))} ${esc(ddmmaaaa(proximo.fecha))}${proximo.turno ? ` · ${esc(turnoTexto(proximo.turno))}` : ""}` : PENDIENTE}</strong>
+          <strong>${proximo ? `${esc(diaSemana(proximo.fecha))} ${esc(ddmmaaaa(proximo.fecha))}${proximo.turno ? ` · ${esc(turnoTexto(proximo.turno))}` : ""}${proximo.hora ? ` · ${esc(proximo.hora)}` : ""}` : PENDIENTE}</strong>
         </p>
       `}
     </article>

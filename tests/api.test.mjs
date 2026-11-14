@@ -315,7 +315,7 @@ test("portal del cliente: enlace, sesión y solo lo de sus perros", async () => 
   const entra = await call("authCliente", { method: "POST", body: { token: enlace } });
   assert.equal(entra.status, 200);
   clienteToken = entra.body.token;
-  assert.deepEqual(entra.body.user, { usuario: "cliente:cli-ana", nombre: "Ana López", rol: "cliente", clienteId: "cli-ana", perros: ["PJ-001"] });
+  assert.deepEqual(entra.body.user, { usuario: "cliente:cli-ana", nombre: "Ana López", rol: "cliente", clienteId: "cli-ana", perros: ["PJ-001"], dias: ["lunes", "miércoles"], turno: "Mañana", hora: "09:30" });
   const me = await call("me", { token: clienteToken });
   assert.equal(me.body.user.rol, "cliente");
   assert.equal(JSON.stringify(me.body).includes("1155550000"), false);

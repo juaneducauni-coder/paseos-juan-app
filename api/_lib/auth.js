@@ -102,6 +102,10 @@ export function usuarioCliente(cliente) {
     rol: ROL_CLIENTE,
     clienteId: cliente.id,
     perros: perrosDeCliente(cliente),
+    // Su propio horario (lo asignó Juan al aprobar el alta): para mostrar el próximo paseo.
+    dias: Array.isArray(cliente.dias) ? cliente.dias : [],
+    turno: String(cliente.turno || ""),
+    hora: String(cliente.hora || ""),
   };
 }
 
@@ -123,8 +127,8 @@ function readToken(token) {
 export function publicUser(user) {
   if (!user) return null;
   if (user.rol === ROL_CLIENTE) {
-    const { usuario, nombre, rol, clienteId, perros } = user;
-    return { usuario, nombre, rol, clienteId, perros };
+    const { usuario, nombre, rol, clienteId, perros, dias, turno, hora } = user;
+    return { usuario, nombre, rol, clienteId, perros, dias: dias || [], turno: turno || "", hora: hora || "" };
   }
   const { usuario, nombre, rol, activo, creadoEn, ultimoIngreso, debeCambiarPin, google } = user;
   return { usuario, nombre, rol, activo, creadoEn, ultimoIngreso, debeCambiarPin: Boolean(debeCambiarPin), google: google || "" };

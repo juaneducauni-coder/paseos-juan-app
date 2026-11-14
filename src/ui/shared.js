@@ -4,6 +4,7 @@ import { canReplyToClient, getChatConversations, sendChatMessage } from "../data
 import { state } from "../state.js";
 import { BUSINESS, PLAN_SIZES, MENU_ITEMS } from "../data/mock.js";
 import { render } from "../app.js";
+import { session } from "../api/client.js";
 
 // Escapa texto para meterlo en HTML (contenido y atributos).
 export function esc(value) {
@@ -129,7 +130,7 @@ function HeaderMinimal(activeRole) {
         </span>
       </a>
       <div class="header-actions">
-        <a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>
+        ${session.user()?.rol === "cliente" ? `<a class="header-cta" href="/cliente" data-link>Mi página</a>` : `<a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>`}
         <button class="menu-button ${state.menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${state.menuOpen}" aria-label="Abrir menu">
           <span></span>
           <span></span>

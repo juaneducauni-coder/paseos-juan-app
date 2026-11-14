@@ -247,7 +247,7 @@ function dashboardPage(roleKey) {
         ${content}
       </section>
     </main>
-    ${isClientDashboard ? FloatingClientChat() : ""}
+    ${isClientDashboard && session.user()?.rol !== "cliente" ? FloatingClientChat() : ""}
   `, roleKey);
 }
 
