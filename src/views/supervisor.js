@@ -39,6 +39,7 @@ import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
 import { session, registros, onDataChange, hoyAR, fotosPerros, archivos } from "../api/client.js";
 import { pestanaMensajes } from "./mensajes.js";
+import { abrirAccesibilidad } from "../ui/accesibilidad.js";
 
 const TIME_ZONE = "America/Argentina/Buenos_Aires";
 const SHIFT_KEYS = ["manana", "tarde"];
@@ -55,7 +56,7 @@ const OBS_DAYS = 7;
 // Pedidos de cambio: los de hoy en adelante y los de los 2 días anteriores.
 const REQUEST_DAYS_BACK = 2;
 const AVISO_TYPES = ["obra o corte", "perro suelto", "clima", "seguridad", "cambio de horario", "otro"];
-const REQUEST_TYPES = ["no sale", "agregar perro", "cambiar hora", "cambiar paseador o ayudante", "otro"];
+const REQUEST_TYPES = ["no sale", "agregar perro", "cambiar hora", "cambiar de ruta", "cambiar paseador o ayudante", "otro"];
 const REQUEST_STATES = {
   pendiente: { label: "Pendiente", tone: "warn" },
   aplicado: { label: "Aplicado", tone: "ok" },
@@ -1270,6 +1271,7 @@ const REQUEST_CHIPS = [
   { value: "no sale", label: "No sale" },
   { value: "cambiar hora", label: "Cambiar hora" },
   { value: "agregar perro", label: "Agregar perro" },
+  { value: "cambiar de ruta", label: "Cambiar de ruta" },
   { value: "cambiar paseador o ayudante", label: "Cambiar paseador" },
   { value: "otro", label: "Otro" },
 ];
@@ -1306,6 +1308,14 @@ function offerUndo(text, run, focusId = "") {
       scheduleLive();
     }
   }, UNDO_MS + 60);
+}
+
+// Al cambiar de pestaña o de sección el aviso de abajo (y su "Deshacer") se va: si no, tapa la
+// pantalla nueva.
+function clearFloating() {
+  flash = null;
+  undo = null;
+  orderFreeze = null;
 }
 
 function activeUndo() {
@@ -1402,12 +1412,11 @@ function SupervisorHeader() {
         </span>
         <span class="sv-brand-text">
           <strong>Supervisión</strong>
-          <small>${esc(user.nombre || PENDIENTE)}</small>
+          <small>${esc(String(user.nombre || "").trim().split(/\s+/)[0] || PENDIENTE)}</small>
         </span>
       </a>
       <div class="sv-header-end">
         ${SyncPill()}
-        <span class="sv-a11y-slot" aria-hidden="true"></span>
         <button class="sv-logout-btn" type="button" id="sv-logout" data-sv-logout>
           ${icon("logOut", "sv-icon")} <span>Salir</span>
         </button>
@@ -1571,8 +1580,8 @@ function Avatar(stop, domId, small = false) {
       <input type="file" class="sv-file" id="sv-photo-${domId}" accept="image/*" capture="environment" data-sv-photo="${esc(stop.perroId)}" data-name="${esc(name)}" ${busy ? "disabled" : ""} />
       <label for="sv-photo-${domId}" class="sv-avatar-label">
         <span class="sv-initial" aria-hidden="true">${initial}</span>
-        <span class="sv-avatar-cam" aria-hidden="true">${icon("camera", "sv-icon")}${busy ? "…" : "Foto"}</span>
-        <span class="visually-hidden">${busy ? `Subiendo foto de ${esc(name)}` : `Sacar foto de ${esc(name)}`}</span>
+        <span class="sv-avatar-cam" aria-hidden="true">${icon("camera", "sv-icon")}<span>${busy ? "…" : "Foto del perro"}</span></span>
+        <span class="visually-hidden">${busy ? `Subiendo foto de ${esc(name)}` : `Foto del perro: sacar la foto de ${esc(name)} para su ficha`}</span>
       </label>
     </span>
   `;
@@ -2061,7 +2070,7 @@ function RouteCard(view, route, byId) {
       ${RequestNotice(requests)}
       <div class="sv-row">
         <a class="sv-btn sv-btn-wa" id="sv-wa-${safeId(route.code)}" href="https://wa.me/?text=${encodeURIComponent(whatsappText(view, route, items))}" target="_blank" rel="noopener noreferrer" aria-label="Avisar${walker ? ` a ${esc(walker)}` : " al paseador"} por WhatsApp. Se abre WhatsApp con el mensaje y elegís el chat">
-          ${icon("message", "sv-icon")} <span>Avisar por WhatsApp (elegí el chat)</span>
+          ${icon("message", "sv-icon")} <span>Avisar por WhatsApp</span>
         </a>
         ${RequestButton(route.code, "", "Cambio")}
       </div>
@@ -2179,6 +2188,7 @@ function MoreTab(view, routeInfo, sub) {
         </a>
       </li>
       ${tile(`id="sv-sub-ayuda" data-sv-sub="ayuda"`, "help", "Ayuda", "Colores y fuentes")}
+      ${tile(`id="sv-a11y-open" data-sv-a11y`, "sun", "Tema y movimiento", "Claro, oscuro o calmo")}
       ${tile(`id="sv-refresh-more" data-sv-refresh`, "radio", "Actualizar", "Traer lo nuevo")}
       ${tile(`id="sv-logout-more" data-sv-logout`, "logOut", "Salir", "")}
     </ul>
@@ -2819,6 +2829,7 @@ async function saveRequest(form) {
   if (tipo === "cambiar hora" && !draft.hora && !texto) return fail("Poné la hora nueva.", "sv-req-hora");
   if (tipo === "agregar perro" && !extraDog && !texto) return fail("Elegí el perro a sumar.", "sv-req-extra");
   if (tipo === "otro" && !texto) return fail("Contá qué cambiar en Detalle.", "sv-req-texto");
+  if (tipo === "cambiar de ruta" && !texto) return fail("Contá en Detalle a qué ruta pasa.", "sv-req-texto");
   if (PHONE_LIKE.test(texto)) return fail("Parece tener un teléfono. Sacalo.", "sv-req-texto");
 
   const ruta = draft.ruta || "";
@@ -2828,6 +2839,7 @@ async function saveRequest(form) {
     "no sale": `${name || "El perro"} no sale hoy.`,
     "cambiar hora": draft.hora ? `Retirar${name ? ` a ${name}` : ""} a las ${draft.hora}${stop?.hora ? ` (en vez de ${stop.hora})` : ""}.` : "",
     "agregar perro": extraDog ? `Sumar a ${extraDog.name}${ruta ? ` a ${ruta}` : ""}.` : "",
+    "cambiar de ruta": `Cambiar${name ? ` a ${name}` : ""} de ruta${ruta ? ` (hoy va en ${ruta})` : ""}.`,
     "cambiar paseador o ayudante": "Cambiar paseador o ayudante.",
     otro: "",
   }[tipo];
@@ -3000,6 +3012,12 @@ function handleSupervisorClick(event) {
     return true;
   }
 
+  if (target.closest("[data-sv-a11y]")) {
+    // Después de este toque (si no, el mismo clic cierra el panel).
+    setTimeout(abrirAccesibilidad, 0);
+    return true;
+  }
+
   if (target.closest("[data-sv-sheet-close]")) {
     closeSheets();
     return true;
@@ -3021,6 +3039,7 @@ function handleSupervisorClick(event) {
   if (tabButton) {
     const tab = tabButton.dataset.svTab;
     const nav = getNav();
+    if (nav.tab !== tab || nav.sub) clearFloating();
     saveNav(tab, "");
     syncFolds();
     render();
@@ -3033,6 +3052,7 @@ function handleSupervisorClick(event) {
   if (subButton) {
     const sub = subButton.dataset.svSub;
     const previous = getNav().sub;
+    clearFloating();
     saveNav("mas", sub);
     syncFolds();
     render();
@@ -3044,6 +3064,7 @@ function handleSupervisorClick(event) {
   const gotoButton = target.closest("[data-sv-goto]");
   if (gotoButton) {
     const [tab, sub] = gotoButton.dataset.svGoto.split(":");
+    clearFloating();
     saveNav(tab, sub || "");
     syncFolds();
     render();
