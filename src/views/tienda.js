@@ -1,6 +1,6 @@
 // Tienda (/tienda): alimento y productos. Negocio separado, identidad negro y verde.
 // Carrito simple guardado en el dispositivo; el pedido se manda por WhatsApp (sin cobro online).
-import { TIENDA, PRODUCTOS, PENDIENTE } from "../data/tienda.js";
+import { TIENDA, PRODUCTOS, PENDIENTE, IMPORTADOS } from "../data/tienda.js";
 import { whatsappLink, icon } from "../ui/shared.js";
 
 const CART_KEY = "paseosJuan_tiendaCarrito";
@@ -113,6 +113,42 @@ function cartPanel(cart) {
   `;
 }
 
+export function buildWaitMessage(product) {
+  return [
+    "Hola, me interesa este producto importado de la tienda de Paseos Juan:",
+    `- ${product.nombre}`,
+    "",
+    "¿Me avisan cuando llegue y a qué precio?",
+  ].join("\n");
+}
+
+// Productos importados: todavía no se venden. Se muestran con el tiempo estimado de llegada
+// y un botón para anotarse por WhatsApp.
+function importadosSection() {
+  return `
+    <section class="tienda-import" aria-labelledby="importados-titulo">
+      <div class="tienda-import-head">
+        <p class="tienda-eyebrow">Próximamente</p>
+        <h2 id="importados-titulo">Importados</h2>
+        <p>Productos que se fabrican afuera y viajan hasta acá. Todavía no hay stock ni precio: anotate y te avisamos cuando lleguen.</p>
+        <p class="tienda-aviso">${icon("clock")}<span><strong>Demora estimada:</strong> ${esc(IMPORTADOS.llegadaEstimada)} ${esc(IMPORTADOS.avion)}</span></p>
+      </div>
+      <ul class="tienda-import-list">
+        ${IMPORTADOS.productos.map((product) => `
+          <li class="tienda-import-item">
+            <span class="tienda-import-icon" aria-hidden="true">${icon(product.icono)}</span>
+            <div>
+              <h3>${esc(product.nombre)}</h3>
+              <p>${esc(product.para)}</p>
+              <p class="tienda-import-meta">Precio: ${esc(PENDIENTE)}</p>
+            </div>
+            <button class="tienda-wait" type="button" data-tienda="esperar" data-id="${esc(product.id)}">Avisame cuando llegue<span class="visually-hidden">: ${esc(product.nombre)}</span></button>
+          </li>`).join("")}
+      </ul>
+    </section>
+  `;
+}
+
 export function tiendaPage() {
   const cart = readCart();
   return `
@@ -139,6 +175,8 @@ export function tiendaPage() {
         <section class="tienda-grid" aria-label="Productos" data-tienda-productos>
           ${PRODUCTOS.map((product) => productCard(product, cart)).join("")}
         </section>
+
+        ${importadosSection()}
 
         <p class="tienda-health">${icon("heartPulse")}<span>Si tu mascota tiene alguna condición de salud, consultá antes con su veterinario.</span></p>
 
@@ -189,6 +227,14 @@ function handleTiendaClick(event) {
     if (!cartCount(cart)) return;
     window.open(whatsappLink(buildOrderMessage(cart)), "_blank", "noopener");
     announce("Se abrió WhatsApp con tu pedido: solo falta tocar Enviar.");
+    return;
+  }
+
+  if (action === "esperar") {
+    const item = IMPORTADOS.productos.find((entry) => entry.id === button.dataset.id);
+    if (!item) return;
+    window.open(whatsappLink(buildWaitMessage(item)), "_blank", "noopener");
+    announce(`Se abrió WhatsApp para anotarte en ${item.nombre}: solo falta tocar Enviar.`);
     return;
   }
 

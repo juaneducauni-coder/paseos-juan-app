@@ -550,15 +550,114 @@ html[data-theme="dark"] body:has(.tienda-page) {
     padding: 10px var(--gutter-mobile, 20px);
   }
 
-  .tienda-logo {
-    display: none;
+  /* En el celular angosto queda solo el ícono de la tienda (el nombre no entra y tapaba "Pedido"). */
+  .tienda-brand {
+    justify-content: center;
   }
 
-  .tienda-brand small {
-    display: none;
+  .tienda-brand > span:not(.tienda-logo) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .tienda-cart-link {
     padding: 0 6px 0 10px;
   }
+}
+
+/* ---- Importados (próximamente): lista aireada con botón "Avisame cuando llegue" ---- */
+.tienda-import {
+  display: grid;
+  gap: 20px;
+}
+
+.tienda-import-head {
+  display: grid;
+  gap: 12px;
+}
+
+.tienda-import-head h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  line-height: 1.15;
+}
+
+.tienda-import-head p:not(.tienda-eyebrow) {
+  max-width: min(100%, var(--measure, 64ch));
+  margin: 0;
+  color: var(--t-muted);
+  line-height: 1.58;
+}
+
+.tienda-import-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tienda-import-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 12px 14px;
+  align-content: start;
+  border: 1px solid var(--t-line);
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
+  background: var(--t-card);
+  padding: 18px;
+}
+
+.tienda-import-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(92, 196, 151, 0.12);
+  color: var(--t-accent);
+}
+
+.tienda-import-icon .line-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.tienda-import-item h3 {
+  margin: 0 0 4px;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.tienda-import-item p {
+  margin: 0;
+  color: var(--t-muted);
+  line-height: 1.5;
+}
+
+.tienda-import-meta {
+  margin-top: 6px !important;
+  font-size: 0.9rem;
+}
+
+.tienda-wait {
+  grid-column: 1 / -1;
+  min-height: var(--touch-min, 48px);
+  border: 1px solid var(--t-accent);
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
+  background: transparent;
+  color: var(--t-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0 18px;
+}
+
+.tienda-wait:hover {
+  background: rgba(92, 196, 151, 0.12);
 }
