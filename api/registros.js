@@ -6,17 +6,42 @@ import { randomBytes } from "node:crypto";
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo } from "./_lib/permisos.js";
+import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo, CLIENTE_LEE, CAMPOS_CLIENTE } from "./_lib/permisos.js";
+import { avisosDePaseo } from "./_lib/mensajes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
-const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre"];
+// avisosCliente: avisos automáticos ya enviados al cliente por ese paseo (lo maneja el servidor).
+const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre", "avisosCliente"];
 const MAX_RECORD = 20 * 1024;
 
 export function nuevoId(fecha) {
   const now = new Date();
   const stamp = now.toISOString().slice(11, 19).replace(/:/g, "");
   return `${fecha || now.toISOString().slice(0, 10)}_${stamp}_${randomBytes(3).toString("hex")}`;
+}
+
+// El acceso del cliente (hash del enlace) no se devuelve ni se cambia por acá: solo por /api/clientes/acceso.
+function sinHashDeAcceso(registro) {
+  if (!registro?.acceso) return registro;
+  const { hash, ...acceso } = registro.acceso;
+  return { ...registro, acceso };
+}
+
+function soloCampos(registro, campos) {
+  const out = {};
+  for (const campo of campos) if (registro[campo] !== undefined) out[campo] = registro[campo];
+  return out;
+}
+
+// Portal del cliente: solo paseos y fotos de SUS perros, con los campos que le corresponden.
+async function listarParaCliente(user, col, desde) {
+  if (!CLIENTE_LEE.includes(col)) throw new HttpError(403, "Tu usuario no puede ver estos datos.");
+  const perros = new Set(user.perros || []);
+  let registros = (await store.list(col)).filter((r) => perros.has(r.perroId || (col === "fotos" ? r.id : "")));
+  if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
+  registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
+  return registros.map((r) => soloCampos(r, CAMPOS_CLIENTE[col]));
 }
 
 function limpiar(datos, max) {
@@ -34,9 +59,13 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
   const user = await requireUser(req);
   const params = query(req);
 
+  if (user.rol === "cliente" && req.method !== "GET") throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
+
   if (req.method === "GET") {
     const col = params.get("col");
     if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
+    if (params.get("desde") && !FECHA.test(params.get("desde"))) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
+    if (user.rol === "cliente") return send(res, 200, { ok: true, registros: await listarParaCliente(user, col, params.get("desde")) });
     if (!puedeLeer(user.rol, col)) throw new HttpError(403, "Tu usuario no puede ver estos datos.");
     const desde = params.get("desde");
     const prefijo = params.get("prefijo") || "";
@@ -46,6 +75,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     // Los comprobantes de pago son solo del admin: los demás ni siquiera ven que existen.
     if (col === "archivos") registros = registros.filter((r) => puedeVerArchivo(user.rol, r));
     if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
+    if (col === "clientes") registros = registros.map(sinHashDeAcceso);
     registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
     return send(res, 200, { ok: true, registros });
   }
@@ -68,9 +98,11 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
 
     const ahora = new Date().toISOString();
     const previo = body.id ? await store.get(col, id) : null;
+    const datos = limpiar(body, coleccion(col).maxBytes);
+    if (col === "clientes") delete datos.acceso;
     const registro = {
       ...(previo || {}),
-      ...limpiar(body, coleccion(col).maxBytes),
+      ...datos,
       id,
       col,
       creadoPor: previo?.creadoPor || user.usuario,
@@ -80,8 +112,17 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       actualizadoPorNombre: user.nombre,
       actualizadoEn: ahora,
     };
+    // Paseos: aviso automático al cliente (retiro, paseo con foto, entrega). Si falla, el paseo se guarda igual.
+    if (col === "paseos") {
+      try {
+        const enviados = await avisosDePaseo(previo, registro);
+        if (enviados.length) registro.avisosCliente = enviados;
+      } catch (error) {
+        console.error("[registros] no se pudo avisar al cliente", error);
+      }
+    }
     await store.put(col, registro);
-    return send(res, previo ? 200 : 201, { ok: true, registro });
+    return send(res, previo ? 200 : 201, { ok: true, registro: col === "clientes" ? sinHashDeAcceso(registro) : registro });
   }
 
   // DELETE

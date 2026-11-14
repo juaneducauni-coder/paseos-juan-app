@@ -9,6 +9,7 @@
 //   await registros.remove("pedidos", id)
 //   onDataChange((col) => ...)             → avisa cuando llegan datos nuevos de una colección
 //   registros.watch("paseos", { desde })   → refresca cada minuto mientras la pestaña está visible
+//   mensajes.resumen() / mensajes.list(canal) / mensajes.enviar(canal, texto) → chats (ver docs/datos-compartidos.md)
 
 const SESSION_KEY = "pj_sesion";
 const OUTBOX_KEY = "pj_pendientes";
@@ -16,10 +17,16 @@ const CACHE_PREFIX = "pj_cache_";
 // Cada cuánto se buscan datos nuevos. Con la planilla de Google: cada minuto. Con el
 // almacenamiento provisorio de Vercel (cupo gratis chico): cada 5 minutos.
 let POLL_MS = 60 * 1000;
+// Chats: el canal abierto se refresca cada 10 s; el resumen (sin leer) cada 60 s, o 5 min con el provisorio.
+const CHAT_MS = 10 * 1000;
+let RESUMEN_MS = 60 * 1000;
 fetch("/api/salud")
   .then((r) => r.json())
   .then((data) => {
-    if (/provisorio/i.test(data.almacenamiento || "")) POLL_MS = 5 * 60 * 1000;
+    if (/provisorio/i.test(data.almacenamiento || "")) {
+      POLL_MS = 5 * 60 * 1000;
+      RESUMEN_MS = 5 * 60 * 1000;
+    }
   })
   .catch(() => {});
 
@@ -150,6 +157,7 @@ export const ROLE_PAGES = {
   paseador: ["paseador"],
   ayudante: ["paseador"],
   marketing: [],
+  cliente: ["cliente"],
 };
 
 export const ROLE_LABELS = {
@@ -159,10 +167,11 @@ export const ROLE_LABELS = {
   paseador: "Paseador",
   ayudante: "Ayudante de paseador",
   marketing: "Marketing",
+  cliente: "Cliente",
 };
 
 export function homeFor(rol) {
-  return { admin: "/admin", coordinador: "/coordinador", supervisor: "/supervisor", paseador: "/paseador", ayudante: "/paseador" }[rol] || "/";
+  return { admin: "/admin", coordinador: "/coordinador", supervisor: "/supervisor", paseador: "/paseador", ayudante: "/paseador", cliente: "/cliente" }[rol] || "/";
 }
 
 // ---------- Usuarios (solo admin) ----------
@@ -562,3 +571,137 @@ export const fotosPaseo = {
 
 window.addEventListener("online", () => fotosPaseo.subirPendientes());
 setInterval(() => fotosPaseo.subirPendientes(), 30 * 1000);
+
+// ---------- Portal del cliente (acceso por enlace /c/<token>, sin PIN) ----------
+session.loginCliente = async function loginCliente(token) {
+  const data = await request("/api/auth/cliente", { method: "POST", body: { token }, auth: false });
+  session.set(data.token, data.user);
+  return data.user; // { usuario: "cliente:<id>", nombre, rol: "cliente", clienteId, perros }
+};
+
+// Solo admin y coordinador. crear() devuelve { enlace: "/c/<token>", url, acceso }: el enlace se ve UNA sola vez.
+export const clientesAcceso = {
+  async crear(clienteId) {
+    const data = await request("/api/clientes/acceso", { method: "POST", body: { clienteId } });
+    return { enlace: data.enlace, url: `${window.location.origin}${data.enlace}`, acceso: data.acceso };
+  },
+  async revocar(clienteId) {
+    const data = await request("/api/clientes/acceso", { method: "POST", body: { clienteId, revocar: true } });
+    return data.acceso;
+  },
+};
+
+// ---------- Mensajes (chats del equipo y con los clientes) ----------
+// Canales: "equipo", "calle", "coordinacion", directos canalDirecto(a, b) y "cliente_<clienteId>".
+// Avisa con onDataChange("mensajes") cuando cambia el resumen y onDataChange("mensajes:<canal>") con mensajes nuevos.
+export function canalDirecto(a, b) {
+  const [x, y] = [String(a), String(b)].sort();
+  return `dm_${x}__${y}`;
+}
+
+const MSJ_KEY = (canal) => `${CACHE_PREFIX}msj_${canal}`;
+const RESUMEN_KEY = `${CACHE_PREFIX}msj__resumen`;
+const msjWatchers = new Map();
+
+export const mensajes = {
+  // [{ canal, tipo: "grupo"|"directo"|"cliente", titulo, ultimo, sinLeer, leidoHasta, con?, clienteId? }]
+  cachedResumen() {
+    return readJson(RESUMEN_KEY, []);
+  },
+  async resumen() {
+    try {
+      const data = await request("/api/mensajes?resumen=1");
+      const before = localStorage.getItem(RESUMEN_KEY);
+      writeJson(RESUMEN_KEY, data.canales);
+      if (before !== JSON.stringify(data.canales)) emit("mensajes");
+      return data.canales;
+    } catch (error) {
+      if (error.status === 0) return mensajes.cachedResumen();
+      throw error;
+    }
+  },
+  // Total de mensajes sin leer (para un globito en el menú).
+  sinLeer() {
+    return mensajes.cachedResumen().reduce((n, c) => n + (c.sinLeer || 0), 0);
+  },
+  cached(canal) {
+    return readJson(MSJ_KEY(canal), []);
+  },
+  // Mensajes del canal en orden cronológico. Pide solo los nuevos y los suma a los guardados.
+  async list(canal) {
+    const previos = mensajes.cached(canal);
+    const desde = previos.length ? previos[previos.length - 1].creadoEn : "";
+    const params = new URLSearchParams({ canal });
+    if (desde) params.set("desde", desde);
+    try {
+      const data = await request(`/api/mensajes?${params}`);
+      if (!data.mensajes.length && desde) return previos;
+      const byId = new Map(previos.map((m) => [m.id, m]));
+      data.mensajes.forEach((m) => byId.set(m.id, m));
+      const lista = [...byId.values()].sort((a, b) => String(a.creadoEn).localeCompare(String(b.creadoEn))).slice(-200);
+      writeJson(MSJ_KEY(canal), lista);
+      emit(`mensajes:${canal}`);
+      return lista;
+    } catch (error) {
+      if (error.status === 0) return previos;
+      throw error;
+    }
+  },
+  // opts: { tipo: "texto"|"aviso"|"foto", adjuntoId, perroId, perroNombre }
+  // Para avisarle al cliente de un perro sin conocer el cliente: enviar("cliente", texto, { tipo: "aviso", perroId }).
+  // Necesita señal: si no hay, lanza ApiError(0) para que la pantalla muestre "No se envió".
+  async enviar(canal, texto, opts = {}) {
+    const { mensaje } = await request("/api/mensajes", { method: "POST", body: { canal, texto, tipo: opts.tipo || "texto", adjuntoId: opts.adjuntoId, perroId: opts.perroId, perroNombre: opts.perroNombre } });
+    const lista = mensajes.cached(mensaje.canal);
+    if (lista.length || mensaje.canal === canal) {
+      writeJson(MSJ_KEY(mensaje.canal), [...lista.filter((m) => m.id !== mensaje.id), mensaje].slice(-200));
+      emit(`mensajes:${mensaje.canal}`);
+    }
+    return mensaje;
+  },
+  async marcarLeido(canal) {
+    const data = await request("/api/mensajes", { method: "POST", body: { canal, leido: true } });
+    const resumen = mensajes.cachedResumen();
+    const item = resumen.find((c) => c.canal === canal);
+    if (item && item.sinLeer) {
+      item.sinLeer = 0;
+      item.leidoHasta = data.leidoHasta;
+      writeJson(RESUMEN_KEY, resumen);
+      emit("mensajes");
+    }
+    return data.leidoHasta;
+  },
+  // Gente del equipo para abrir un directo: [{ usuario, nombre, rol }] (no para clientes).
+  async contactos() {
+    return (await request("/api/mensajes?contactos=1")).contactos;
+  },
+  // watch(canal): refresca el chat cada 10 s SOLO mientras está abierto y la pestaña visible.
+  // watch() sin canal: refresca el resumen cada 60 s (5 min con el almacenamiento provisorio).
+  // Devuelve una función para cortar: llamala al cerrar el chat.
+  watch(canal) {
+    const key = canal || "_resumen";
+    if (msjWatchers.has(key)) return msjWatchers.get(key);
+    const tick = () => {
+      if (document.visibilityState !== "visible" || !session.token()) return;
+      (canal ? mensajes.list(canal) : mensajes.resumen()).catch(() => {});
+    };
+    tick();
+    ticks.add(tick);
+    let timer = setInterval(tick, canal ? CHAT_MS : RESUMEN_MS);
+    let reprogramar = canal ? null : setTimeout(() => {
+      clearInterval(timer);
+      timer = setInterval(tick, RESUMEN_MS);
+    }, 3000);
+    const stop = () => {
+      ticks.delete(tick);
+      clearInterval(timer);
+      clearTimeout(reprogramar);
+      msjWatchers.delete(key);
+    };
+    msjWatchers.set(key, stop);
+    return stop;
+  },
+  watchResumen() {
+    return mensajes.watch();
+  },
+};

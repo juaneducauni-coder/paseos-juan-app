@@ -27,6 +27,7 @@ import { coordinatorShell, coordinatorDashboard, registerCoordinadorEvents } fro
 import { adminShell, adminDashboard, registerAdminEvents } from "./views/admin.js";
 
 const app = document.querySelector("#app");
+let entrandoCliente = null;
 
 function normalizePath(pathname) {
   return pathname.replace(/\/+$/, "") || "/";
@@ -116,6 +117,29 @@ export function render() {
     session.clear();
     app.innerHTML = loginPage();
     hydrateAfterRender();
+    return;
+  }
+
+  // Enlace del portal del cliente: /c/<token> → entra como cliente y va a /cliente.
+  const enlaceCliente = path.match(/^\/c\/([A-Za-z0-9_-]{20,100})$/);
+  if (enlaceCliente) {
+    app.innerHTML = `<main class="dashboard"><p role="status" aria-live="polite" id="acceso-cliente">Entrando…</p></main>`;
+    // La sesión nueva vuelve a dibujar la página: se entra una sola vez por enlace.
+    if (entrandoCliente === enlaceCliente[1]) return;
+    entrandoCliente = enlaceCliente[1];
+    session.loginCliente(enlaceCliente[1])
+      .finally(() => {
+        entrandoCliente = null;
+      })
+      .then(() => {
+        window.history.replaceState({}, "", "/cliente");
+        render();
+      })
+      .catch((error) => {
+        window.history.replaceState({}, "", "/");
+        const aviso = document.getElementById("acceso-cliente");
+        if (aviso) aviso.textContent = error.message || "No se pudo entrar con este enlace.";
+      });
     return;
   }
 
