@@ -517,7 +517,7 @@ function detectRouteChanges(sel, routes) {
     if (added.length) parts.push(`+ ${listNames(added)}`);
     if (removed.length) parts.push(`− ${listNames(removed)}`);
     if (moved.length) parts.push(`hora: ${listNames(moved)}`);
-    if (parts.length) changes.push(`${routes.length > 1 ? `${route.ruta}: ` : ""}${parts.join(" · ")}`);
+    if (parts.length) changes.push(`${routes.length > 1 ? `${routeName(route.ruta)}: ` : ""}${parts.join(" · ")}`);
   });
   if (!changes.length) return;
   view.routeChange = { text: changes.join(". "), time: sel.now.time };
@@ -999,6 +999,7 @@ export function walkerDashboard() {
   const ctx = routeContext(sel, plan);
   const { stops } = ctx;
   headerInfo = headerFor(ctx);
+  if (view.toast) requestAnimationFrame(placeToast);
 
   const screens = { ruta: RouteScreen, equipo: EquipScreen, incidente: IncidentScreen, mas: MoreScreen };
   const screen = (screens[view.tab] || RouteScreen)(ctx);
@@ -1033,6 +1034,15 @@ function firstWord(name) {
   return String(name || "").trim().split(/\s+/)[0] || "";
 }
 
+// Nombre de la ruta para mostrar: "PJ_1M" → "Ruta 1" (el código queda solo en los datos).
+// Con turno ("Ruta 1 · Mañana") donde el turno no está a la vista.
+function routeName(code, { withShift = false } = {}) {
+  const text = String(code || "").trim();
+  const match = /^PJ_(\d+)([MT])$/i.exec(text);
+  if (!match) return text;
+  return `Ruta ${match[1]}${withShift ? ` · ${match[2].toUpperCase() === "M" ? "Mañana" : "Tarde"}` : ""}`;
+}
+
 // Encabezado: el nombre (o "Con <paseador>") en una línea y la ruta en un chip aparte.
 function headerFor({ sel, plan, names }) {
   const helping = helperRoute(plan);
@@ -1041,13 +1051,14 @@ function headerFor({ sel, plan, names }) {
   if (helping) {
     const partner = firstWord(personName(helping.paseador, names));
     title = partner ? `Con ${partner}` : title;
-    route = helping.ruta;
+    route = routeName(helping.ruta);
   } else if (plan.assigned) {
-    route = plan.mine.map((item) => item.ruta).join(" + ");
+    route = plan.mine.map((item) => routeName(item.ruta)).join(" + ");
   } else if (plan.shown.length === 1) {
-    route = plan.shown[0].ruta;
+    route = routeName(plan.shown[0].ruta);
   }
-  return { title, route, shift: sel.isToday ? sel.shift : `${sel.day.slice(0, 3)} · ${sel.shift}` };
+  // Otro día: la pastilla dice el día entero (el turno está en el título de la pantalla).
+  return { title, route, shift: sel.isToday ? sel.shift : sel.day, spoken: sel.isToday ? sel.shift : `${sel.day}, ${sel.shift.toLowerCase()}` };
 }
 
 function WalkerHeader() {
@@ -1065,7 +1076,7 @@ function WalkerHeader() {
         ${headerInfo.route ? `<span class="pw-head-route">${ic("route", "pw-icon pw-icon--xs")}${esc(headerInfo.route)}</span>` : ""}
       </p>
       ${pending ? `<span class="pw-head-sync" role="img" aria-label="${pending} ${pending === 1 ? "cambio espera" : "cambios esperan"} señal">${ic("uploadCloud", "pw-icon pw-icon--sm")}${pending}</span>` : ""}
-      <button class="pw-head-chip" type="button" data-pw-shift-menu aria-label="${esc(`Turno: ${headerInfo.shift}. Cambiar día o turno`)}">${esc(headerInfo.shift)}<span aria-hidden="true">▾</span></button>
+      <button class="pw-head-chip" type="button" data-pw-shift-menu aria-label="${esc(`Turno: ${headerInfo.spoken || headerInfo.shift}. Cambiar día o turno`)}">${esc(headerInfo.shift)}<span aria-hidden="true">▾</span></button>
       <button class="pw-head-out" type="button" data-pw-logout>${ic("logOut", "pw-icon pw-icon--sm")}<span>Salir</span></button>
     </header>
   `;
@@ -1151,6 +1162,29 @@ function showToast(text, undo = null) {
 function updateToast() {
   const slot = document.querySelector("[data-pw-toast-slot]");
   if (slot) slot.innerHTML = ToastInner();
+  placeToast();
+}
+
+// El aviso nunca tapa los botones de abajo de la pantalla (Siguiente/Enviar, "Listo"): si quedan
+// debajo, sube arriba de ellos. Pegados abajo ya los contempla el CSS; esto cubre cuando están en el medio.
+function placeToast() {
+  const slot = document.querySelector("[data-pw-toast-slot]");
+  if (!slot) return;
+  slot.style.removeProperty("bottom");
+  const toast = slot.firstElementChild?.getBoundingClientRect();
+  if (!toast?.height) return;
+  const hit = [...document.querySelectorAll(".pw-main .pw-wizard-nav, .pw-main .pw-equip-foot")]
+    .map((element) => element.getBoundingClientRect())
+    .filter((box) => box.height && box.top < toast.bottom && box.bottom > toast.top);
+  if (!hit.length) return;
+  const top = Math.min(...hit.map((box) => box.top));
+  slot.style.bottom = `${Math.max(0, Math.round(window.innerHeight - top + 8))}px`;
+}
+
+// Al cambiar de pestaña o de pantalla el aviso se va (si no, tapa los botones de la otra pantalla).
+function clearToast() {
+  clearTimeout(toastTimer);
+  view.toast = null;
 }
 
 // ---------- pantalla: Ruta ----------
@@ -1183,7 +1217,7 @@ function RouteScreen(ctx) {
         ${NextList(queue, ctx)}
         ${DoneList(queue, ctx)}
       ` : `${EmptyRoute(sel, plan)}${notices.length ? NoticeList(notices) : ""}`}
-      ${plan.fromPlanilla ? `<p class="pw-source">${ic("alertCircle", "pw-icon pw-icon--sm")}Ruta de la planilla: falta que la confirme el coordinador.</p>` : ""}
+      ${plan.fromPlanilla ? `<p class="pw-source">${ic("alertCircle", "pw-icon pw-icon--sm")}Falta que el coordinador confirme la ruta.</p>` : ""}
     </section>
   `;
 }
@@ -1232,7 +1266,7 @@ function RoutePicker(sel, plan) {
     const other = plan.elsewhere[0];
     parts.push(`
       <button class="pw-strip pw-strip--info" type="button" data-pw-shift="${other.turno}">
-        ${ic("route", "pw-icon")}<span>Tu ruta: <b>${esc(other.ruta)}</b> (${other.turno.toLowerCase()})</span>${ic("arrowRight", "pw-icon pw-icon--sm")}
+        ${ic("route", "pw-icon")}<span>Tu ruta: <b>${esc(routeName(other.ruta))}</b> (${other.turno.toLowerCase()})</span>${ic("arrowRight", "pw-icon pw-icon--sm")}
       </button>
     `);
   }
@@ -1243,7 +1277,7 @@ function RoutePicker(sel, plan) {
         <div class="pw-chip-row">
           ${plan.ofShift.map((route) => `
             <button type="button" class="pw-chip ${plan.picked === route.ruta ? "is-active" : ""}" data-pw-route="${esc(route.ruta)}" aria-pressed="${plan.picked === route.ruta}">
-              ${esc(route.ruta)}<small>${route.stops.length} ${route.stops.length === 1 ? "perro" : "perros"}</small>
+              ${esc(routeName(route.ruta))}<small>${route.stops.length} ${route.stops.length === 1 ? "perro" : "perros"}</small>
             </button>
           `).join("")}
           ${isHelper() ? "" : `<button type="button" class="pw-chip ${plan.picked ? "" : "is-active"}" data-pw-route="" aria-pressed="${!plan.picked}">Todas<small>${plan.ofShift.length}</small></button>`}
@@ -1282,7 +1316,7 @@ function AlertStrip({ sel, plan, stops }, { skipEquip = false } = {}) {
       `);
     }
   }
-  const notes = plan.shown.filter((route) => route.notas).map((route) => `${plan.shown.length > 1 ? `${route.ruta}: ` : ""}${route.notas}`);
+  const notes = plan.shown.filter((route) => route.notas).map((route) => `${plan.shown.length > 1 ? `${routeName(route.ruta)}: ` : ""}${route.notas}`);
   const list = items.slice(0, 3);
   const water = sel.isToday && !isHelper() ? groupWater(sel, plan) : "";
   if (water) list.push(water);
@@ -1474,7 +1508,7 @@ function Hero(queue, ctx) {
       <div class="pw-hero-top">
         ${AvatarControl(dog, "xl", "hero")}
         <div class="pw-hero-info">
-          <p class="pw-hero-kicker">${kicker}${stops.length && isMulti(ctx) ? ` · ${esc(stop.route.ruta)}` : ""}</p>
+          <p class="pw-hero-kicker">${kicker}${stops.length && isMulti(ctx) ? ` · ${esc(routeName(stop.route.ruta))}` : ""}</p>
           <h2 class="pw-hero-name" id="pw-hero-name">
             <button class="pw-link" type="button" data-pw-open="${esc(dog.id)}" data-pw-where="hero-name" ${dog.id ? "" : "disabled"}>${esc(dog.name)}</button>
           </h2>
@@ -1517,7 +1551,7 @@ function RowCard(entry, ctx, { actions = true } = {}) {
       ${AvatarControl(dog, "md", "row")}
       ${dog.id ? `<button class="pw-row-body" type="button" data-pw-open="${esc(dog.id)}" data-pw-where="row">` : `<div class="pw-row-body">`}
         <span class="pw-row-name">${esc(dog.name)}</span>
-        <span class="pw-row-meta"><b class="pw-row-time">${esc(entry.time || "--:--")}</b>${multi ? `<small>${esc(stop.route.ruta)}</small>` : ""}${StatusChip(entry, sel)}</span>
+        <span class="pw-row-meta"><b class="pw-row-time">${esc(entry.time || "--:--")}</b>${multi ? `<small>${esc(routeName(stop.route.ruta))}</small>` : ""}${StatusChip(entry, sel)}</span>
         <span class="pw-row-chips">${WalkChips(entry, names, { compact: true })}${SafetyChips(dog, routePartners(stop, stops), { compact: true })}</span>
       ${dog.id ? "</button>" : "</div>"}
       ${showAction ? `<div class="pw-row-act">${StepButton(entry, "row", { size: "row" })}</div>` : ""}
@@ -1597,7 +1631,7 @@ function HelperRoutePick({ sel, plan, names }) {
       ${PlanningBar(sel)}
       ${other ? `
         <button class="pw-strip pw-strip--info" type="button" data-pw-shift="${other.turno}">
-          ${ic("route", "pw-icon")}<span>Tu ruta: <b>${esc(other.ruta)}</b> (${other.turno.toLowerCase()})</span>${ic("arrowRight", "pw-icon pw-icon--sm")}
+          ${ic("route", "pw-icon")}<span>Tu ruta: <b>${esc(routeName(other.ruta))}</b> (${other.turno.toLowerCase()})</span>${ic("arrowRight", "pw-icon pw-icon--sm")}
         </button>
       ` : ""}
       <div class="pw-route-cards" role="group" aria-labelledby="pw-tab-title">
@@ -1606,7 +1640,7 @@ function HelperRoutePick({ sel, plan, names }) {
           const first = route.stops.find((stop) => stop.hora)?.hora || "";
           return `
             <button type="button" class="pw-route-card" data-pw-route="${esc(route.ruta)}">
-              <span class="pw-route-card-name">${ic("route", "pw-icon")}${esc(route.ruta)}</span>
+              <span class="pw-route-card-name">${ic("route", "pw-icon")}${esc(routeName(route.ruta))}</span>
               <span class="pw-route-card-meta">${walker ? `Con <b>${esc(walker)}</b>` : "Paseador: Pendiente de confirmar"}</span>
               <span class="pw-route-card-meta">${ic("pawPrint", "pw-icon pw-icon--sm")}${route.stops.length} ${route.stops.length === 1 ? "perro" : "perros"}${first ? ` · desde ${esc(first)}` : ""}</span>
             </button>
@@ -1776,9 +1810,14 @@ function ReturnPicker(groups) {
   if (!groups.returnable.length) return "";
   const count = groups.picks.length;
   const full = groups.room === 0;
+  // Integrar se recomienda pero no es obligatorio: si aparece uno sin integrar, se aclara.
+  const loose = groups.returnable.filter((item) => !item.state.record?.horaIntegrado).map((item) => item.stop.dog.name);
+  const looseHint = loose.length
+    ? `<p class="pw-source">${ic("help", "pw-icon pw-icon--sm")}<span>${esc(listNames(loose))} ${loose.length === 1 ? "todavía no está integrado: se puede devolver igual" : "todavía no están integrados: se pueden devolver igual"}.</span></p>`
+    : "";
   return `
     <section class="pw-hsec" aria-labelledby="pw-ret-title">
-      <h2 class="pw-list-title" id="pw-ret-title">Devolver <span class="pw-max">máx. ${MAX_RETURN}</span></h2>
+      <h2 class="pw-list-title" id="pw-ret-title">Devolver <span class="pw-max">Hasta ${MAX_RETURN}</span></h2>
       <div class="pw-dog-grid" role="group" aria-labelledby="pw-ret-title">
         ${groups.returnable.map(({ stop }) => {
           const { dog } = stop;
@@ -1792,6 +1831,7 @@ function ReturnPicker(groups) {
           `;
         }).join("")}
       </div>
+      ${looseHint}
       <p class="pw-status ${view.helper.status ? "is-warn" : ""}" role="status" data-pw-helper-status>${esc(view.helper.status)}</p>
       <button class="pw-btn pw-btn--go pw-btn--xl" type="button" data-pw-return-go ${count && loaded.ready ? "" : 'aria-disabled="true"'}>${ic("arrowRight", "pw-icon")}Voy a entregar${count ? ` (${count})` : ""}</button>
     </section>
@@ -1880,7 +1920,7 @@ function CureScreen(ctx) {
 // No hay teléfonos del equipo cargados (Pendiente de confirmar): el enlace abre WhatsApp y se elige el chat.
 function HerdScreen(ctx) {
   const route = helperRoute(ctx.plan) || ctx.plan.shown[0];
-  const text = `Paseos Juan: cruce con otra manada o un perro suelto${route ? ` (ruta ${route.ruta})` : ""}. Dividamos los perros y pasemos de a grupos.`;
+  const text = `Paseos Juan: cruce con otra manada o un perro suelto${route ? ` (${routeName(route.ruta, { withShift: true })})` : ""}. Dividamos los perros y pasemos de a grupos.`;
   return `
     <section class="pw-screen pw-herd" aria-labelledby="pw-tab-title">
       <div class="pw-title-row">
@@ -2135,7 +2175,7 @@ function IncidentScreen({ sel }) {
         </div>
       </fieldset>
       <label class="pw-field">Detalle <small>(opcional)</small>
-        <input type="text" maxlength="160" data-pw-field="detalle" value="${esc(draft.detalle)}" placeholder="Ej.: tiró de la correa y gruñó" autocomplete="off" />
+        <input type="text" maxlength="160" data-pw-field="detalle" value="${esc(draft.detalle)}" placeholder="Por ejemplo: tiró y gruñó" autocomplete="off" />
       </label>
       ${speechOk() ? `<button class="pw-btn pw-btn--ghost pw-btn--block pw-voice-btn" type="button" data-pw-dictar aria-pressed="false">${ic("message", "pw-icon")}<span data-pw-dictar-text>Contarlo con la voz</span></button>` : ""}
       <button class="pw-btn pw-btn--ghost pw-btn--block" type="button" data-pw-inc-none>No hubo incidente · volver a la ruta</button>
@@ -2158,7 +2198,7 @@ function IncidentScreen({ sel }) {
           }).join("")}
           <button type="button" class="pw-dog-pick ${draft.dogs.includes(EXTERNAL_DOG) ? "is-on" : ""}" data-pw-inc-dog="${EXTERNAL_DOG}" aria-pressed="${draft.dogs.includes(EXTERNAL_DOG)}">
             <span class="pw-ava pw-ava--md pw-ava--ext" aria-hidden="true">${ic("help", "pw-icon")}</span>
-            <span>Otro perro</span>
+            <span class="pw-dog-pick-wrap">Otro perro</span>
             <span class="pw-dog-pick-mark" aria-hidden="true">${draft.dogs.includes(EXTERNAL_DOG) ? ic("check", "pw-icon pw-icon--sm") : ""}</span>
           </button>
         </div>
@@ -2167,7 +2207,7 @@ function IncidentScreen({ sel }) {
   } else {
     body = `
       <fieldset class="pw-q">
-        <legend>¿Hubo lesión?</legend>
+        <legend>¿Hubo lesión? <small class="pw-req">(obligatorio)</small></legend>
         <div class="pw-seg">
           ${INJURY_OPTIONS.map((option) => `
             <button type="button" class="pw-pick pw-pick--big ${option === "Sí" ? "pw-pick--danger" : ""} ${draft.lesiones === option ? "is-on" : ""}" data-pw-inc-lesion="${option}" aria-pressed="${draft.lesiones === option}">${option}</button>
@@ -2176,7 +2216,7 @@ function IncidentScreen({ sel }) {
       </fieldset>
       ${draft.lesiones === "Sí" ? `<p class="pw-strip pw-strip--danger">${ic("heartPulse", "pw-icon")}<span>La veterinaria va antes que el reporte. Avisá a Juan.</span></p>` : ""}
       <fieldset class="pw-q">
-        <legend>Riesgo</legend>
+        <legend>Riesgo <small class="pw-req">(obligatorio)</small></legend>
         <div class="pw-seg">
           ${RISK_LEVELS.map((level) => `
             <button type="button" class="pw-pick pw-pick--risk-${plain(level)} ${draft.riesgo === level ? "is-on" : ""}" data-pw-inc-riesgo="${level}" aria-pressed="${draft.riesgo === level}">${level}</button>
@@ -2191,9 +2231,9 @@ function IncidentScreen({ sel }) {
           <label class="pw-field">Hora<input type="time" data-pw-field="hora" value="${esc(draft.hora || sel.now.time)}" /></label>
           <label class="pw-field">Lugar<input type="text" data-pw-field="lugar" value="${esc(draft.lugar)}" placeholder="Plaza, esquina" autocomplete="off" /></label>
         </div>
-        <label class="pw-field">Antes<textarea data-pw-field="antes" rows="2" placeholder="Ej.: pasó un perro suelto">${esc(draft.antes)}</textarea></label>
-        <label class="pw-field">Qué hiciste<textarea data-pw-field="accion" rows="2" placeholder="Ej.: crucé la calle y lo senté">${esc(draft.accion)}</textarea></label>
-        <label class="pw-field">Después<textarea data-pw-field="despues" rows="2" placeholder="Ej.: se calmó en 1 minuto">${esc(draft.despues)}</textarea></label>
+        <label class="pw-field">Antes<textarea data-pw-field="antes" rows="2" placeholder="Por ejemplo: pasó un perro suelto">${esc(draft.antes)}</textarea></label>
+        <label class="pw-field">Qué hiciste<textarea data-pw-field="accion" rows="2" placeholder="Por ejemplo: crucé la calle y lo senté">${esc(draft.accion)}</textarea></label>
+        <label class="pw-field">Después<textarea data-pw-field="despues" rows="2" placeholder="Por ejemplo: se calmó en 1 minuto">${esc(draft.despues)}</textarea></label>
         <fieldset class="pw-q">
           <legend>Protocolo hecho</legend>
           <div class="pw-chip-grid">
@@ -2217,6 +2257,7 @@ function IncidentScreen({ sel }) {
         ${INCIDENT_STEPS.map((label, index) => `<li class="${index + 1 < step ? "is-done" : ""} ${index + 1 === step ? "is-on" : ""}" ${index + 1 === step ? 'aria-current="step"' : ""}><span>${index + 1}</span>${label}</li>`).join("")}
       </ol>
       ${body}
+      ${step === 3 ? IncidentNeeds(draft) : ""}
       <p class="pw-status ${warn ? "is-warn" : ""}" role="status" data-pw-incident-status>${esc(view.incidentStatus)}</p>
       <div class="pw-wizard-nav">
         ${step > 1 ? `<button class="pw-btn pw-btn--ghost" type="button" data-pw-inc-back>${ic("arrowLeft", "pw-icon")}Atrás</button>` : `
@@ -2230,6 +2271,13 @@ function IncidentScreen({ sel }) {
       </div>
     </section>
   `;
+}
+
+// Lo que falta para poder enviar, a la vista antes de tocar "Enviar" (nada viene marcado de antemano).
+function IncidentNeeds(draft) {
+  const missing = [!draft.lesiones && "si hubo lesión", !draft.riesgo && "el riesgo"].filter(Boolean);
+  if (!missing.length) return "";
+  return `<p class="pw-need">${ic("alertCircle", "pw-icon pw-icon--sm")}<span>Para enviar, marcá ${missing.join(" y ")}.</span></p>`;
 }
 
 function IncidentSent(draft, sel) {
@@ -2296,7 +2344,7 @@ function MoreScreen({ sel, plan, stops, names }) {
     if (route.ayudante && !isMe(route.ayudante)) people.push(["Ayudante", personName(route.ayudante, names)]);
   });
   const facts = [
-    ["Ruta", plan.shown.map((route) => route.ruta).join(", ") || "Sin ruta"],
+    ["Ruta", plan.shown.map((route) => routeName(route.ruta, { withShift: true })).join(", ") || "Sin ruta"],
     ["Perros", String(stops.length)],
     ["Horario", hours],
     ["Supervisa", supervisor],
@@ -2351,7 +2399,7 @@ function MoreScreen({ sel, plan, stops, names }) {
           <li>Lo que marcás lo ven ${isHelper() ? "el paseador" : "tu ayudante"}, Juan y quien supervisa.</li>
           <li>Sin señal: seguí marcando, se envía solo. La foto del paseo se sube sola al volver la señal; la foto de la ficha necesita señal.</li>
           <li>Categoría: <b>SIN EVALUAR</b> salvo otra. ${esc(CATEGORIES["SIN EVALUAR"])}</li>
-          <li>Rutas: las arma el coordinador. Base: ${esc(BUSINESS_INFO.officialSources.routes)} (12/11/2026).</li>
+          <li>Rutas: las arma el coordinador.</li>
         </ul>
       </div>
 
@@ -2371,13 +2419,14 @@ function routeHours(routes) {
 }
 
 function sourceText(route, names) {
+  const name = routeName(route.ruta);
   if (route.fuente === "dia") {
     const who = route.record.actualizadoPor ? whoName(route.record.actualizadoPor, names) : "";
     const time = route.record.actualizadoEn ? timeAR(route.record.actualizadoEn) : "";
-    return `${route.ruta}: cambio del día${[who, time].filter(Boolean).length ? ` · ${[who, time].filter(Boolean).join(" ")}` : ""}`;
+    return `${name}: cambio del día${[who, time].filter(Boolean).length ? ` · ${[who, time].filter(Boolean).join(" ")}` : ""}`;
   }
-  if (route.fuente === "plantilla") return `${route.ruta}: plantilla semanal`;
-  return `${route.ruta}: planilla RPJ, sin confirmar`;
+  if (route.fuente === "plantilla") return `${name}: ruta de la semana`;
+  return `${name}: rutas de Paseos Juan, falta que el coordinador la confirme`;
 }
 
 // ---------- mensaje de incidente ----------
@@ -2396,7 +2445,7 @@ function validateStep(draft, step) {
   const word = texts.match(FORBIDDEN_WORDS)?.[0];
   if (word) {
     const field = ["detalle", "antes", "accion", "despues", "lugar"].find((name) => FORBIDDEN_WORDS.test(draft[name] || "")) || "detalle";
-    return { text: `Cambiá “${word}” por lo que viste. Ej.: “gruñó y mostró los dientes”.`, focus: `[data-pw-field="${field}"]`, word };
+    return { text: `Cambiá “${word}” por lo que viste. Por ejemplo: “gruñó y mostró los dientes”.`, focus: `[data-pw-field="${field}"]`, word };
   }
   return null;
 }
@@ -2605,6 +2654,7 @@ function goTab(tab) {
   view.tab = tab;
   view.detailId = "";
   view.confirmClear = false;
+  clearToast();
   render();
   window.scrollTo({ top: 0, behavior: "auto" });
   document.getElementById("pw-tab-title")?.focus({ preventScroll: true });
@@ -2617,6 +2667,7 @@ function openHelperPanel({ cure = null, herd = false }) {
   view.helper.cure = cure;
   view.helper.herd = herd;
   view.helper.status = "";
+  clearToast();
   render();
   window.scrollTo({ top: 0, behavior: "auto" });
   document.getElementById("pw-tab-title")?.focus({ preventScroll: true });
@@ -3170,6 +3221,7 @@ function handlePaseadorClick(event) {
     const shift = shiftButton.dataset.pwShift;
     view.shift = shift === shiftByClock(nowAR()) && !view.day ? null : shift;
     if (view.tab !== "mas") {
+      if (view.tab !== "ruta") clearToast();
       view.tab = "ruta";
       rerender("#pw-tab-title");
     } else {

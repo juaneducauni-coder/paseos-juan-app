@@ -233,11 +233,11 @@ html[data-theme="dark"] .pw-logo-dark {
   display: inline-flex;
   max-width: 100%;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   overflow: hidden;
   border: 1px solid var(--pw-line);
   border-radius: 999px;
-  padding: 0 8px;
+  padding: 0 6px;
   color: var(--pw-muted);
   font-size: 0.8rem;
   font-weight: 800;
@@ -1427,6 +1427,17 @@ body:has(.pw-shell.has-sheet) {
   pointer-events: none;
 }
 
+/* Con botones pegados abajo (Siguiente/Enviar del incidente, "Listo" del equipo) el aviso va
+   arriba de ellos: nunca los tapa. */
+.pw-shell:has(.pw-wizard-nav) .pw-toast-slot,
+.pw-shell:has(.pw-equip-foot) .pw-toast-slot {
+  bottom: calc(var(--pw-bar-h) + var(--pw-safe) + 88px);
+}
+
+.pw-shell:has(.pw-equip-foot .pw-ready) .pw-toast-slot {
+  bottom: calc(var(--pw-bar-h) + var(--pw-safe) + 140px);
+}
+
 .pw-toast {
   display: flex;
   width: 100%;
@@ -1742,6 +1753,30 @@ body:has(.pw-shell.has-sheet) {
   font-weight: 800;
 }
 
+/* "(obligatorio)" al lado de la pregunta: se ve antes de tocar "Enviar". */
+.pw-req {
+  color: var(--pw-warn-ink);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.pw-need {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 10px 14px;
+  background: var(--pw-warn-bg);
+  color: var(--pw-warn-ink);
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.pw-need .pw-icon {
+  flex: 0 0 auto;
+}
+
 .pw-chip-grid {
   display: flex;
   flex-wrap: wrap;
@@ -1830,6 +1865,13 @@ body:has(.pw-shell.has-sheet) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* "Otro perro": el texto entero, en dos líneas si hace falta (no "Otro p…"). */
+.pw-dog-pick > span.pw-dog-pick-wrap {
+  overflow: visible;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .pw-dog-pick.is-on {
