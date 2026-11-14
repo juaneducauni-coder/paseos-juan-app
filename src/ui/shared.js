@@ -110,10 +110,38 @@ export function getStoredObject(key) {
 }
 
 export function shell(content, activeRole = "visitante") {
+  // Cliente con sesión en su página: encabezado mínimo, sin el menú de la página pública.
+  if (activeRole === "cliente" && session.user()?.rol === "cliente") {
+    return `
+      ${ClientHeader()}
+      ${SmoothScrollWrapper(content)}
+    `;
+  }
   return `
     ${HeaderMinimal(activeRole)}
     ${MobileMenu()}
     ${SmoothScrollWrapper(content)}
+  `;
+}
+
+// Encabezado de la página del cliente: logo + "Mi página" y el botón de tema y movimiento
+// (abre el mismo panel de accesibilidad; el botón flotante no se muestra en esta página).
+function ClientHeader() {
+  return `
+    <header class="topbar topbar-cliente">
+      <a class="brand" href="/cliente" data-link aria-label="Mi página de Paseos Juan">
+        <span class="brand-mark">
+          <img src="/paseos-juan-logo.png" alt="" />
+        </span>
+        <span>
+          <strong>Mi página</strong>
+          <small>Paseos Juan</small>
+        </span>
+      </a>
+      <button class="topbar-a11y" type="button" data-a11y-toggle aria-controls="a11y-panel">
+        ${icon("eye", "topbar-a11y-icon")}<span>Tema y movimiento</span>
+      </button>
+    </header>
   `;
 }
 

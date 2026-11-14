@@ -279,7 +279,9 @@ function SummerShowcaseSection() {
         <h2 id="verano-titulo">Viví el verano con la manada</h2>
         <p>En verano salimos con agua en ruta y registramos cada paseo con una foto.</p>
       </div>
-      <div class="summer-gallery">
+      <details class="landing-fold summer-fold">
+        <summary>${icon("camera", "pill-icon")}Ver fotos de la manada ${icon("chevronDown", "landing-fold-chevron")}</summary>
+        <div class="summer-gallery">
         ${summerHighlights.map((item, idx) => `
           <article class="summer-card summer-card--blob-${idx + 1}">
             <div class="summer-media-blob">
@@ -293,7 +295,8 @@ function SummerShowcaseSection() {
             </div>
           </article>
         `).join("")}
-      </div>
+        </div>
+      </details>
     </section>
   `;
 }
@@ -338,6 +341,8 @@ function AlliancesSection() {
 }
 
 function TermsAndPrivacySection() {
+  // Plegado para acortar la página; se abre solo si se llega con el enlace "Términos y privacidad".
+  const abierto = window.location.hash === "#terminos-privacidad";
   return `
     <section class="terms-section reveal" id="terminos-privacidad" aria-labelledby="terminos-titulo">
       <div class="terms-blob-box">
@@ -345,6 +350,8 @@ function TermsAndPrivacySection() {
           <p class="eyebrow">Transparencia y confianza</p>
           <h2 id="terminos-titulo">Términos del servicio y privacidad</h2>
         </div>
+        <details class="landing-fold terms-fold" ${abierto ? "open" : ""}>
+        <summary>${icon("fileText", "pill-icon")}Leer los términos ${icon("chevronDown", "landing-fold-chevron")}</summary>
         <div class="terms-columns">
           <article class="terms-item">
             <h3>${icon("shieldCheck")} Seguridad y admisión grupal</h3>
@@ -359,6 +366,7 @@ function TermsAndPrivacySection() {
             <p>Tus teléfonos, domicilio, datos de pago e indicaciones de salud se resguardan de forma privada únicamente para la operación del equipo autorizado de Paseos Juan y nunca se publican.</p>
           </article>
         </div>
+        </details>
       </div>
     </section>
   `;
