@@ -1273,7 +1273,7 @@ function PriorityList(priorities, done) {
   const rest = priorities.map((priority, index) => ({ priority, index })).filter((item) => item.priority !== next);
   if (!rest.length) return "";
   // En el celular Inicio quedaba muy largo: la primera prioridad ya está arriba ("Próximo paso")
-  // y las otras van plegadas. La cantidad queda a la vista, en rojo si alguna es urgente.
+  // y las otras van plegadas, salvo que alguna sea urgente. La cantidad queda a la vista.
   const pending = rest.filter(({ priority }) => !done.includes(priority.id));
   const urgent = pending.some(({ priority }) => priority.tone === "red");
   return Fold("prioridades", {
@@ -1281,6 +1281,8 @@ function PriorityList(priorities, done) {
     iconName: "flag",
     count: pending.length,
     tone: urgent ? "red" : pending.length ? "yellow" : "green",
+    // Si hay algo urgente (rojo), arranca abierto: lo urgente no queda escondido.
+    open: urgent,
     id: "adm-prioridades",
   }, `
       <ol class="adm-prios">
