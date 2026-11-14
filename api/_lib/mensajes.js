@@ -113,6 +113,20 @@ const cambio = (m) => String(m.actualizadoEn || m.creadoEn || "");
 
 // Mensajes de un canal en orden cronológico (los últimos MAX_LISTA), opcionalmente desde un ISO
 // (trae los creados o cambiados después: así llegan también los mensajes que borró el admin).
+const TOPE_LISTADO = 2000;
+const DIAS_HACIA_ATRAS = 90;
+
+// El id de cada mensaje lleva la fecha (canal_AAAAMMDDT…): se puede leer un día por vez.
+async function recientesPorDia(canal) {
+  const juntos = [];
+  const hoy = Date.now();
+  for (let i = 0; i < DIAS_HACIA_ATRAS && juntos.length < MAX_LISTA; i += 1) {
+    const dia = new Date(hoy - i * 24 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    juntos.push(...(await store.list("mensajes", `${canal}_${dia}`)));
+  }
+  return juntos;
+}
+
 export async function mensajesDe(canal, desde = "") {
   if (desde) {
     // Si el canal no tiene nada nuevo, no hace falta leer todos sus mensajes.
@@ -120,7 +134,11 @@ export async function mensajesDe(canal, desde = "") {
     const ultimoCambio = [indice?.ultimo?.creadoEn, indice?.actualizadoEn].filter(Boolean).sort().pop() || "";
     if (!ultimoCambio || ultimoCambio <= desde) return [];
   }
-  const lista = (await store.list("mensajes", `${canal}_`))
+  let todos = await store.list("mensajes", `${canal}_`);
+  // Algunos almacenamientos devuelven como mucho 2000 archivos, en orden alfabético (los más viejos
+  // primero). Si el canal llegó a ese tope, se leen los días más recientes de a uno, hacia atrás.
+  if (todos.length >= TOPE_LISTADO) todos = await recientesPorDia(canal);
+  const lista = todos
     .filter((m) => m.canal === canal && (!desde || cambio(m) > desde))
     .sort((a, b) => String(a.creadoEn).localeCompare(String(b.creadoEn)) || String(a.id).localeCompare(String(b.id)));
   return lista.slice(-MAX_LISTA);
