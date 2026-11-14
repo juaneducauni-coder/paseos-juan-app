@@ -985,7 +985,7 @@ function buildPriorities(live = liveData()) {
     const titleOf = (pedido) => pedido.titulo || pedido.tipo || "Pedido sin título";
     const sueltosNames = [...new Set(carnetsSueltos.map((archivo) => archivo.perroNombre || "perro sin nombre"))];
     const sueltosText = carnetsSueltos.length
-      ? `${count ? "Además, l" : "L"}${carnetsSueltos.length === 1 ? "legó 1 carnet de vacunas" : `legaron ${carnetsSueltos.length} carnets de vacunas`} por la web en las últimas 24 h (${listJoin(sueltosNames)}) de ${carnetsSueltos.length === 1 ? "un pedido que" : "pedidos que"} ya no ${carnetsSueltos.length === 1 ? "está" : "están"} como nuevo${carnetsSueltos.length === 1 ? "" : "s"}.`
+      ? `${count ? "Además, l" : "L"}${carnetsSueltos.length === 1 ? "legó 1 carnet de vacunas" : `legaron ${carnetsSueltos.length} carnets de vacunas`} por la web en las últimas 24 horas (${listJoin(sueltosNames)}) de ${carnetsSueltos.length === 1 ? "un pedido que" : "pedidos que"} ya no ${carnetsSueltos.length === 1 ? "está" : "están"} como nuevo${carnetsSueltos.length === 1 ? "" : "s"}.`
       : "";
     if (count) {
       const titles = pedidosNuevos.slice(0, 3).map((pedido) => `${titleOf(pedido)}${hasCarnet(pedido, live) ? " (con carnet)" : ""}`);
@@ -1272,9 +1272,17 @@ function PriorityList(priorities, done) {
   const next = priorities.find((priority) => !done.includes(priority.id));
   const rest = priorities.map((priority, index) => ({ priority, index })).filter((item) => item.priority !== next);
   if (!rest.length) return "";
-  return `
-    <section class="adm-block" aria-labelledby="adm-prio-title">
-      <h2 class="adm-h2" id="adm-prio-title">${next ? "Después" : "Prioridades"}</h2>
+  // En el celular Inicio quedaba muy largo: la primera prioridad ya está arriba ("Próximo paso")
+  // y las otras van plegadas. La cantidad queda a la vista, en rojo si alguna es urgente.
+  const pending = rest.filter(({ priority }) => !done.includes(priority.id));
+  const urgent = pending.some(({ priority }) => priority.tone === "red");
+  return Fold("prioridades", {
+    title: next ? "Otras prioridades" : "Prioridades",
+    iconName: "flag",
+    count: pending.length,
+    tone: urgent ? "red" : pending.length ? "yellow" : "green",
+    id: "adm-prioridades",
+  }, `
       <ol class="adm-prios">
         ${rest.map(({ priority, index }) => {
           const isDone = done.includes(priority.id);
@@ -1298,8 +1306,7 @@ function PriorityList(priorities, done) {
           `;
         }).join("")}
       </ol>
-    </section>
-  `;
+  `);
 }
 
 function Numbers(live) {
@@ -1582,7 +1589,7 @@ function PedidosFold(live) {
     iconName: "message",
     count: pedidosNuevos.length,
     tone: pedidosNuevos.length ? "blue" : "gray",
-    open: pedidosNuevos.length > 0,
+    // Plegado: las altas ya están en el próximo paso y los pedidos los responde el coordinador.
     id: "adm-pedidos",
   }, pedidosNuevos.length ? `
     <ul class="adm-list">
@@ -1908,10 +1915,16 @@ function Sheet(kind, title, body) {
 
 /* ---------- Plata (pagos: registro de apoyo, solo admin) ---------- */
 
-function monthLabel(ym, short = false) {
+// Mes completo, sin abreviar: "Noviembre de 2026". Para los botones de mes: "noviembre 2026".
+function monthLabel(ym, chip = false) {
   const [y, m] = String(ym).split("-").map(Number);
   if (!y || !m) return ym;
-  const text = new Intl.DateTimeFormat("es-AR", { month: short ? "short" : "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, 15)));
+  const date = new Date(Date.UTC(y, m - 1, 15));
+  if (chip) {
+    const mes = new Intl.DateTimeFormat("es-AR", { month: "long", timeZone: "UTC" }).format(date);
+    return `${mes} ${y}`;
+  }
+  const text = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" }).format(date);
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
@@ -1988,6 +2001,7 @@ function PlataTab(data, conta) {
       <h1 id="adm-title" tabindex="-1">Plata</h1>
       ${Help(`<p>Registro de apoyo para no olvidarte de nada. Fuente oficial: ${LIBRO}. Cada pago se pasa al Libro. Solo vos lo ves.</p>`, "Qué es Plata")}
     </div>
+    ${AliasBlock()}
     <p class="conta-apoyo">${CONTA_APOYO}</p>
     <div class="adm-seg conta-meses" role="group" aria-label="Mes">
       ${chips.map((m) => `<button class="adm-seg-item ${m === data.mes ? "is-on" : ""}" type="button" data-adm-pagos-mes="${m}" aria-pressed="${m === data.mes}">${m === "todos" ? "Todos" : esc(monthLabel(m, true))}</button>`).join("")}
@@ -2011,7 +2025,6 @@ function PlataTab(data, conta) {
       ${data.filtered.length > shown.length ? `<button class="adm-btn adm-btn--ghost adm-btn--block" type="button" data-adm-pagos-todos>Ver los ${data.filtered.length}</button>` : ""}
     ` : `<p class="adm-empty">Sin pagos en ${esc(mesText.toLowerCase())}.</p>`}
     ${data.deOtros.length ? `<p class="adm-row-meta">${plural(data.deOtros.length, "pago lo cargó", "pagos los cargó")} otro rol antes del cambio de roles (el coordinador ya no ve plata).</p>` : ""}
-    ${AliasBlock()}
     ${FinanceFold()}
   `;
 }
@@ -2506,7 +2519,7 @@ function PlanesView() {
     <ul class="adm-plans">
       ${REAL_PLANS.map((plan) => `
         <li class="adm-card adm-plan">
-          <div class="adm-plan-head"><strong>${plan.name}</strong><span class="adm-chip adm-chip--gray">${plan.walks} paseos/sem</span></div>
+          <div class="adm-plan-head"><strong>${plan.name}</strong><span class="adm-chip adm-chip--gray">${plan.walks} paseos por semana</span></div>
           <dl class="adm-plan-prices">
             ${SIZES.map((size) => `<div><dt>${size}</dt><dd>${formatPeso(plan.prices[size])}</dd></div>`).join("")}
           </dl>
@@ -2968,7 +2981,7 @@ function PerroCodigoField(perro, index, total) {
         </label>
         ${total > 1 ? `<button class="adm-btn adm-btn--ghost adm-btn--icon" type="button" data-adm-alta-quitar="${index}" aria-label="Quitar ${esc(nombre)}">${ico("x")}</button>` : ""}
       </div>
-      ${igual && igual.id !== normCodigo(perro.codigo) ? `<button class="adm-btn adm-btn--soft adm-btn--sm adm-btn--block" type="button" data-adm-alta-usar="${index}" data-adm-codigo="${esc(igual.id)}">¿Es ${esc(igual.name)} de la planilla? Usar ${esc(igual.id)}</button>` : ""}
+      ${igual ? `<button class="adm-btn adm-btn--soft adm-btn--sm adm-btn--block" type="button" data-adm-alta-usar="${index}" data-adm-codigo="${esc(igual.id)}" ${igual.id === normCodigo(perro.codigo) ? "hidden" : ""}>¿Es ${esc(igual.name)} de la planilla? Usar ${esc(igual.id)}</button>` : ""}
     </div>
   `;
 }
@@ -3173,7 +3186,10 @@ function AliasBlock() {
   const a = ui.alias;
   const d = drafts.alias;
   const pendiente = a.estado !== "cargando" && !a.alias;
-  return Fold("alias", { title: "Alias de pago", iconName: "wallet", open: a.estado === "listo" && !a.alias, id: "adm-alias" }, `
+  // Tarjeta abierta arriba de Plata: el alias se ve siempre, sin tener que abrir nada.
+  return `
+    <section class="adm-card adm-alias" id="adm-alias" tabindex="-1" aria-labelledby="adm-alias-title">
+    <h2 class="adm-h2" id="adm-alias-title">${ico("wallet")} Alias de pago</h2>
     <div class="adm-alias-now">
       <span class="adm-row-meta">Ahora</span>
       ${a.estado === "cargando" ? `<span class="adm-row-meta">Cargando…</span>` : pendiente ? `<span class="adm-chip adm-chip--yellow">${PENDIENTE}</span>` : `<strong class="adm-alias-value">${esc(a.alias)}</strong>`}
@@ -3191,7 +3207,8 @@ function AliasBlock() {
       ${MsgRegion("alias")}
       <button class="adm-btn adm-btn--primary adm-btn--block" type="submit" ${ui.savingAlias || a.estado === "cargando" ? "disabled" : ""}>${ico("check")} ${ui.savingAlias ? "Guardando…" : "Guardar alias"}</button>
     </form>
-  `);
+    </section>
+  `;
 }
 
 async function saveAlias(form) {
@@ -4148,9 +4165,14 @@ function handleDraftInput(event) {
   }
   const codigo = event.target.closest?.("[data-adm-alta-codigo]");
   if (codigo) {
-    const perro = drafts.alta.perros[Number(codigo.dataset.admAltaCodigo)];
+    // Solo se guarda el texto y se muestra u oculta la sugerencia en el lugar. Nunca se redibuja
+    // la hoja: al salir del campo, el primer toque en un día (o en el turno) se perdía.
+    // El código se revisa al aprobar.
+    const index = Number(codigo.dataset.admAltaCodigo);
+    const perro = drafts.alta.perros[index];
     if (perro) perro.codigo = codigo.value;
-    if (event.type === "change") rerender();
+    const usar = codigo.closest(".adm-alta-perro")?.querySelector(`[data-adm-alta-usar="${index}"]`);
+    if (usar) usar.hidden = usar.dataset.admCodigo === normCodigo(codigo.value);
     return;
   }
   const field = event.target.closest?.("[data-adm-draft]");
