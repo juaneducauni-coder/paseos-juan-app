@@ -35,3 +35,13 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - **E-049 Cliente con datos reales:** estado del paseo de hoy con foto, avisos, alias completo con "Copiar alias", comunidad, avisar ausencia; próximo paseo según sus días y turno.
 - **Supervisor:** ve la foto del paseo en la tarjeta del perro.
 - Pruebas: 41 del servidor OK, armado OK, recorrido en navegador sin fallas (incluye /manual y /mensajes).
+
+## 14/11/2026 — 00:37 (revisión de cada hora)
+
+- Auditoría de uso en el celular, rol por rol (agente independiente): un error real y varios detalles. Se repartieron en 4 arreglos en paralelo:
+  - **E-054 Admin:** arreglado el error del alta (se perdía el primer toque en un día y el cliente quedaba sin ese día); alias de pago arriba en Plata; meses completos; barra de abajo sólida; Inicio más corto (las prioridades urgentes quedan abiertas).
+  - **E-055 Coordinador:** las rutas de la planilla se ven y se editan de a una sin cargar todas; días y minutos completos; buscador más claro; equipo real en el editor; barra de guardar en un renglón.
+  - **E-057 Públicas y cliente:** precios en tarjetas en el celular (antes se cortaban); preguntas frecuentes más altas; portal del cliente con encabezado propio, "Tema y movimiento" y un solo "Cerrar sesión"; reglas de la comunidad plegadas; botón "Consultar" de la tienda en un renglón.
+  - **E-056 Paseador y supervisor:** en curso.
+- Pruebas: 41 del servidor OK, armado OK, recorrido sin fallas, portal del cliente revisado con captura.
+- Sigue: unir E-056 y una segunda auditoría corta.
