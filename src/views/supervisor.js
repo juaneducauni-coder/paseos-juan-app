@@ -114,6 +114,14 @@ const TOUCH_CALM_MS = 900;
 
 // ---------- Utilidades ----------
 
+// "PJ_1M" → "Ruta 1" (o "Ruta 1 · Mañana"): el código interno no se muestra en pantalla.
+function routeName(code, { withShift = false } = {}) {
+  const text = String(code || "").trim();
+  const match = /^PJ_(\d+)([MT])$/i.exec(text);
+  if (!match) return text;
+  return `Ruta ${match[1]}${withShift ? ` · ${match[2].toUpperCase() === "M" ? "Mañana" : "Tarde"}` : ""}`;
+}
+
 function esc(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -1006,7 +1014,7 @@ function shiftWarnings(routes) {
   const inactive = dogs.filter((dog) => dog.status !== "Activo");
   const review = dogs.filter((dog) => dog.review && dog.status === "Activo");
   const unevaluated = dogs.filter((dog) => dog.category === "SIN EVALUAR");
-  const noFile = routes.flatMap((route) => route.stops.filter((stop) => !stop.dog).map((stop) => `${stop.perroNombre} (${route.code})`));
+  const noFile = routes.flatMap((route) => route.stops.filter((stop) => !stop.dog).map((stop) => `${stop.perroNombre} (${routeName(route.code)})`));
   const warnings = [];
 
   if (pairs.length) {
@@ -1208,7 +1216,7 @@ function closureSummary(view, closureOverride) {
     `Rutas${fallback ? " (tomadas de la planilla RPJ)" : ""}:`,
     ...routes.map(
       (route) =>
-        `- ${route.code}: paseador ${personLabel(route.paseador) || PENDIENTE}${route.ayudante ? `, ayudante ${personLabel(route.ayudante)}` : ""} · ${plural(route.stops.length, "perro", "perros")}`,
+        `- ${routeName(route.code)}: paseador ${personLabel(route.paseador) || PENDIENTE}${route.ayudante ? `, ayudante ${personLabel(route.ayudante)}` : ""} · ${plural(route.stops.length, "perro", "perros")}`,
     ),
     `Cumplimiento: ${result.onTime.length} a tiempo · ${result.late.length} con atraso · ${result.noSale.length} no salieron (de ${result.items.length} previstos)`,
     `- Con atraso: ${result.late.length ? result.late.map(lateDetail).join("; ") : "ninguno"}`,
@@ -1622,7 +1630,7 @@ function whatsappText(view, route, items) {
   const counts = countLive(items);
   const lines = [
     `Hola${name ? ` ${name}` : ""}, te escribe ${user.nombre || "el supervisor"} (supervisión ${BUSINESS_INFO.name}).`,
-    `Ruta ${route.code}, turno ${shift.label.toLowerCase()} ${view.fechaLabel}: ${counts.entregado} entregados de ${items.length - counts.nosale}.`,
+    `${routeName(route.code)}, turno ${shift.label.toLowerCase()} ${view.fechaLabel}: ${counts.entregado} entregados de ${items.length - counts.nosale}.`,
   ];
   if (late.length) {
     lines.push(`Veo atrasados: ${late.map((item) => `${item.stop.perroNombre} (${item.status.kind === "demorada" ? "entrega demorada" : `retiro ${item.stop.hora}`}, ${item.status.label.replace(/^\D+/, "")})`).join("; ")}.`);
@@ -1834,7 +1842,7 @@ function DogCard(view, item, requests, showRoute = true) {
         ${Avatar(stop, domId)}
         <div class="sv-dog-main">
           <h3 class="sv-dog-name" id="sv-dog-name-${domId}">${esc(stop.perroNombre)}</h3>
-          ${showRoute ? `<p class="sv-dog-sub">${esc(route.code)}${walker ? ` · ${esc(walker)}` : ""}</p>` : ""}
+          ${showRoute ? `<p class="sv-dog-sub">${esc(routeName(route.code))}${walker ? ` · ${esc(walker)}` : ""}</p>` : ""}
           <p class="sv-dog-state"><span class="sv-state is-${status.tone}">${esc(status.label)}</span>${extraLate}</p>
         </div>
         <p class="sv-dog-time">
@@ -2055,7 +2063,7 @@ function RouteCard(view, route, byId) {
   return `
     <article class="sv-card sv-route" aria-labelledby="${titleId}">
       <header class="sv-route-head">
-        <h2 class="sv-h2" id="${titleId}">${esc(route.code)}</h2>
+        <h2 class="sv-h2" id="${titleId}">${esc(routeName(route.code))}</h2>
         <p class="sv-route-counts">
           <span class="sv-state is-neutral">${plural(route.stops.length, "perro", "perros")}</span>
           ${counts.atrasado ? `<span class="sv-state is-danger">${plural(counts.atrasado, "atrasado", "atrasados")}</span>` : ""}
@@ -2074,7 +2082,7 @@ function RouteCard(view, route, byId) {
         </a>
         ${RequestButton(route.code, "", "Cambio")}
       </div>
-      <ol class="sv-stops" aria-label="Perros de ${esc(route.code)} en orden">
+      <ol class="sv-stops" aria-label="Perros de ${esc(routeName(route.code))} en orden">
         ${items.map((item) => StopRow(route, item)).join("")}
       </ol>
       <p class="sv-source">${esc(routeSourceLabel(route))}${route.record.actualizadoEn && route.source !== "planilla" ? ` · ${esc(lastMark(route.record, "Último cambio de"))}` : ""}</p>
@@ -2495,7 +2503,7 @@ function RequestSheet(view, routeInfo) {
       ${showRoutes ? `
         <fieldset class="sv-chipset">
           <legend>Ruta</legend>
-          ${radios("sv-req-ruta", [...routes.map((route) => ({ value: route.code, label: route.code })), { value: "", label: "Todas" }], draft.ruta, "sv-req-ruta")}
+          ${radios("sv-req-ruta", [...routes.map((route) => ({ value: route.code, label: routeName(route.code) })), { value: "", label: "Todas" }], draft.ruta, "sv-req-ruta")}
         </fieldset>
       ` : ""}
       ${hourChips.length ? `
@@ -2732,7 +2740,7 @@ async function notifyAbsent(view, route, stop) {
     urgente: false,
     estado: "pendiente",
     respuesta: "",
-    titulo: `No sale · ${stop.perroNombre} · ${route.code} · ${turno} ${view.fechaLabel}`,
+    titulo: `No sale · ${stop.perroNombre} · ${routeName(route.code)} · ${turno} ${view.fechaLabel}`,
   };
   const result = await persist("solicitudes", record, "toast", "Pedido enviado al coordinador.");
   if (result && !result.pendiente) requestStates.set(result.id, "pendiente");
