@@ -1834,6 +1834,7 @@ function DogCard(view, item, requests, showRoute = true) {
       ${safetyChips(stop)}
       ${RequestNotice(requests)}
       ${record?.nota ? `<p class="sv-dog-note">${icon("message", "sv-icon")} <span>${esc(record.nota)}</span></p>` : ""}
+      ${status.retirado ? WalkPhoto(record, stop.perroNombre) : ""}
       ${stop.perroId ? DogActions(item, domId, optionsOpen) : `
         <p class="sv-line is-warn">${icon("alertCircle", "sv-icon")} <span>Sin ficha: no se marca desde acá.</span></p>
         <div class="sv-row">${RequestButton(route.code, "", "Cambio")}</div>
@@ -1895,6 +1896,49 @@ function AbsentAsk(item, domId, busy) {
       </div>
     </div>
   `;
+}
+
+// ---------- Foto del paseo (la saca el paseador o el ayudante) ----------
+// Se baja con la sesión desde /api/archivos y se guarda en memoria mientras dure la visita.
+const walkPhotos = new Map();
+const WALK_PHOTO_ID = /^[A-Za-z0-9_.-]{6,120}$/;
+
+function walkPhotoUrl(fileId) {
+  const id = String(fileId || "");
+  if (!WALK_PHOTO_ID.test(id) || typeof fetch !== "function" || !session.token()) return "";
+  const known = walkPhotos.get(id);
+  if (known?.url) return known.url;
+  if (known && (known.loading || Date.now() - known.at < 60 * 1000)) return "";
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return "";
+  const entry = { url: "", loading: true, at: Date.now() };
+  walkPhotos.set(id, entry);
+  fetch(`/api/archivos?id=${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${session.token()}` } })
+    .then((response) => (response.ok ? response.blob() : null))
+    .then((blob) => {
+      if (blob && /^image\//.test(blob.type)) {
+        entry.url = URL.createObjectURL(blob);
+        renderKeepingFocus();
+      }
+    })
+    .catch(() => null)
+    .finally(() => {
+      entry.loading = false;
+      entry.at = Date.now();
+    });
+  return "";
+}
+
+function WalkPhoto(record, name) {
+  if (!record) return "";
+  if (record.fotoPaseoId) {
+    const url = walkPhotoUrl(record.fotoPaseoId);
+    return url
+      ? `<figure class="sv-walkphoto"><img src="${esc(url)}" alt="${esc(`Foto del paseo de ${name}`)}" loading="lazy" /><figcaption>Foto del paseo${record.horaPaseo ? ` · ${esc(record.horaPaseo)}` : ""}</figcaption></figure>`
+      : `<p class="sv-source">${icon("camera", "sv-icon")} Foto del paseo: cargando…</p>`;
+  }
+  if (record.fotoPendiente) return `<p class="sv-source">${icon("camera", "sv-icon")} Foto del paseo por subir (sin señal).</p>`;
+  if (record.sinFotoPaseo) return `<p class="sv-source">${icon("camera", "sv-icon")} Se entregó sin foto del paseo.</p>`;
+  return "";
 }
 
 function DogOptions(item, domId) {
