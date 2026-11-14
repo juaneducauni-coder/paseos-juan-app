@@ -544,9 +544,14 @@
   text-transform: uppercase;
 }
 
+/* Semana con los días escritos completos: en pantallas angostas se desliza de costado. */
 .cl-week-days {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(84px, 1fr);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -835,11 +840,10 @@
   overflow: hidden;
 }
 
+/* Títulos completos: se parten en dos renglones en vez de cortarse con "…". */
 .cl-more > summary strong,
 .cl-more > summary small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .cl-more > summary strong {

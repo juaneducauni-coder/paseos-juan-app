@@ -41,7 +41,7 @@ const DEFAULT_CUPONES = [
   {
     id: "paseo-gratis-1",
     code: "PRIMERPASEO",
-    title: "1.er Paseo Grupal Gratis",
+    title: "Primer paseo grupal gratis",
     detail: "Tu primer paseo de adaptación con la manada, 100% bonificado luego de la evaluación inicial.",
     status: "Activo",
     season: "Bienvenida",
@@ -244,7 +244,7 @@ function toMinutes(hhmm) {
 }
 
 function shortDay(day) {
-  return { Lunes: "Lun", Martes: "Mar", Miércoles: "Mié", Jueves: "Jue", Viernes: "Vie", Sábado: "Sáb", Domingo: "Dom" }[day];
+  return { Lunes: "Lunes", Martes: "Martes", Miércoles: "Miércoles", Jueves: "Jueves", Viernes: "Viernes", Sábado: "Sábado", Domingo: "Domingo" }[day];
 }
 
 function listJoin(items) {
@@ -462,7 +462,7 @@ function pageContent(ctx) {
     ${quickActions(ctx)}
     <div class="cl-more-list" aria-label="Más opciones">
       ${morePanel("cl-pagos", "wallet", "Pagos, alias y elegir horario", paymentSection(ctx))}
-      ${morePanel("cl-cupones", "medal", "Mis cupones y 1.er paseo gratis", couponsSection(ctx))}
+      ${morePanel("cl-cupones", "medal", "Mis cupones y primer paseo gratis", couponsSection(ctx))}
       ${morePanel("cl-comunidad", "users", "Chat grupal de clientes", communityChatSection(ctx))}
       ${morePanel("cl-detalle-hoy", "calendarCheck", "Detalle de hoy", todayDetails(ctx))}
       ${morePanel("cl-ausencia", "bell", "Ausencias", absenceSection(ctx))}
@@ -511,7 +511,7 @@ function morePanel(id, iconName, label, content) {
     <details class="cl-more" id="${id}" data-cl-details="${id}" ${open ? "open" : ""}>
       <summary>
         <span class="cl-more-icon">${icon(iconName, "cl-icon")}</span>
-        <span><strong>${label}</strong><small>Más</small></span>
+        <span><strong>${label}</strong></span>
         ${icon("chevronDown", "cl-icon-sm cl-chevron")}
       </summary>
       <div class="cl-more-body">${content}</div>

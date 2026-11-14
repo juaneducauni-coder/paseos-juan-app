@@ -200,13 +200,15 @@ function plural(count, one, many) {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-// Atraso legible al sol: 144 → "2 h 24 min", 60 → "1 h", 25 → "25 min".
+// Atraso en palabras completas: 144 → "2 horas y 24 minutos", 60 → "1 hora", 25 → "25 minutos".
 function lateText(minutes) {
   const total = Math.max(0, Math.round(Number(minutes) || 0));
   const h = Math.floor(total / 60);
   const m = total % 60;
-  if (!h) return `${m} min`;
-  return m ? `${h} h ${m} min` : `${h} h`;
+  const minutos = `${m} ${m === 1 ? "minuto" : "minutos"}`;
+  const horas = `${h} ${h === 1 ? "hora" : "horas"}`;
+  if (!h) return minutos;
+  return m ? `${horas} y ${minutos}` : horas;
 }
 
 // La hoja interna se llama "BASE RUTAS": en pantalla se dice "Planilla de rutas".
@@ -217,7 +219,8 @@ function sheetText(text) {
     .replace(/BASE RUTAS/g, "Planilla de rutas");
 }
 
-const SHORT_DAYS = { Lunes: "Lun", Martes: "Mar", Miércoles: "Mié", Jueves: "Jue", Viernes: "Vie", Sábado: "Sáb", Domingo: "Dom" };
+// Días con el nombre completo (Juan pidió no abreviar).
+const SHORT_DAYS = { Lunes: "Lunes", Martes: "Martes", Miércoles: "Miércoles", Jueves: "Jueves", Viernes: "Viernes", Sábado: "Sábado", Domingo: "Domingo" };
 
 function daysText(days) {
   const ordered = WEEK_DAYS.filter((day) => days.includes(day));
@@ -336,7 +339,7 @@ function isAdminPage() {
 }
 
 // "?" que se despliega: la explicación larga queda guardada acá, no a la vista.
-function Help(text, label = "Más info") {
+function Help(text, label = "Más información") {
   return `
     <details class="adm-help">
       <summary aria-label="${esc(label)}"><span aria-hidden="true">?</span></summary>
@@ -1217,7 +1220,7 @@ function PriorityList(priorities, done) {
                   <span class="adm-chip adm-chip--${isDone ? "green" : priority.tone}">${esc(priority.tag)}${isDone ? " · Hecho" : ""}</span>
                   <h3>${esc(priority.short)}</h3>
                 </div>
-                ${Help(`<p><strong>${esc(priority.title)}.</strong> ${esc(priority.detail)}</p>`, `Más info: ${priority.short}`)}
+                ${Help(`<p><strong>${esc(priority.title)}.</strong> ${esc(priority.detail)}</p>`, `Más información: ${priority.short}`)}
               </div>
               <div class="adm-prio-actions">
                 <button class="adm-btn adm-btn--ghost" type="button" data-adm-goto="${priority.target}">${esc(priority.targetLabel)}</button>
@@ -1270,7 +1273,7 @@ function SafetyCard() {
           ${missing.length || notRouted.length ? `<ul>
             ${missing.map((m) => `<li>${esc(m.dog)} figura “no juntar con ${esc(m.other)}”, pero ${esc(m.other)} no está en el registro: ${PENDIENTE}.</li>`).join("")}
             ${notRouted.map((n) => `<li>${esc(n.dog)} y ${esc(n.other)}: hoy ${esc(n.idle)} no tiene ruta. Si vuelve, revisá el turno.</li>`).join("")}
-          </ul>` : ""}`, "Más info de seguridad")}
+          </ul>` : ""}`, "Más información de seguridad")}
       </div>
       ${conflicts.length ? `
         <ul class="adm-cross-list" aria-label="Perros marcados no juntar que comparten turno">
@@ -1363,7 +1366,7 @@ function IncidentsBlock(live) {
               ${DogAvatar(dog?.id, item.perroNombre || item.titulo || "!", "md")}
               <div class="adm-row-main">
                 <strong class="adm-row-title">${esc(item.titulo || item.perroNombre || "Incidente")}</strong>
-                <span class="adm-row-meta">${recordTime(item) ? `${esc(recordTime(item))} h · ` : ""}${esc(item.creadoPorNombre || nameOf(item.creadoPor) || "")}</span>
+                <span class="adm-row-meta">${recordTime(item) ? `${esc(recordTime(item))} · ` : ""}${esc(item.creadoPorNombre || nameOf(item.creadoPor) || "")}</span>
                 <span class="adm-chips">
                   ${item.riesgo ? `<span class="adm-chip adm-chip--red">Riesgo: ${esc(item.riesgo)}</span>` : ""}
                   ${item.lesiones ? `<span class="adm-chip adm-chip--yellow">Lesiones: ${esc(item.lesiones)}</span>` : ""}
@@ -2406,7 +2409,7 @@ function CargaView() {
         const isBusiest = load.busiest.includes(row.day);
         return `
           <li class="adm-load-row ${isBusiest ? "is-busiest" : ""}">
-            <strong class="adm-load-day">${SHORT_DAYS[row.day]}<span class="adm-sr-only"> (${row.day})</span></strong>
+            <strong class="adm-load-day">${SHORT_DAYS[row.day]}</strong>
             <span class="adm-load-bars">
               <span class="adm-bar-cell"><span class="adm-bar" style="--v:${(row.morning / load.maxShift).toFixed(3)}" aria-hidden="true"></span><span class="adm-bar-value"><span class="adm-sr-only">Mañana: </span>${row.morning}</span></span>
               <span class="adm-bar-cell"><span class="adm-bar adm-bar--tarde" style="--v:${(row.afternoon / load.maxShift).toFixed(3)}" aria-hidden="true"></span><span class="adm-bar-value"><span class="adm-sr-only">Tarde: </span>${row.afternoon}</span></span>
@@ -2670,7 +2673,7 @@ function summaryText() {
     shiftText("manana", "Mañana"),
     shiftText("tarde", "Tarde"),
     `Incidentes de hoy: ${live.incidentes.length}. Pedidos nuevos: ${live.pedidosNuevos.length}.`,
-    `Perros atrasados (más de ${LATE_MINUTES} min sin retiro): ${live.late.length}. Avisos por barrio vigentes: ${live.avisos.length}.`,
+    `Perros atrasados (más de ${LATE_MINUTES} minutos sin retiro): ${live.late.length}. Avisos por barrio vigentes: ${live.avisos.length}.`,
     "",
     `Carga semanal: ${load.weekTotal} salidas. Más carga: ${listJoin(load.busiest)} (${load.maxTotal}).`,
     "",

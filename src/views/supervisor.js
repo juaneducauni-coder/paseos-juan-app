@@ -188,13 +188,15 @@ function clock(minutes) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
-// Minutos a texto corto para leer al sol: "25 min", "2 h", "2 h 24 min".
+// Minutos a texto completo (Juan pidió palabras sin abreviar): "25 minutos", "2 horas y 24 minutos".
 function duration(minutes) {
   const total = Math.max(0, Math.round(Number(minutes) || 0));
-  if (total < 60) return `${total} min`;
+  const minutos = (n) => `${n} ${n === 1 ? "minuto" : "minutos"}`;
+  if (total < 60) return minutos(total);
   const hours = Math.floor(total / 60);
   const rest = total % 60;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+  const horas = `${hours} ${hours === 1 ? "hora" : "horas"}`;
+  return rest ? `${horas} y ${minutos(rest)}` : horas;
 }
 
 function toMinutes(time) {
@@ -288,7 +290,7 @@ function shiftKeyOf(turno) {
 
 function shiftMoment(shiftKey, now) {
   const shift = SHIFTS[shiftKey];
-  if (now.minutes < toMinutes(shift.from)) return { label: `Arranca ${shift.from} hs`, tone: "next" };
+  if (now.minutes < toMinutes(shift.from)) return { label: `Empieza a las ${shift.from}`, tone: "next" };
   if (now.minutes <= toMinutes(shift.to)) return { label: "En curso", tone: "live" };
   return { label: "Terminado", tone: "done" };
 }
@@ -328,7 +330,7 @@ function lastMark(record, verb = "Marcó") {
   if (record.pendiente) return "Se enviará cuando haya señal.";
   const who = personName(record.actualizadoPor || record.creadoPor, record);
   const at = timeOf(record.actualizadoEn || record.creadoEn);
-  return who ? `${verb} ${who}${at ? ` a las ${at} hs` : ""}.` : "";
+  return who ? `${verb} ${who}${at ? ` a las ${at}` : ""}.` : "";
 }
 
 // ---------- Datos compartidos ----------
@@ -1124,7 +1126,7 @@ function observationText(obs) {
   return [
     `Observación de conducta — ${BUSINESS_INFO.name}`,
     `Perro: ${obs.perroNombre || dogById(obs.perroId)?.name || PENDIENTE}`,
-    `Fecha: ${isoToLabel(obs.fecha)}${obs.hora ? ` · ${obs.hora} hs` : ""}`,
+    `Fecha: ${isoToLabel(obs.fecha)}${obs.hora ? ` · ${obs.hora}` : ""}`,
     `Lugar: ${obs.lugar || PENDIENTE}`,
     `Estímulo: ${obs.estimulo || PENDIENTE}`,
     `Reacción: ${obs.reaccion || PENDIENTE}`,
@@ -1200,7 +1202,7 @@ function closureSummary(view, closureOverride) {
   const lines = [
     `Cierre de turno — ${BUSINESS_INFO.name}`,
     `Fecha: ${view.fechaLabel} (${view.day})`,
-    `Turno: ${shift.label} (${shift.from} a ${shift.to} hs) · Supervisó: ${user.nombre || PENDIENTE}`,
+    `Turno: ${shift.label} (de ${shift.from} a ${shift.to}) · Supervisó: ${user.nombre || PENDIENTE}`,
     `Rutas${fallback ? " (tomadas de la planilla RPJ)" : ""}:`,
     ...routes.map(
       (route) =>
@@ -1221,7 +1223,7 @@ function closureSummary(view, closureOverride) {
     `Observaciones de conducta registradas hoy en este turno: ${observations.length}`,
     `Notas del supervisor: ${notes.trim() || "sin notas"}`,
   ];
-  if (closure?.cerrado) lines.push(`Turno cerrado a las ${closure.horaCierre || timeOf(closure.actualizadoEn) || PENDIENTE} hs por ${personName(closure.actualizadoPor, closure) || PENDIENTE}.`);
+  if (closure?.cerrado) lines.push(`Turno cerrado a las ${closure.horaCierre || timeOf(closure.actualizadoEn) || PENDIENTE} por ${personName(closure.actualizadoPor, closure) || PENDIENTE}.`);
   return lines.join("\n");
 }
 
@@ -2065,7 +2067,7 @@ function RequestsTab(view) {
 function RequestCard(item, seen) {
   const state = REQUEST_STATES[item.estado] || REQUEST_STATES.pendiente;
   const fresh = isFreshAnswer(item, seen);
-  const when = item.pendiente ? "Sin señal: se envía solo" : `${isoToLabel(item.fecha)} · ${String(item.turno || "").toLowerCase()} · ${timeOf(item.creadoEn)} hs`;
+  const when = item.pendiente ? "Sin señal: se envía solo" : `${isoToLabel(item.fecha)} · ${String(item.turno || "").toLowerCase()} · ${timeOf(item.creadoEn)}`;
   return `
     <li class="sv-request is-${state.tone} ${fresh ? "is-new" : ""}">
       <p class="sv-request-head">
@@ -2180,7 +2182,7 @@ function IncidentsSection(view) {
             ${item.lesiones ? `<span class="sv-state is-warn">Lesiones: ${esc(item.lesiones)}</span>` : ""}
           </p>
           <h2 class="sv-h3">${esc(item.titulo || "Incidente")}</h2>
-          <p class="sv-muted">${item.hora ? `${esc(item.hora)} hs · ` : ""}${esc(incidentDogs(item))}${item.lugar ? ` · ${esc(item.lugar)}` : ""}${item.barrio ? ` · ${esc(item.barrio)}` : ""}</p>
+          <p class="sv-muted">${item.hora ? `${esc(item.hora)} · ` : ""}${esc(incidentDogs(item))}${item.lugar ? ` · ${esc(item.lugar)}` : ""}${item.barrio ? ` · ${esc(item.barrio)}` : ""}</p>
           <dl class="sv-detail">
             ${[["Antes", item.antes], ["Conducta", item.conducta], ["Acción", item.accion], ["Después", item.despues], ["Protocolo", item.protocolo]]
               .filter(([, value]) => value)
@@ -2200,7 +2202,7 @@ function HelpSection() {
     ["warn", "Retirar ya", "Es la hora de retiro."],
     ["info", "Retirado", "En la calle."],
     ["ok", "Entregado", "Volvió a casa."],
-    ["danger", "Atrasado", `Retiro + ${PICKUP_GRACE} min o paseo + ${DELIVERY_GRACE} min. Se recalcula cada minuto.`],
+    ["danger", "Atrasado", `Pasaron ${PICKUP_GRACE} minutos de la hora de retiro, o ${DELIVERY_GRACE} minutos del final del paseo. Se recalcula cada minuto.`],
   ];
   return `
     <section class="sv-card" aria-labelledby="sv-legend-title">
@@ -2360,7 +2362,7 @@ function ObservationCard(obs) {
   const domId = safeId(obs.id);
   return `
     <li class="sv-request ${obs.seguimiento ? "is-warn" : "is-neutral"}">
-      <p class="sv-request-head">${obs.seguimiento ? `<span class="sv-state is-warn">Seguimiento</span>` : ""}<span class="sv-muted">${esc(isoToLabel(obs.fecha))}${obs.hora ? ` · ${esc(obs.hora)} hs` : ""}</span></p>
+      <p class="sv-request-head">${obs.seguimiento ? `<span class="sv-state is-warn">Seguimiento</span>` : ""}<span class="sv-muted">${esc(isoToLabel(obs.fecha))}${obs.hora ? ` · ${esc(obs.hora)}` : ""}</span></p>
       <h2 class="sv-h3">${esc(name)}${obs.lugar ? ` · ${esc(obs.lugar)}` : ""}</h2>
       <dl class="sv-detail">
         <div><dt>Antes</dt><dd>${esc(obs.estimulo || PENDIENTE)}</dd></div>

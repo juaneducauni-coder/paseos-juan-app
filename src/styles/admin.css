@@ -2144,7 +2144,7 @@ html[data-theme="dark"] .adm-btn--undo {
 
 .adm-load-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 40px;
+  grid-template-columns: 88px minmax(0, 1fr) 40px;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;

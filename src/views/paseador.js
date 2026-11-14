@@ -242,10 +242,12 @@ function minutesOf(hora) {
 }
 
 function durationText(total) {
-  if (total < 60) return `${total} min`;
+  const minutos = (n) => `${n} ${n === 1 ? "minuto" : "minutos"}`;
+  if (total < 60) return minutos(total);
   const hours = Math.floor(total / 60);
   const rest = total % 60;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+  const horas = `${hours} ${hours === 1 ? "hora" : "horas"}`;
+  return rest ? `${horas} y ${minutos(rest)}` : horas;
 }
 
 // Cuenta regresiva o atraso contra la hora prevista (texto corto).
@@ -1922,7 +1924,7 @@ function DogSheet(ctx) {
         <span class="pw-sheet-photo">${Avatar(dog, "xl")}</span>
         <div class="pw-sheet-id">
           <h2 id="pw-sheet-title" tabindex="-1">${esc(dog.name)}</h2>
-          <p>${esc(dog.unknown ? "Sin ficha" : dog.size)} · ${minutes ? `${minutes} min` : "Duración sin dato"}</p>
+          <p>${esc(dog.unknown ? "Sin ficha" : dog.size)} · ${minutes ? `${minutes} minutos` : "Duración sin dato"}</p>
           <p class="pw-sheet-times">${ic("clock", "pw-icon pw-icon--sm")}${stop.hora ? `Retiro ${esc(stop.hora)}` : "Sin hora"}${entry?.kind === "deliver" && entry.time ? ` · vuelve ${esc(entry.time)}` : entry?.kind === "photo" && deliveryTime(stop, state) ? ` · vuelve ${esc(deliveryTime(stop, state))}` : stop.salida ? ` · vuelve ${esc(stop.salida)}` : ""}</p>
         </div>
         <button class="pw-sheet-close" type="button" data-pw-close-sheet aria-label="Cerrar">${ic("x", "pw-icon")}</button>
@@ -2285,7 +2287,7 @@ function MoreScreen({ sel, plan, stops, names }) {
   const supervisors = [...new Set(plan.shown.map((route) => route.supervisor).filter(Boolean))];
   const supervisor = supervisors.length ? listNames(supervisors) : SHIFT_BY_LABEL[sel.shift].supervisor;
   const hours = routeHours(plan.shown) || shiftHours(sel.shift);
-  const short = { Lunes: "Lun", Martes: "Mar", Miércoles: "Mié", Jueves: "Jue", Viernes: "Vie", Sábado: "Sáb", Domingo: "Dom" };
+  const short = { Lunes: "Lunes", Martes: "Martes", Miércoles: "Miércoles", Jueves: "Jueves", Viernes: "Viernes", Sábado: "Sábado", Domingo: "Domingo" };
   const people = [];
   plan.shown.forEach((route) => {
     if (route.paseador && !isMe(route.paseador)) people.push(["Paseador", personName(route.paseador, names)]);

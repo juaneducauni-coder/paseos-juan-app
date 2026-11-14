@@ -186,7 +186,7 @@ function HeroSection() {
           como en casa, en ${BUSINESS.zone}.
         </p>
         <div class="hero-actions">
-          <a class="primary-button" href="#evaluacion" data-link>Pedí tu 1.er paseo gratis</a>
+          <a class="primary-button" href="#evaluacion" data-link>Pedí tu primer paseo gratis</a>
           <a class="secondary-button" href="/cliente" data-link>Ya soy cliente · Entrar</a>
         </div>
       </div>
@@ -619,7 +619,7 @@ function CTASection() {
       <span class="anchor-alias" id="contacto" aria-hidden="true"></span>
       <div class="evaluation-heading">
         <p class="eyebrow">Evaluación inicial</p>
-        <h2 id="evaluacion-titulo">Pedí tu 1.er paseo gratis en 1 minuto</h2>
+        <h2 id="evaluacion-titulo">Pedí tu primer paseo gratis en 1 minuto</h2>
         <p>Con 3 datos alcanza. Lo demás, si querés, lo sumás abajo o nos lo contás por WhatsApp.</p>
       </div>
       <form class="evaluation-form quick-form" data-evaluation-form novalidate>
@@ -649,7 +649,7 @@ function CTASection() {
             ${choiceGroup({ name: "perros", legend: "¿Se lleva bien con otros perros?", draft, options: [["Sí", "Sí"], ["No", "No"], ["Depende", "Depende"]] })}
             ${choiceGroup({ name: "mordida", legend: "¿Alguna vez mordió o intentó morder?", draft, options: [["No", "No"], ["Sí", "Sí"], ["No sé", "No estoy seguro"]] })}
             ${choiceGroup({ name: "horario", legend: "Turno", draft, options: [["Mañana", "Mañana"], ["Tarde", "Tarde"], ["Indistinto", "Indistinto"]] })}
-            ${choiceGroup({ name: "dias", legend: "Días (tocá todos los que quieras)", draft, multiple: true, options: DAYS.map(([short, long]) => [short, long, long]) })}
+            ${choiceGroup({ name: "dias", legend: "Días (tocá todos los que quieras)", draft, multiple: true, options: DAYS.map(([, long]) => [long, long]) })}
 
             <div class="voice-field">
               <label for="campo-conducta">Contanos de tu perro</label>
@@ -686,7 +686,7 @@ function CTASection() {
         <div class="quick-send">
           <label class="quick-terms-check">
             <input type="checkbox" name="aceptaTerminos" required />
-            <span>Acepto los <a href="#terminos-privacidad" data-link>términos del servicio y la política de privacidad</a> (incluye 1.er paseo de adaptación sin cargo).</span>
+            <span>Acepto los <a href="#terminos-privacidad" data-link>términos del servicio y la política de privacidad</a> (incluye el primer paseo de adaptación sin cargo).</span>
           </label>
           <p class="quick-note">Al tocar Enviar se abre WhatsApp: apretá Enviar ahí para mandarnos el pedido.</p>
           <div class="quick-submit-bar" data-submit-bar>

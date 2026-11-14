@@ -1965,18 +1965,11 @@ body:has(.pw-shell.has-sheet) {
   font-weight: 800;
 }
 
+/* Días con el nombre completo: los botones se acomodan solos en filas (en el celular, de a 3). */
 .pw-days {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 8px;
-}
-
-/* En el celular, 7 botones en una fila quedan chicos: van en dos filas (4 + 3) con 8 px de separación. */
-@media (max-width: 479px) {
-  .pw-days {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-  }
 }
 
 .pw-chip--day {
