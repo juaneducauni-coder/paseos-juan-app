@@ -2,7 +2,7 @@
 
 Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Cada IA lo actualiza al tomar y al entregar una tarea.
 
-Última actualización: 13/11/2026 (tarde) — Claude (JUAN 3.0)
+Última actualización: 14/11/2026 (madrugada) — Claude (JUAN 3.0)
 
 ## Necesita a Juan
 
@@ -18,7 +18,9 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 | Naranja X: generar un link de pago de prueba y pasar comisión y si se reutiliza | Armar el botón "Pagar" de cada plan |
 | Ficha de Google del negocio: ¿existe y quién tiene el acceso? | Plan de marketing |
 
-## Hecho (en la rama `claude/quirky-shannon-ih7yx1`, commit 7931aeb; sin publicar)
+## Hecho (en la rama `claude/quirky-shannon-ih7yx1`, commit 7bf270b; sin publicar)
+
+- **14/11:** el ayudante lleva la muslera y el paseador la pechera (checklist y equipo).
 
 - **13/11 tarde:** diseño aireado y figuras orgánicas en toda la app (Gemini, E-044; falta revisarlo con capturas en celular, modo oscuro y calmo).
 - **13/11 tarde:** portada de verano con olas, ilustraciones y "primer paseo gratis" (Gemini, E-041, corregido por Claude).
@@ -40,6 +42,8 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 | Tarea | IA | Estado |
 |---|---|---|
 | E-040 Arreglos chicos de paseador, ayudante y admin | Claude | A MEDIAS: se cortó la sesión; revisar qué quedó |
+| E-029 Investigación: chats de las IAs, Drive, tienda importada, diseño profesional | Claude | EN CURSO |
+| E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | EN CURSO |
 | (Gemini: anotá acá lo que estás haciendo) | Gemini | — |
 
 ## Por hacer (del Plan maestro)
