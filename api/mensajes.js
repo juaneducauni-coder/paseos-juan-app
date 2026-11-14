@@ -5,16 +5,28 @@
 // POST { canal, texto, tipo: "texto"|"aviso"|"foto", adjuntoId?, perroId?, perroNombre? } → { mensaje }
 //      canal "cliente" + perroId: el servidor busca el cliente de ese perro (para que el equipo avise sin ver clientes).
 // POST { canal, leido: true } → marca el canal como leído (colección "lecturas").
+// Moderación (SOLO admin):
+// POST { borrar: "<id de mensaje>" }                 → lo deja sin texto ni adjunto, con borrado: true.
+// POST { silenciar: "<usuario>", horas: 24 }          → no puede escribir en la comunidad "clientes" (horas: 0 lo quita).
+// GET  ?moderacion=1                                  → { silenciados: { usuario: ISO hasta } }
+// Comunidad de clientes ("clientes"): no acepta teléfonos ni correos; GET devuelve también { reglas, silenciadoHasta }.
+// Límite: 30 mensajes por minuto por usuario.
 // Permisos por canal: api/_lib/permisos.js (accesoCanal).
-import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
+import { handler, send, readJson, query, HttpError, limitador } from "./_lib/http.js";
 import { requireUser, perrosDeCliente } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { accesoCanal, CANALES_GRUPO, otroDelDirecto, puedeVerArchivoUsuario } from "./_lib/permisos.js";
-import { publicar, mensajesDe, clienteDelPerro, limpiarTextoMensaje, errorTexto, idLectura, TIPOS_MENSAJE } from "./_lib/mensajes.js";
+import { accesoCanal, CANALES_GRUPO, CANAL_COMUNIDAD, COMUNIDAD_ROLES, otroDelDirecto, puedeVerArchivoUsuario } from "./_lib/permisos.js";
+import {
+  publicar, mensajesDe, clienteDelPerro, limpiarTextoMensaje, errorTexto, idLectura, TIPOS_MENSAJE,
+  REGLAS_COMUNIDAD, tieneDatosPrivados, borrarMensaje, silenciados, silenciar,
+} from "./_lib/mensajes.js";
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const PERRO = /^[A-Za-z0-9_-]{1,20}$/;
 const ARCHIVO = /^[a-z0-9][a-z0-9_.-]{0,120}$/i;
+const USUARIO = /^(cliente:[a-z0-9][a-z0-9_.-]{0,79}|[a-z][a-z0-9._-]{2,30})$/i;
+const MENSAJE_ID = /^[a-z0-9][a-z0-9_.-]{0,160}$/i;
+const porUsuario = limitador(30, 60 * 1000, "Mandaste muchos mensajes seguidos. Esperá un minuto.");
 
 function acceso(user, canal) {
   const a = accesoCanal(user, canal);
@@ -27,7 +39,9 @@ async function lecturasDe(user) {
 }
 
 function contarSinLeer(lista, user, leidoHasta) {
-  return lista.filter((m) => m.autor !== user.usuario && (!leidoHasta || String(m.creadoEn) > leidoHasta)).length;
+  // Los avisos automáticos son para el cliente: al equipo no le suman "sin leer".
+  return lista.filter((m) => !m.borrado && m.autor !== user.usuario && !(m.automatico && user.rol !== "cliente")
+    && (!leidoHasta || String(m.creadoEn) > leidoHasta)).length;
 }
 
 async function resumen(user) {
@@ -37,7 +51,9 @@ async function resumen(user) {
 
   if (user.rol === "cliente") {
     visibles.set(`cliente_${user.clienteId}`, { tipo: "cliente", titulo: "Paseos Juan" });
+    visibles.set(CANAL_COMUNIDAD, { tipo: "comunidad", titulo: "Comunidad de clientes" });
   } else {
+    if (COMUNIDAD_ROLES.includes(user.rol)) visibles.set(CANAL_COMUNIDAD, { tipo: "comunidad", titulo: "Comunidad de clientes" });
     for (const [canal, def] of Object.entries(CANALES_GRUPO)) {
       if (def.roles.includes(user.rol)) visibles.set(canal, { tipo: "grupo", titulo: def.titulo });
     }
@@ -89,16 +105,45 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
         .sort((a, b) => a.nombre.localeCompare(b.nombre));
       return send(res, 200, { ok: true, contactos });
     }
+    if (params.get("moderacion")) {
+      if (user.rol !== "admin") throw new HttpError(403, "La moderación es solo del admin.");
+      return send(res, 200, { ok: true, silenciados: await silenciados() });
+    }
     const canal = params.get("canal") || "";
     const permiso = acceso(user, canal);
     if (!permiso.leer) throw new HttpError(403, permiso.soloAvisos ? "Podés mandar avisos a este cliente, pero no leer su conversación." : "No podés ver este chat.");
     const desde = params.get("desde") || "";
     if (desde && !ISO.test(desde)) throw new HttpError(400, "Fecha no válida (ISO).");
-    return send(res, 200, { ok: true, canal, mensajes: await mensajesDe(canal, desde) });
+    const respuesta = { ok: true, canal, mensajes: await mensajesDe(canal, desde) };
+    if (canal === CANAL_COMUNIDAD) {
+      respuesta.reglas = REGLAS_COMUNIDAD;
+      respuesta.silenciadoHasta = (await silenciados())[user.usuario] || null;
+    }
+    return send(res, 200, respuesta);
   }
 
   // POST
   const body = await readJson(req, 16 * 1024);
+
+  // Moderación del admin.
+  if (body.borrar !== undefined) {
+    if (user.rol !== "admin") throw new HttpError(403, "Solo el admin puede borrar mensajes.");
+    const id = String(body.borrar || "");
+    if (!MENSAJE_ID.test(id)) throw new HttpError(400, "Mensaje no válido.");
+    const previo = await store.get("mensajes", id);
+    // Los directos son privados: el admin tampoco los toca.
+    if (!previo || !accesoCanal(user, previo.canal).moderar) throw new HttpError(404, "Ese mensaje no existe.");
+    return send(res, 200, { ok: true, mensaje: await borrarMensaje(id, user) });
+  }
+  if (body.silenciar !== undefined) {
+    if (user.rol !== "admin") throw new HttpError(403, "Solo el admin puede silenciar.");
+    const usuario = String(body.silenciar || "");
+    if (!USUARIO.test(usuario) || usuario === user.usuario) throw new HttpError(400, "Usuario no válido.");
+    const horas = body.horas === undefined ? 24 : Number(body.horas);
+    if (!Number.isFinite(horas) || horas < 0 || horas > 24 * 90) throw new HttpError(400, "Las horas no son válidas (0 a 2160).");
+    return send(res, 200, { ok: true, silenciados: await silenciar(usuario, horas, user) });
+  }
+
   let canal = String(body.canal || "");
   const perroId = body.perroId ? String(body.perroId) : "";
   if (perroId && !PERRO.test(perroId)) throw new HttpError(400, "Perro no válido.");
@@ -122,12 +167,23 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   }
 
   if (!permiso.escribir) throw new HttpError(403, "No podés escribir en este chat.");
+  porUsuario.usar(user.usuario);
   const tipo = body.tipo || "texto";
   if (!TIPOS_MENSAJE.includes(tipo)) throw new HttpError(400, "Tipo de mensaje no válido.");
   if (permiso.soloAvisos && tipo !== "aviso") throw new HttpError(403, "Al cliente solo le podés mandar avisos.");
   if (user.rol === "cliente" && tipo !== "texto") throw new HttpError(400, "Podés mandar mensajes de texto.");
   const texto = limpiarTextoMensaje(body.texto);
   errorTexto(texto);
+
+  // Comunidad de clientes: sin datos privados, sin adjuntos, y respetando el silencio del admin.
+  if (permiso.tipo === "comunidad") {
+    if (user.rol !== "admin") {
+      const hasta = (await silenciados())[user.usuario];
+      if (hasta) throw new HttpError(403, "El admin te silenció en la comunidad por un tiempo.");
+    }
+    if (tieneDatosPrivados(texto)) throw new HttpError(400, "Por seguridad, en la comunidad no se comparten teléfonos, correos ni direcciones.");
+    if (body.adjuntoId || tipo === "foto") throw new HttpError(400, "En la comunidad solo se mandan mensajes de texto.");
+  }
 
   // Cliente: el canal tiene que existir (cliente cargado).
   let cliente = null;

@@ -599,8 +599,16 @@ session.loginCliente = async function loginCliente(token) {
   return data.user; // { usuario: "cliente:<id>", nombre, rol: "cliente", clienteId, perros }
 };
 
-// Solo admin y coordinador. crear() devuelve { enlace: "/c/<token>", url, acceso }: el enlace se ve UNA sola vez.
+// Acceso de clientes (P-01): pedir alta (formulario web) → Juan aprueba con horario → el cliente recibe su enlace.
+// aprobar(): SOLO admin. datos: { pedidoId | clienteId, perros: ["PJ-0xx"], dias: ["lunes", ...], turno: "Mañana"|"Tarde", hora?, plan? }
+//   → { cliente, enlace: "/c/<token>", url }. El enlace se ve UNA sola vez (en el servidor queda solo su hash).
+// crear(): enlace NUEVO para un cliente ya aprobado (si lo perdió). Admin y coordinador. Invalida el anterior.
+// revocar(): corta el enlace y las sesiones abiertas. Admin y coordinador.
 export const clientesAcceso = {
+  async aprobar(datos) {
+    const data = await request("/api/clientes/aprobar", { method: "POST", body: datos });
+    return { cliente: data.cliente, enlace: data.enlace, url: `${window.location.origin}${data.enlace}`, acceso: data.acceso };
+  },
   async crear(clienteId) {
     const data = await request("/api/clientes/acceso", { method: "POST", body: { clienteId } });
     return { enlace: data.enlace, url: `${window.location.origin}${data.enlace}`, acceso: data.acceso };
@@ -611,8 +619,29 @@ export const clientesAcceso = {
   },
 };
 
+// ---------- Datos de pago para clientes ----------
+// El alias NO está en el código: lo carga el admin (colección "ajustes", id "pagos") y lo ven el admin y los clientes con sesión.
+export const PENDIENTE = "Pendiente de confirmar";
+export const datosPago = {
+  // → { alias, instrucciones, pendiente } (alias = "Pendiente de confirmar" si Juan todavía no lo cargó)
+  async leer() {
+    let registro = null;
+    try {
+      registro = (await registros.list("ajustes")).find((r) => r.id === "pagos") || null;
+    } catch (error) {
+      if (error.status !== 403) throw error;
+    }
+    return { alias: registro?.alias || PENDIENTE, instrucciones: registro?.instrucciones || "", pendiente: !registro?.alias };
+  },
+  // Solo admin. alias: 6 a 20 letras, números, puntos o guiones ("" lo borra).
+  guardar({ alias, instrucciones }) {
+    return registros.save("ajustes", { id: "pagos", alias, instrucciones });
+  },
+};
+
 // ---------- Mensajes (chats del equipo y con los clientes) ----------
-// Canales: "equipo", "calle", "coordinacion", directos canalDirecto(a, b) y "cliente_<clienteId>".
+// Canales: "equipo", "calle", "coordinacion", "clientes" (comunidad de clientes), directos canalDirecto(a, b)
+// y "cliente_<clienteId>" (chat privado del cliente con Paseos Juan).
 // Avisa con onDataChange("mensajes") cuando cambia el resumen y onDataChange("mensajes:<canal>") con mensajes nuevos.
 export function canalDirecto(a, b) {
   const [x, y] = [String(a), String(b)].sort();
@@ -624,7 +653,7 @@ const RESUMEN_KEY = `${CACHE_PREFIX}msj__resumen`;
 const msjWatchers = new Map();
 
 export const mensajes = {
-  // [{ canal, tipo: "grupo"|"directo"|"cliente", titulo, ultimo, sinLeer, leidoHasta, con?, clienteId? }]
+  // [{ canal, tipo: "grupo"|"comunidad"|"directo"|"cliente", titulo, ultimo, sinLeer, leidoHasta, con?, clienteId?, perros? }]
   cachedResumen() {
     return readJson(RESUMEN_KEY, []);
   },
@@ -647,14 +676,17 @@ export const mensajes = {
   cached(canal) {
     return readJson(MSJ_KEY(canal), []);
   },
-  // Mensajes del canal en orden cronológico. Pide solo los nuevos y los suma a los guardados.
+  // Mensajes del canal en orden cronológico. Pide solo los nuevos (o cambiados) y los suma a los guardados.
+  // Cada mensaje: { id, canal, texto, tipo, adjuntoId, perroId, perroNombre, autor, autorNombre, autorRol,
+  //   automatico, creadoEn, borrado? }. Si borrado es true, mostrar "Mensaje borrado por el admin".
   async list(canal) {
     const previos = mensajes.cached(canal);
-    const desde = previos.length ? previos[previos.length - 1].creadoEn : "";
+    const desde = previos.reduce((max, m) => [max, m.creadoEn || "", m.actualizadoEn || ""].sort().pop(), "");
     const params = new URLSearchParams({ canal });
     if (desde) params.set("desde", desde);
     try {
       const data = await request(`/api/mensajes?${params}`);
+      if (data.reglas) writeJson(`${MSJ_KEY(canal)}_info`, { reglas: data.reglas, silenciadoHasta: data.silenciadoHasta });
       if (!data.mensajes.length && desde) return previos;
       const byId = new Map(previos.map((m) => [m.id, m]));
       data.mensajes.forEach((m) => byId.set(m.id, m));
@@ -691,6 +723,28 @@ export const mensajes = {
     }
     return data.leidoHasta;
   },
+  // Comunidad "clientes": { reglas: [textos], silenciadoHasta: ISO|null } (después de list("clientes")).
+  infoComunidad() {
+    return readJson(`${MSJ_KEY("clientes")}_info`, { reglas: [], silenciadoHasta: null });
+  },
+  // Moderación (SOLO admin): borrar un mensaje de un grupo, la comunidad o un chat de cliente.
+  async borrar(mensajeId) {
+    const { mensaje } = await request("/api/mensajes", { method: "POST", body: { borrar: mensajeId } });
+    const lista = mensajes.cached(mensaje.canal);
+    if (lista.length) {
+      writeJson(MSJ_KEY(mensaje.canal), lista.map((m) => (m.id === mensaje.id ? mensaje : m)));
+      emit(`mensajes:${mensaje.canal}`);
+    }
+    return mensaje;
+  },
+  // Silenciar en la comunidad (horas = 0 lo quita). usuario: el "autor" del mensaje (por ejemplo "cliente:<id>").
+  async silenciar(usuario, horas = 24) {
+    return (await request("/api/mensajes", { method: "POST", body: { silenciar: usuario, horas } })).silenciados;
+  },
+  // { usuario: ISO hasta } de los silenciados vigentes (solo admin).
+  async silenciados() {
+    return (await request("/api/mensajes?moderacion=1")).silenciados;
+  },
   // Gente del equipo para abrir un directo: [{ usuario, nombre, rol }] (no para clientes).
   async contactos() {
     return (await request("/api/mensajes?contactos=1")).contactos;
@@ -708,7 +762,7 @@ export const mensajes = {
     tick();
     ticks.add(tick);
     let timer = setInterval(tick, canal ? CHAT_MS : RESUMEN_MS);
-    let reprogramar = canal ? null : setTimeout(() => {
+    const reprogramar = canal ? null : setTimeout(() => {
       clearInterval(timer);
       timer = setInterval(tick, RESUMEN_MS);
     }, 3000);

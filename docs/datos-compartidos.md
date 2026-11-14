@@ -37,6 +37,7 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 | paseador | Hace su ruta del turno, en orden y con horario. | `/paseador` | No |
 | ayudante | Ayudante de paseador: acompaña al paseador en su ruta (ver "Tareas del ayudante"). Sin datos de clientes. | `/paseador` (modo ayudante) | No |
 | marketing | Mateo Pérez: pedidos y comunicación. | (en preparación) | No |
+| cliente | Tutor aprobado por Juan. Entra por su enlace (sin PIN) y ve solo lo de sus perros. Ver "Chats y portal del cliente (E-045)". | `/cliente` | Solo el alias para transferir |
 
 ## Tareas del ayudante de paseador (definidas por Juan, 13/11/2026)
 
@@ -69,7 +70,7 @@ El **paseador** lleva la **pechera** (la muslera la lleva el ayudante).
 | `rutas` | equipo* | admin, coordinador | `AAAA-MM-DD_PJ_1M` | igual que plantilla + `fecha` |
 | `solicitudes` | admin, coordinador, supervisor | admin, coordinador, supervisor | automático | Pedido de cambio de ruta del supervisor al coordinador: `fecha` (día del cambio), `turno`, `ruta`, `tipo` ("no sale", "agregar perro", "cambiar hora", "cambiar paseador o ayudante", "otro"), `perroId`, `perroNombre`, `detalle` (qué cambiar), `motivo` (qué pasó o con quién habló), `urgente` (true/false), `estado` ("pendiente", "aplicado", "rechazado"), `respuesta` (la escribe el coordinador), `titulo` |
 | `cierres` | admin, coordinador, supervisor | admin, supervisor | `AAAA-MM-DD_manana` | `fecha`, `turno`, `notas`, `resumen`, `cerrado` |
-| `clientes` | admin, coordinador | admin, coordinador | automático | `nombre` (tutor), `telefono`, `barrio`, `perros` (ids), `plan`, `dias`, `turno`, `estado` ("activo", "pausa", "baja"), `notas` |
+| `clientes` | admin, coordinador | admin, coordinador | automático | `nombre` (tutor), `telefono`, `barrio`, `perros` (ids), `plan`, `dias` (["lunes", ...]), `turno`, `hora`, `estado` ("activo", "pausa", "baja"), `notas`. Los pone el servidor (no se cambian por `registros.save`): `aprobado` (`{ por, porNombre, en }`, al aprobar Juan), `acceso` (`{ activo, creadoEn }`; el hash del enlace nunca se devuelve), `pedidoId` |
 | `avisos` | equipo* y marketing | admin, coordinador, supervisor | automático | `fecha`, `barrio`, `tipo` ("obra o corte", "perro suelto", "clima", "seguridad", "cambio de horario", "otro"), `mensaje`, `vigenteHasta` (AAAA-MM-DD), `titulo` |
 | `pedidos` | admin, coordinador, marketing | admin, coordinador, marketing | automático | `fecha`, `tipo`, `estado` ("nuevo", "en-curso", "resuelto"), `titulo`, `detalle`, `datos`, `origen` |
 | `fichas` | admin, coordinador (tienen datos de tutores y de salud) | admin, coordinador | automático | `fecha`, `perroNombre`, `datos`, `categoria`, `estado` |
@@ -77,6 +78,7 @@ El **paseador** lleva la **pechera** (la muslera la lleva el ayudante).
 | `archivos` | admin, coordinador (comprobantes: solo admin) | se crean solo con `archivos.subir()` / `POST /api/archivos` (equipo) o desde el formulario web | automático | `fecha`, `tipo` ("carnet de vacunas", "comprobante de pago", "documento", "foto"), `titulo`, `nombreArchivo`, `mime`, `tamano`, `perroId`, `perroNombre`, `clienteId`, `pedidoId`, `nota`, `ubicacion` ("drive", "vercel" o "local"), `driveUrl` (si está en Drive) |
 | `fotos` | equipo* | equipo* | id del perro (`PJ-001`) | `perroId`, `perroNombre`, `miniatura` (data URL JPG ~15 KB, cuadrada 240 px), `archivoId` (foto grande en `archivos`, tipo "foto") |
 | `pagos` | **solo admin** | **solo admin** | automático | `fecha`, `concepto`, `monto`, `medio`, `pasadoAlLibro` |
+| `ajustes` | admin (y el cliente con sesión: solo `pagos`) | **solo admin** | `pagos` (único válido) | `alias` (6 a 20 letras, números, puntos o guiones; "" = sin cargar), `instrucciones` (hasta 400). El alias NO va en el código: lo carga Juan desde su panel. |
 | `movimientos` | **`ROLES_CONTADURIA`** (hoy: solo admin) | **`ROLES_CONTADURIA`** (hoy: solo admin) | automático | Contaduría (ingresos y egresos): `fecha` (AAAA-MM-DD), `tipo` ("ingreso" o "egreso"), `categoria` (ver abajo), `concepto` (2 a 120 letras), `monto` (número mayor que 0), `medio` (hasta 40 letras; los mismos de `pagos`: "Efectivo", "Transferencia", "Naranja X" u otro), `nota` (opcional, hasta 300), `pasadoAlLibro` (true/false) |
 
 \* equipo = admin, coordinador, supervisor, paseador y ayudante.
@@ -146,3 +148,76 @@ fotosPaseo.pendientes(); // fotos sacadas sin señal que todavía no se subieron
 ```
 
 Sacar la foto marca el paseo (`estado: "paseando"`, `horaPaseo`, `fotoPaseoId`). Sin señal, el paseo se marca igual y la foto se sube sola después. La foto la abren admin y coordinador (y el resto del equipo, porque es tipo "foto").
+
+## Chats y portal del cliente (E-045)
+
+Lo pidió Juan: comunicación entre paseadores, supervisores, ayudantes y coordinadores, con el cliente, y que el paseador avise al cliente y al supervisor. Y que el cliente entre a ver lo de su perro.
+
+### Canales y quién los usa
+
+| Canal | Leen y escriben | Notas |
+|---|---|---|
+| `equipo` | admin, coordinador, supervisor, paseador, ayudante | Todo el equipo. |
+| `calle` | admin, coordinador, supervisor, paseador, ayudante | Lo que pasa en el turno ("llegando", "falta retirar a…"). |
+| `coordinacion` | admin, coordinador, supervisor | Decisiones entre supervisión y coordinación. El paseador no lo ve. |
+| `dm_<a>__<b>` | **solo esos dos usuarios** | Directo. `canalDirecto(a, b)` ordena los nombres. El admin tampoco lo lee ni lo borra. Clientes no tienen directos. |
+| `cliente_<clienteId>` | el cliente dueño, coordinador y admin | Chat privado del cliente con Paseos Juan. Supervisor, paseador y ayudante **solo publican avisos** (`tipo: "aviso"`), no leen la conversación. |
+| `clientes` | clientes con sesión, coordinador y admin | Comunidad de clientes (P-08). Sin teléfonos ni correos (el servidor los rechaza), sin adjuntos; del cliente se muestra nombre e inicial ("Carla G."). Modera **solo el admin**: borrar mensajes y silenciar. |
+
+Marketing no está en los grupos (solo directos).
+
+### Colecciones (no se leen por `/api/registros`, solo por `/api/mensajes`)
+
+| Colección | id | Campos |
+|---|---|---|
+| `mensajes` | `<canal>_<AAAAMMDDTHHMMSSmmmZ>_<6 hex>` (se lista por prefijo de canal) | `canal`, `fecha`, `tipo` ("texto", "aviso", "foto"), `texto` (máx. 1000, sin HTML), `adjuntoId` (archivo), `perroId`, `perroNombre`, `autor` (usuario; cliente = `cliente:<id>`; avisos automáticos = `sistema`), `autorNombre`, `autorRol`, `automatico`, `clave` (aviso automático: `<idPaseo>:<paso>`), `creadoEn`; si lo borró el admin: `borrado: true`, `borradoPor`, `actualizadoEn` (texto y adjunto vacíos) |
+| `lecturas` | usuario (cliente: `cliente_<clienteId>`) | `{ "<canal>": ISO de la última lectura }` |
+| `canales` | canal | `ultimo` (id, tipo, texto corto, autor, autorNombre, creadoEn), `actualizadoEn`. Sirve para el resumen sin leer todos los mensajes. |
+| `moderacion` | `clientes` | `silenciados: { "<usuario>": ISO hasta }` |
+
+### Avisos automáticos al cliente
+
+Al guardar un `paseos` de **hoy** de un perro que figura en `clientes.perros` (cliente que no esté de baja), el servidor publica en `cliente_<id>` un mensaje `tipo: "aviso"`, `autor: "sistema"`, `autorNombre: "Paseos Juan"`:
+- `estado` pasa a "retirado" → "Retiramos a Pistacho · 09:45" (`horaRetiro`, o la hora actual).
+- `estado` "paseando" → "Pistacho está paseando" con `adjuntoId` = `fotoPaseoId` si ya está. Si la foto llega después (se sacó sin señal) → "Foto del paseo de Pistacho" con la foto.
+- `estado` pasa a "entregado" → "Entregamos a Pistacho · 10:40" (`horaEntrega`).
+- No se repite: el paseo guarda `avisosCliente` (lo maneja el servidor). Días pasados y perros sin cliente: no avisa.
+
+### Portal del cliente (P-01: pedir alta → Juan aprueba → horario → acceso)
+
+1. El tutor pide el alta con el formulario de la web (queda en `pedidos`).
+2. Juan aprueba con `clientesAcceso.aprobar({ pedidoId, perros, dias, turno, hora?, plan? })` (solo admin). Sin días y turno no se aprueba. Crea el cliente con los datos del pedido, marca el pedido "aprobado" y devuelve el enlace `/c/<token>`, que se ve **una sola vez** (en el servidor queda solo su hash SHA-256). Para un cliente ya cargado: `{ clienteId, dias, turno, ... }`.
+3. Juan (o el coordinador) le manda el enlace al cliente. Al abrirlo, `src/app.js` hace `session.loginCliente(token)` y lleva a `/cliente`. La sesión dura 90 días.
+4. Si lo pierde: `clientesAcceso.crear(clienteId)` (admin o coordinador, solo clientes aprobados) da un enlace nuevo y corta el anterior. `clientesAcceso.revocar(clienteId)` corta todo. Si el cliente pasa a "baja", su sesión deja de valer.
+
+El cliente ve **solo**: `paseos` y `fotos` de sus perros (sin ruta, notas ni usuarios del equipo), las fotos de sus perros en `/api/archivos?id=`, su chat `cliente_<id>`, la comunidad `clientes` y el alias de pago (`ajustes/pagos`). Nada de rutas, otros perros, pagos, contaduría ni equipo.
+
+`session.user()` del cliente: `{ usuario: "cliente:<id>", nombre, rol: "cliente", clienteId, perros: ["PJ-001"] }`.
+
+### Funciones de `src/api/client.js`
+
+```js
+import { mensajes, canalDirecto, clientesAcceso, datosPago, session, onDataChange } from "../api/client.js";
+
+mensajes.watch();                        // resumen cada 60 s (5 min con el almacenamiento provisorio)
+const lista = mensajes.cachedResumen();  // [{ canal, tipo, titulo, ultimo, sinLeer, leidoHasta, con?, clienteId? }]
+mensajes.sinLeer();                      // total para el globito del menú
+onDataChange((col) => { if (col === "mensajes") dibujarLista(); if (col === `mensajes:${abierto}`) dibujarChat(); });
+
+const parar = mensajes.watch(canal);     // al ABRIR un chat: cada 10 s mientras está visible. parar() al cerrarlo.
+mensajes.cached(canal);                  // mensajes guardados (orden cronológico)
+await mensajes.enviar(canal, texto);     // opts: { tipo: "aviso"|"foto", adjuntoId, perroId, perroNombre }
+await mensajes.enviar("cliente", "Llegamos en 5 minutos", { tipo: "aviso", perroId: "PJ-001" }); // paseador → cliente del perro
+await mensajes.marcarLeido(canal);
+await mensajes.contactos();              // equipo para abrir un directo: canalDirecto(yo, otro)
+mensajes.infoComunidad();                // { reglas, silenciadoHasta } de "clientes" (mostrar las reglas arriba)
+await mensajes.borrar(id); await mensajes.silenciar("cliente:<id>", 24); await mensajes.silenciados(); // solo admin
+
+await datosPago.leer();                  // { alias, instrucciones, pendiente } (alias "Pendiente de confirmar" si falta)
+await datosPago.guardar({ alias, instrucciones }); // solo admin
+```
+
+- Mostrá el texto como texto (`textContent`), nunca como HTML. Si `borrado` es true: "Mensaje borrado por el admin".
+- Sin señal, `enviar` lanza `ApiError` con `status 0`: mostrá "No se envió. Revisá la señal" y dejá el texto en la caja.
+- Límite: 30 mensajes por minuto por persona.
+- La página `/cliente` actual tiene datos de ejemplo (pagos, cupones, chat en `localStorage`, de Codex): estas funciones son las que los reemplazan cuando se haga la pantalla.

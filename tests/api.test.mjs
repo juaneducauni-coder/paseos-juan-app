@@ -26,6 +26,7 @@ const routes = {
   mensajes: (await import("../api/mensajes.js")).default,
   authCliente: (await import("../api/auth/cliente.js")).default,
   acceso: (await import("../api/clientes/acceso.js")).default,
+  aprobar: (await import("../api/clientes/aprobar.js")).default,
 };
 const { store } = await import("../api/_lib/store.js");
 
@@ -278,11 +279,20 @@ test("portal del cliente: enlace, sesión y solo lo de sus perros", async () => 
   assert.equal(alta.status, 201);
   await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-otro", nombre: "Otro", perros: ["PJ-002"], estado: "activo" } });
 
-  // Solo admin y coordMsj generan enlaces.
+  // P-01: el acceso lo crea la aprobación de Juan (admin), con el horario asignado.
   assert.equal((await call("acceso", { method: "POST", token: paseador, body: { clienteId: "cli-ana" } })).status, 403);
   assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "no-existe" } })).status, 404);
-  const crea = await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } });
+  assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } })).status, 409);
+  assert.equal((await call("aprobar", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana", dias: ["lunes"], turno: "Mañana" } })).status, 403);
+  assert.equal((await call("aprobar", { method: "POST", token: admin, body: { clienteId: "cli-ana" } })).status, 400);
+  // Ni el coordinador puede marcarlo aprobado a mano por /api/registros.
+  await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-ana", aprobado: { en: "2026-01-01" } } });
+  assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } })).status, 409);
+  const crea = await call("aprobar", { method: "POST", token: admin, body: { clienteId: "cli-ana", dias: ["lunes", "Miércoles"], turno: "Mañana", hora: "09:30" } });
   assert.equal(crea.status, 201);
+  assert.deepEqual(crea.body.cliente.dias, ["lunes", "miércoles"]);
+  assert.equal(crea.body.cliente.aprobado.por, "juan");
+  assert.equal(crea.body.cliente.acceso.hash, undefined);
   assert.match(crea.body.enlace, /^\/c\/[A-Za-z0-9_-]{43}$/);
   enlace = crea.body.enlace.slice(3);
   // El token nunca queda guardado en claro, y el hash no se devuelve.
@@ -350,7 +360,7 @@ test("mensajes del cliente: su canal y nada más; el equipo de calle solo public
   assert.equal((await call("mensajes", { method: "POST", token: clienteToken, body: { canal: "cliente_cli-otro", texto: "hola" } })).status, 403);
   assert.equal((await call("mensajes", { url: "/?contactos=1", token: clienteToken })).status, 403);
   const resumen = await call("mensajes", { url: "/?resumen=1", token: clienteToken });
-  assert.deepEqual(resumen.body.canales.map((c) => c.canal), [canal]);
+  assert.deepEqual(resumen.body.canales.map((c) => c.canal).sort(), ["cliente_cli-ana", "clientes"]);
 
   // Coordinador y admin leen y responden.
   assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: coordMsj })).body.mensajes.length, 1);
@@ -442,6 +452,94 @@ test("enlace del cliente: renovar y revocar cortan las sesiones", async () => {
   // Nombres reservados para usuarios del equipo.
   assert.equal((await call("usuarios", { method: "POST", token: admin, body: { usuario: "cliente_x", nombre: "X", rol: "paseador", pin: "620483", crear: true } })).status, 400);
   assert.equal((await call("usuarios", { method: "POST", token: admin, body: { usuario: "a__b", nombre: "X", rol: "paseador", pin: "620483", crear: true } })).status, 400);
+});
+
+let clienteRocco;
+
+test("P-01: el alta pedida en la web se aprueba con horario y da el acceso", async () => {
+  const pide = await call("evaluacion", { method: "POST", body: { perro: "Rocco", responsable: "Carla Gómez", telefono: "1144440000", zona: "Pilar" } });
+  assert.equal(pide.status, 201);
+  const pedido = (await call("registros", { url: "/?col=pedidos", token: admin })).body.registros.find((p) => p.titulo === "Evaluación: Rocco");
+  assert.equal((await call("aprobar", { method: "POST", token: admin, body: { pedidoId: pedido.id, dias: ["martes"], turno: "Tarde" } })).status, 400);
+  const ok = await call("aprobar", { method: "POST", token: admin, body: { pedidoId: pedido.id, perros: ["PJ-010"], dias: ["martes", "jueves"], turno: "Tarde", plan: "2 veces por semana" } });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.body.cliente.nombre, "Carla Gómez");
+  assert.equal(ok.body.cliente.barrio, "Pilar");
+  assert.equal(ok.body.cliente.pedidoId, pedido.id);
+  const marcado = (await call("registros", { url: "/?col=pedidos", token: admin })).body.registros.find((p) => p.id === pedido.id);
+  assert.equal(marcado.estado, "aprobado");
+  assert.equal(marcado.clienteId, ok.body.cliente.id);
+  assert.equal((await call("aprobar", { method: "POST", token: admin, body: { pedidoId: pedido.id, perros: ["PJ-010"], dias: ["martes"], turno: "Tarde" } })).status, 409);
+  const entra = await call("authCliente", { method: "POST", body: { token: ok.body.enlace.slice(3) } });
+  assert.equal(entra.status, 200);
+  assert.deepEqual(entra.body.user.perros, ["PJ-010"]);
+  assert.equal(entra.body.user.nombre, "Carla Gómez");
+  clienteRocco = entra.body.token;
+  // De baja: la sesión deja de valer.
+  const id = ok.body.cliente.id;
+  await call("registros", { method: "POST", token: admin, body: { col: "clientes", id, estado: "baja" } });
+  assert.equal((await call("me", { token: clienteRocco })).status, 401);
+  await call("registros", { method: "POST", token: admin, body: { col: "clientes", id, estado: "activo" } });
+  assert.equal((await call("me", { token: clienteRocco })).status, 200);
+});
+
+test("alias de pago: lo configura el admin y lo ven los clientes con sesión", async () => {
+  assert.deepEqual((await call("registros", { url: "/?col=ajustes", token: clienteRocco })).body.registros, []);
+  assert.equal((await call("registros", { method: "POST", token: admin, body: { col: "ajustes", id: "pagos", alias: "con espacios" } })).status, 400);
+  assert.equal((await call("registros", { method: "POST", token: admin, body: { col: "ajustes", id: "otro", alias: "algo.valido" } })).status, 400);
+  assert.equal((await call("registros", { method: "POST", token: coordMsj, body: { col: "ajustes", id: "pagos", alias: "algo.valido" } })).status, 403);
+  const guarda = await call("registros", { method: "POST", token: admin, body: { col: "ajustes", id: "pagos", alias: "Prueba.Alias", instrucciones: "<b>Transferí</b> y avisá", extra: "x" } });
+  assert.equal(guarda.status, 201);
+  assert.equal(guarda.body.registro.alias, "prueba.alias");
+  assert.equal(guarda.body.registro.extra, undefined);
+  const visto = (await call("registros", { url: "/?col=ajustes", token: clienteRocco })).body.registros;
+  assert.deepEqual(Object.keys(visto[0]).sort(), ["actualizadoEn", "alias", "id", "instrucciones"]);
+  assert.equal(visto[0].instrucciones, "Transferí y avisá");
+  for (const token of [coordMsj, paseador, supMsj]) {
+    assert.equal((await call("registros", { url: "/?col=ajustes", token })).status, 403);
+  }
+});
+
+test("P-08: comunidad de clientes con reglas y moderación del admin", async () => {
+  const habla = await call("mensajes", { method: "POST", token: clienteRocco, body: { canal: "clientes", texto: "¡Hola a todos! Rocco ama el parque" } });
+  assert.equal(habla.status, 201);
+  assert.equal(habla.body.mensaje.autorNombre, "Carla G.");
+  assert.equal((await call("mensajes", { method: "POST", token: clienteRocco, body: { canal: "clientes", texto: "Escribime al 11 4444-0000" } })).status, 400);
+  assert.equal((await call("mensajes", { method: "POST", token: clienteRocco, body: { canal: "clientes", texto: "mi mail es carla@correo.com" } })).status, 400);
+  assert.equal((await call("mensajes", { url: "/?canal=clientes", token: paseador })).status, 403);
+  assert.equal((await call("mensajes", { url: "/?canal=clientes", token: supMsj })).status, 403);
+  const lee = await call("mensajes", { url: "/?canal=clientes", token: coordMsj });
+  assert.equal(lee.body.mensajes.length, 1);
+  assert.ok(lee.body.reglas.length >= 3);
+  const resumen = (await call("mensajes", { url: "/?resumen=1", token: clienteRocco })).body.canales.map((c) => c.canal).sort();
+  assert.equal(resumen.length, 2);
+  assert.ok(resumen.includes("clientes"));
+
+  // Borrar: solo el admin; el cambio llega también a quien pide "lo nuevo".
+  const id = habla.body.mensaje.id;
+  assert.equal((await call("mensajes", { method: "POST", token: coordMsj, body: { borrar: id } })).status, 403);
+  const borra = await call("mensajes", { method: "POST", token: admin, body: { borrar: id } });
+  assert.equal(borra.status, 200);
+  assert.equal(borra.body.mensaje.borrado, true);
+  assert.equal(borra.body.mensaje.texto, "");
+  const nuevos = await call("mensajes", { url: `/?canal=clientes&desde=${encodeURIComponent(habla.body.mensaje.creadoEn)}`, token: clienteRocco });
+  assert.equal(nuevos.body.mensajes[0].borrado, true);
+  // Los directos ajenos no se moderan (ni se revela si existen).
+  const dm = (await call("mensajes", { url: "/?canal=dm_coordina__sebastian", token: coordMsj })).body.mensajes[0].id;
+  assert.equal((await call("mensajes", { method: "POST", token: admin, body: { borrar: dm } })).status, 404);
+
+  // Silenciar.
+  assert.equal((await call("mensajes", { method: "POST", token: coordMsj, body: { silenciar: "cliente:x" } })).status, 403);
+  const usuario = (await call("me", { token: clienteRocco })).body.user.usuario;
+  assert.equal((await call("mensajes", { method: "POST", token: admin, body: { silenciar: usuario, horas: 2 } })).status, 200);
+  assert.equal((await call("mensajes", { method: "POST", token: clienteRocco, body: { canal: "clientes", texto: "hola" } })).status, 403);
+  assert.ok((await call("mensajes", { url: "/?canal=clientes", token: clienteRocco })).body.silenciadoHasta);
+  assert.ok((await call("mensajes", { url: "/?moderacion=1", token: admin })).body.silenciados[usuario]);
+  assert.equal((await call("mensajes", { url: "/?moderacion=1", token: coordMsj })).status, 403);
+  // En su chat privado con Paseos Juan puede seguir escribiendo.
+  assert.equal((await call("mensajes", { method: "POST", token: clienteRocco, body: { canal: `cliente_${usuario.slice(8)}`, texto: "¿Por qué me silenciaron?" } })).status, 201);
+  await call("mensajes", { method: "POST", token: admin, body: { silenciar: usuario, horas: 0 } });
+  assert.equal((await call("mensajes", { method: "POST", token: clienteRocco, body: { canal: "clientes", texto: "Perdón, ya entendí" } })).status, 201);
 });
 
 test("bloqueo después de 5 intentos fallidos (mismo 401 genérico, no revela la cuenta)", async () => {

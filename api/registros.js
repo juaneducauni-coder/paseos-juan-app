@@ -6,8 +6,9 @@ import { randomBytes } from "node:crypto";
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
-import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo, CLIENTE_LEE, CAMPOS_CLIENTE } from "./_lib/permisos.js";
+import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo, CLIENTE_LEE, CAMPOS_CLIENTE, AJUSTES_CLIENTE } from "./_lib/permisos.js";
 import { avisosDePaseo } from "./_lib/mensajes.js";
+import { sinHash } from "./_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -130,12 +131,8 @@ export function nuevoId(fecha) {
   return `${fecha || now.toISOString().slice(0, 10)}_${stamp}_${randomBytes(3).toString("hex")}`;
 }
 
-// El acceso del cliente (hash del enlace) no se devuelve ni se cambia por acá: solo por /api/clientes/acceso.
-function sinHashDeAcceso(registro) {
-  if (!registro?.acceso) return registro;
-  const { hash, ...acceso } = registro.acceso;
-  return { ...registro, acceso };
-}
+// El acceso del cliente (hash del enlace) no se devuelve ni se cambia por acá: solo por /api/clientes/*.
+const sinHashDeAcceso = sinHash;
 
 function soloCampos(registro, campos) {
   const out = {};
@@ -147,10 +144,31 @@ function soloCampos(registro, campos) {
 async function listarParaCliente(user, col, desde) {
   if (!CLIENTE_LEE.includes(col)) throw new HttpError(403, "Tu usuario no puede ver estos datos.");
   const perros = new Set(user.perros || []);
-  let registros = (await store.list(col)).filter((r) => perros.has(r.perroId || (col === "fotos" ? r.id : "")));
+  const esDelCliente = col === "ajustes"
+    ? (r) => AJUSTES_CLIENTE.includes(r.id)
+    : (r) => perros.has(r.perroId || (col === "fotos" ? r.id : ""));
+  let registros = (await store.list(col)).filter(esDelCliente);
   if (desde) registros = registros.filter((r) => (r.fecha || r.creadoEn?.slice(0, 10) || "") >= desde);
   registros.sort((a, b) => String(b.actualizadoEn || b.creadoEn).localeCompare(String(a.actualizadoEn || a.creadoEn)));
   return registros.map((r) => soloCampos(r, CAMPOS_CLIENTE[col]));
+}
+
+// Ajustes del admin. "pagos": alias de transferencia (6 a 20 letras, números, punto o guion) e instrucciones.
+const ALIAS = /^[a-z0-9.-]{6,20}$/;
+function validarAjustes(id, datos) {
+  if (id !== "pagos") throw new HttpError(400, "Ajuste desconocido.");
+  const out = {};
+  if (datos.alias !== undefined) {
+    const alias = String(datos.alias ?? "").trim().toLowerCase();
+    if (alias && !ALIAS.test(alias)) throw new HttpError(400, "El alias tiene que tener de 6 a 20 letras, números, puntos o guiones.");
+    out.alias = alias;
+  }
+  if (datos.instrucciones !== undefined) {
+    const texto = String(datos.instrucciones ?? "").replace(/<[^>]*>/g, "").replace(/[<>]/g, "").trim();
+    if (texto.length > 400) throw new HttpError(400, "Las instrucciones son muy largas (máximo 400 letras).");
+    out.instrucciones = texto;
+  }
+  return out;
 }
 
 function limpiar(datos, max) {
@@ -222,9 +240,13 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
 
     const ahora = new Date().toISOString();
     const previo = body.id ? await store.get(col, id) : null;
-    const datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
-    // El acceso del cliente (enlace) solo se cambia por /api/clientes/acceso.
-    if (col === "clientes") delete datos.acceso;
+    let datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
+    if (col === "ajustes") datos = validarAjustes(id, datos);
+    // El acceso del cliente (enlace) y la aprobación de Juan solo se cambian por /api/clientes/*.
+    if (col === "clientes") {
+      delete datos.acceso;
+      delete datos.aprobado;
+    }
     const registro = {
       ...(previo || {}),
       ...datos,

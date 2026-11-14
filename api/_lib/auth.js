@@ -140,7 +140,7 @@ export async function requireUser(req, roles = null) {
   if (data.r === ROL_CLIENTE) {
     if (!data.c || !/^[a-z0-9][a-z0-9_.-]{0,100}$/i.test(String(data.c))) throw new HttpError(401, "Tu sesión ya no es válida.");
     const cliente = await store.get("clientes", data.c);
-    if (!cliente || !cliente.acceso?.activo || cliente.acceso.creadoEn !== data.v) {
+    if (!cliente || cliente.estado === "baja" || !cliente.acceso?.activo || cliente.acceso.creadoEn !== data.v) {
       throw new HttpError(401, "Este enlace ya no está activo. Pedile uno nuevo a Paseos Juan.");
     }
     if (roles && !roles.includes(ROL_CLIENTE)) throw new HttpError(403, "Tu usuario no tiene permiso para esto.");

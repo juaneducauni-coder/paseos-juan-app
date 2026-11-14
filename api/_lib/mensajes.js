@@ -3,6 +3,7 @@
 // - mensajes: id = <canal>_<ISO compacto>_<random> (se listan por prefijo de canal).
 // - lecturas: id = usuario (cliente: "cliente_<clienteId>"); { "<canal>": ISO de la última lectura }.
 // - canales:  id = canal; último mensaje de cada canal, para el resumen sin leer todos los mensajes.
+// - moderacion: id = "clientes"; { silenciados: { "<usuario>": ISO hasta } } (lo maneja el admin).
 import { randomBytes } from "node:crypto";
 import { HttpError } from "./http.js";
 import { store } from "./store.js";
@@ -11,6 +12,28 @@ import { perrosDeCliente } from "./auth.js";
 export const TIPOS_MENSAJE = ["texto", "aviso", "foto"];
 export const MAX_TEXTO = 1000;
 export const MAX_LISTA = 200;
+
+// Reglas de la comunidad de clientes (P-08). Las pantallas las muestran arriba del chat.
+export const REGLAS_COMUNIDAD = [
+  "Es un espacio de clientes de Paseos Juan: respeto y buena onda.",
+  "No compartas teléfonos, direcciones ni datos de pago: por seguridad, el chat no los acepta.",
+  "Para algo de tu perro o tu plan, escribile a Paseos Juan por tu chat privado.",
+  "El admin puede borrar mensajes y silenciar a quien no respete las reglas.",
+];
+
+// Teléfonos (8 o más números seguidos, con espacios o guiones) y correos: no van en la comunidad.
+const PARECE_TELEFONO = /(?:\+?\d[\s().-]*){8,}/;
+const PARECE_CORREO = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+export function tieneDatosPrivados(texto) {
+  return PARECE_TELEFONO.test(texto) || PARECE_CORREO.test(texto);
+}
+
+// En la comunidad, de cada cliente se muestra solo el nombre y la inicial del apellido.
+export function nombreCorto(nombre) {
+  const partes = String(nombre || "").trim().split(/\s+/).filter(Boolean);
+  if (!partes.length) return "Cliente";
+  return partes.length > 1 ? `${partes[0]} ${partes[1][0].toUpperCase()}.` : partes[0];
+}
 
 const ZONA = "America/Argentina/Buenos_Aires";
 
@@ -67,7 +90,7 @@ export async function publicar({ canal, texto, tipo = "texto", adjuntoId = "", p
     perroId: perroId || "",
     perroNombre: perroNombre || "",
     autor: autor.usuario,
-    autorNombre: autor.nombre,
+    autorNombre: canal === "clientes" && autor.rol === "cliente" ? nombreCorto(autor.nombre) : autor.nombre,
     autorRol: autor.rol,
     automatico: Boolean(automatico),
     ...(clave ? { clave } : {}),
@@ -85,17 +108,52 @@ export async function publicar({ canal, texto, tipo = "texto", adjuntoId = "", p
   return mensaje;
 }
 
-// Mensajes de un canal en orden cronológico (los últimos MAX_LISTA), opcionalmente desde un ISO.
+const cambio = (m) => String(m.actualizadoEn || m.creadoEn || "");
+
+// Mensajes de un canal en orden cronológico (los últimos MAX_LISTA), opcionalmente desde un ISO
+// (trae los creados o cambiados después: así llegan también los mensajes que borró el admin).
 export async function mensajesDe(canal, desde = "") {
   if (desde) {
     // Si el canal no tiene nada nuevo, no hace falta leer todos sus mensajes.
     const indice = await store.get("canales", canal);
-    if (!indice?.ultimo?.creadoEn || indice.ultimo.creadoEn <= desde) return [];
+    const ultimoCambio = [indice?.ultimo?.creadoEn, indice?.actualizadoEn].filter(Boolean).sort().pop() || "";
+    if (!ultimoCambio || ultimoCambio <= desde) return [];
   }
   const lista = (await store.list("mensajes", `${canal}_`))
-    .filter((m) => m.canal === canal && (!desde || String(m.creadoEn) > desde))
+    .filter((m) => m.canal === canal && (!desde || cambio(m) > desde))
     .sort((a, b) => String(a.creadoEn).localeCompare(String(b.creadoEn)) || String(a.id).localeCompare(String(b.id)));
   return lista.slice(-MAX_LISTA);
+}
+
+// Borrado por el admin: el mensaje queda (para el orden y el historial) pero sin contenido.
+export async function borrarMensaje(id, admin) {
+  const mensaje = await store.get("mensajes", id);
+  if (!mensaje) throw new HttpError(404, "Ese mensaje no existe.");
+  const ahora = new Date().toISOString();
+  const borrado = { ...mensaje, texto: "", adjuntoId: "", borrado: true, borradoPor: admin.usuario, actualizadoEn: ahora };
+  await store.put("mensajes", borrado);
+  const indice = await store.get("canales", mensaje.canal);
+  if (indice) {
+    const ultimo = indice.ultimo?.id === id ? { ...indice.ultimo, texto: "", borrado: true } : indice.ultimo;
+    await store.put("canales", { ...indice, ultimo, actualizadoEn: ahora });
+  }
+  return borrado;
+}
+
+// Silenciados de la comunidad: { usuario: ISO hasta }. Solo cuenta lo vigente.
+export async function silenciados() {
+  const registro = (await store.get("moderacion", "clientes")) || {};
+  const ahora = new Date().toISOString();
+  return Object.fromEntries(Object.entries(registro.silenciados || {}).filter(([, hasta]) => hasta > ahora));
+}
+
+export async function silenciar(usuario, horas, admin) {
+  const lista = await silenciados();
+  if (horas > 0) lista[usuario] = new Date(Date.now() + horas * 3600 * 1000).toISOString();
+  else delete lista[usuario];
+  const ahora = new Date().toISOString();
+  await store.put("moderacion", { id: "clientes", col: "moderacion", silenciados: lista, actualizadoPor: admin.usuario, actualizadoEn: ahora });
+  return lista;
 }
 
 // Cliente al que pertenece un perro (colección "clientes", campo "perros"). Los de baja no cuentan.

@@ -55,6 +55,9 @@ export const COLECCIONES = {
   // Contaduría: ingresos y egresos (registro de apoyo; la fuente oficial es el Libro contable).
   // Los campos y sus valores válidos los controla api/registros.js.
   movimientos: { leer: ROLES_CONTADURIA, escribir: ROLES_CONTADURIA, porFecha: true },
+  // Ajustes que configura Juan desde el panel. Hoy solo id "pagos": { alias, instrucciones }.
+  // El alias NO va en el código. Lo lee el admin y, por el portal, los clientes con sesión.
+  ajustes: { leer: ["admin"], escribir: ["admin"] },
 };
 
 export function coleccion(nombre) {
@@ -95,12 +98,15 @@ export function puedeSubirArchivo(rol, tipo) {
 // ---------- Portal del cliente ----------
 // El cliente (tutor) entra por un enlace y ve SOLO lo de sus perros: el estado de sus paseos
 // y sus fotos. Nada de rutas, otros perros, pagos ni datos del equipo.
-export const CLIENTE_LEE = ["paseos", "fotos"];
+export const CLIENTE_LEE = ["paseos", "fotos", "ajustes"];
 // Campos que ve el cliente (sin ruta, notas internas ni usuarios del equipo).
 export const CAMPOS_CLIENTE = {
   paseos: ["id", "fecha", "perroId", "perroNombre", "turno", "estado", "horaRetiro", "horaPaseo", "horaEntrega", "fotoPaseoId", "sinFotoPaseo", "actualizadoEn"],
   fotos: ["id", "perroId", "perroNombre", "miniatura", "archivoId", "actualizadoEn"],
+  ajustes: ["id", "alias", "instrucciones", "actualizadoEn"],
 };
+// De "ajustes", el cliente solo ve estos registros (datos de pago para transferir).
+export const AJUSTES_CLIENTE = ["pagos"];
 
 // Archivos según el usuario completo: el cliente solo abre fotos de sus perros.
 export function puedeVerArchivoUsuario(user, archivo) {
@@ -125,7 +131,11 @@ export const CANALES_GRUPO = {
 // Supervisor, paseador y ayudante solo PUBLICAN avisos (tipo "aviso"); no leen la conversación.
 const CLIENTE_CONVERSA = ["admin", "coordinador"];
 const CLIENTE_SOLO_AVISOS = ["supervisor", "paseador", "ayudante"];
-const CANAL = /^(equipo|calle|coordinacion|dm_[a-z0-9._-]{3,31}__[a-z0-9._-]{3,31}|cliente_[a-z0-9][a-z0-9_.-]{0,79})$/i;
+// Comunidad de clientes (P-08): "clientes". Leen y escriben los clientes con sesión, coordinador y admin.
+// Modera SOLO el admin (borrar mensajes y silenciar). El resto del equipo no participa.
+export const CANAL_COMUNIDAD = "clientes";
+export const COMUNIDAD_ROLES = ["cliente", "admin", "coordinador"];
+const CANAL = /^(equipo|calle|coordinacion|clientes|dm_[a-z0-9._-]{3,31}__[a-z0-9._-]{3,31}|cliente_[a-z0-9][a-z0-9_.-]{0,79})$/i;
 
 export function canalDirecto(a, b) {
   const [x, y] = [String(a), String(b)].sort();
@@ -145,14 +155,19 @@ export function otroDelDirecto(canal, usuario) {
   return canalDirecto(yo, otro) === canal ? otro : null;
 }
 
-// Qué puede hacer `user` en `canal`: { valido, tipo, leer, escribir, soloAvisos, clienteId?, otro? }.
+// Qué puede hacer `user` en `canal`: { valido, tipo, leer, escribir, soloAvisos, moderar?, clienteId?, otro? }.
+// tipo: "grupo" | "comunidad" | "directo" | "cliente".
 export function accesoCanal(user, canal) {
   const nada = { valido: false, leer: false, escribir: false, soloAvisos: false };
   if (!CANAL.test(String(canal || ""))) return nada;
   const rol = user?.rol;
   if (CANALES_GRUPO[canal]) {
     const ok = rol !== "cliente" && CANALES_GRUPO[canal].roles.includes(rol);
-    return { valido: true, tipo: "grupo", leer: ok, escribir: ok, soloAvisos: false };
+    return { valido: true, tipo: "grupo", leer: ok, escribir: ok, soloAvisos: false, moderar: ok && rol === "admin" };
+  }
+  if (canal === CANAL_COMUNIDAD) {
+    const ok = COMUNIDAD_ROLES.includes(rol);
+    return { valido: true, tipo: "comunidad", leer: ok, escribir: ok, soloAvisos: false, moderar: rol === "admin" };
   }
   if (canal.startsWith("dm_")) {
     const otro = rol === "cliente" ? null : otroDelDirecto(canal, user?.usuario);
@@ -163,7 +178,7 @@ export function accesoCanal(user, canal) {
     const ok = user.clienteId === clienteId;
     return { valido: true, tipo: "cliente", leer: ok, escribir: ok, soloAvisos: false, clienteId };
   }
-  if (CLIENTE_CONVERSA.includes(rol)) return { valido: true, tipo: "cliente", leer: true, escribir: true, soloAvisos: false, clienteId };
+  if (CLIENTE_CONVERSA.includes(rol)) return { valido: true, tipo: "cliente", leer: true, escribir: true, soloAvisos: false, moderar: rol === "admin", clienteId };
   if (CLIENTE_SOLO_AVISOS.includes(rol)) return { valido: true, tipo: "cliente", leer: false, escribir: true, soloAvisos: true, clienteId };
   return { valido: true, tipo: "cliente", leer: false, escribir: false, soloAvisos: false, clienteId };
 }
