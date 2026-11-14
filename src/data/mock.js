@@ -772,6 +772,7 @@ export const MENU_ITEMS = [
   ["Tienda", "/tienda", "shoppingBag"],
   ["Compromiso", "/#testimonios", "message"],
   ["Preguntas frecuentes", "/#faq", "help"],
+  ["Manual de la app", "/manual", "play"],
   ["Contacto", "/#contacto", "mail"],
   ["Ingresar", "/login", "logIn"],
   ["Registro", "/registro", "userPlus"],

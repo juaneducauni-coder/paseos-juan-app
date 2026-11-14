@@ -19,6 +19,7 @@ import "./ui/instalar.js";
 import { landingPage, registerLandingEvents } from "./views/landing.js";
 import { preciosPage } from "./views/precios.js";
 import { tiendaPage, registerTiendaEvents } from "./views/tienda.js";
+import { manualPage, registerManualEvents } from "./views/manual.js";
 import { loginPage, registroPage, sinPermisoPage, registerAccesoEvents } from "./views/acceso.js";
 import { session, ROLE_PAGES, onDataChange, flushPending } from "./api/client.js";
 import { clientDashboard, registerClienteEvents } from "./views/cliente.js";
@@ -64,6 +65,7 @@ window.addEventListener("storage", (e) => {
 registerSharedEvents();
 registerLandingEvents();
 registerTiendaEvents();
+registerManualEvents();
 registerAccesoEvents();
 registerClienteEvents();
 registerPaseadorEvents();
@@ -101,6 +103,12 @@ export function render() {
 
   if (path === "/tienda") {
     app.innerHTML = tiendaPage();
+    hydrateAfterRender();
+    return;
+  }
+
+  if (path === "/manual") {
+    app.innerHTML = manualPage();
     hydrateAfterRender();
     return;
   }
