@@ -468,6 +468,8 @@ test("P-01: el alta pedida en la web se aprueba con horario y da el acceso", asy
   assert.equal(pide.status, 201);
   const pedido = (await call("registros", { url: "/?col=pedidos", token: admin })).body.registros.find((p) => p.titulo === "Evaluación: Rocco");
   assert.equal((await call("aprobar", { method: "POST", token: admin, body: { pedidoId: pedido.id, dias: ["martes"], turno: "Tarde" } })).status, 400);
+  // Un perro que ya es de otro cliente: no se aprueba y el pedido sigue pendiente.
+  assert.equal((await call("aprobar", { method: "POST", token: admin, body: { pedidoId: pedido.id, perros: ["PJ-001"], dias: ["martes"], turno: "Tarde" } })).status, 409);
   const ok = await call("aprobar", { method: "POST", token: admin, body: { pedidoId: pedido.id, perros: ["PJ-010"], dias: ["martes", "jueves"], turno: "Tarde", plan: "2 veces por semana" } });
   assert.equal(ok.status, 201);
   assert.equal(ok.body.cliente.nombre, "Carla Gómez");

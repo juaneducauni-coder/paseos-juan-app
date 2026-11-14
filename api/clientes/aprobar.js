@@ -6,7 +6,7 @@
 // Sin horario asignado (días y turno) no se aprueba. Respuesta: { cliente, enlace: "/c/<token>", acceso }.
 // El enlace se muestra UNA vez: en el servidor queda solo su hash.
 import { handler, send, readJson, HttpError } from "../_lib/http.js";
-import { requireUser } from "../_lib/auth.js";
+import { requireUser, perrosDeCliente } from "../_lib/auth.js";
 import { store } from "../_lib/store.js";
 import { nuevoId } from "../registros.js";
 import { validarHorario, validarPerros, activarAcceso, sinHash } from "../_lib/clientes.js";
@@ -21,6 +21,7 @@ export default handler({ POST: 1 }, async (req, res) => {
   const ahora = new Date().toISOString();
   const aprobado = { por: user.usuario, porNombre: user.nombre, en: ahora };
   let cliente;
+  let pedidoAprobado = null; // el pedido se marca aprobado solo si el alta sale bien
 
   if (body.pedidoId) {
     const pedidoId = String(body.pedidoId);
@@ -49,7 +50,7 @@ export default handler({ POST: 1 }, async (req, res) => {
       creadoPorNombre: user.nombre,
       creadoEn: ahora,
     };
-    await store.put("pedidos", { ...pedido, estado: "aprobado", clienteId: cliente.id, actualizadoPor: user.usuario, actualizadoPorNombre: user.nombre, actualizadoEn: ahora });
+    pedidoAprobado = { ...pedido, estado: "aprobado", clienteId: cliente.id, actualizadoPor: user.usuario, actualizadoPorNombre: user.nombre, actualizadoEn: ahora };
   } else {
     const clienteId = String(body.clienteId || "");
     if (!ID.test(clienteId)) throw new HttpError(400, "Falta el pedido o el cliente a aprobar.");
@@ -65,6 +66,12 @@ export default handler({ POST: 1 }, async (req, res) => {
     };
   }
 
+  // Cada perro es de un solo cliente (si no, una familia vería los paseos de otra).
+  const otros = (await store.list("clientes")).filter((c) => c.id !== cliente.id && c.estado !== "baja");
+  const repetido = perrosDeCliente(cliente).find((perro) => otros.some((c) => perrosDeCliente(c).includes(perro)));
+  if (repetido) throw new HttpError(409, `El perro ${repetido} ya es de otro cliente. Revisá el código.`);
+
   const resultado = await activarAcceso(cliente, user);
+  if (pedidoAprobado) await store.put("pedidos", pedidoAprobado);
   return send(res, 201, { ok: true, cliente: sinHash(resultado.cliente), enlace: resultado.enlace, acceso: resultado.acceso });
 });
