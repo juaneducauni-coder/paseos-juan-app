@@ -36,6 +36,7 @@ import {
   plantillasDesdePlanilla,
 } from "../data/realData.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
+import { routeName, sinCodigosDeRuta } from "../ui/rutas.js";
 import { navigate, render } from "../app.js";
 import { session, registros, onDataChange, hoyAR, fotosPerros, archivos } from "../api/client.js";
 import { pestanaMensajes } from "./mensajes.js";
@@ -114,13 +115,6 @@ const TOUCH_CALM_MS = 900;
 
 // ---------- Utilidades ----------
 
-// "PJ_1M" → "Ruta 1" (o "Ruta 1 · Mañana"): el código interno no se muestra en pantalla.
-function routeName(code, { withShift = false } = {}) {
-  const text = String(code || "").trim();
-  const match = /^PJ_(\d+)([MT])$/i.exec(text);
-  if (!match) return text;
-  return `Ruta ${match[1]}${withShift ? ` · ${match[2].toUpperCase() === "M" ? "Mañana" : "Tarde"}` : ""}`;
-}
 
 function esc(value) {
   return String(value ?? "")
@@ -444,7 +438,7 @@ async function refreshAll(announce = true) {
   const failed = results.find((result) => result.status === "rejected");
   if (failed) setFlash("sync", failed.reason?.message || "No se pudieron traer los datos.", "error");
   else if (!navigator.onLine) setFlash("sync", "Sin señal: ves lo último que se guardó en este teléfono.", "info");
-  else setFlash("sync", `Datos actualizados a las ${nowInArgentina().time} hs.`);
+  else setFlash("sync", `Datos actualizados a las ${nowInArgentina().time}.`);
   rerender("sv-refresh");
 }
 
@@ -814,7 +808,7 @@ function routesFor(view) {
 function routeSourceLabel(route) {
   if (route.source === "dia") return "Cambio del día (coordinador)";
   if (route.source === "plantilla") return "Plantilla semanal (coordinador)";
-  return "Planilla RPJ (respaldo)";
+  return "Planilla de rutas (respaldo)";
 }
 
 // Perros únicos del turno (con ficha), en el orden en que aparecen en las rutas.
@@ -1104,10 +1098,10 @@ function shiftWarnings(routes) {
 
 const OBSERVATION_FIELDS = [
   { key: "lugar", label: "Lugar", hint: "Dónde pasó (calle, plaza, entrada del barrio). Sin domicilios.", type: "input" },
-  { key: "estimulo", label: "Estímulo: qué pasó antes", hint: "Ej.: se cruzó un perro suelto a 5 metros.", type: "textarea" },
-  { key: "reaccion", label: "Reacción: qué hizo el perro", hint: "Lo que se vio y se oyó. Ej.: ladró, se paró en dos patas y tiró de la correa.", type: "textarea" },
-  { key: "accion", label: "Acción: qué hiciste vos", hint: "Ej.: crucé de vereda y le di distancia.", type: "textarea" },
-  { key: "resultado", label: "Resultado: cómo terminó", hint: "Ej.: a los 30 segundos se calmó y siguió caminando.", type: "textarea" },
+  { key: "estimulo", label: "Estímulo: qué pasó antes", hint: "Por ejemplo: se cruzó un perro suelto a 5 metros.", type: "textarea" },
+  { key: "reaccion", label: "Reacción: qué hizo el perro", hint: "Lo que se vio y se oyó. Por ejemplo: ladró, se paró en dos patas y tiró de la correa.", type: "textarea" },
+  { key: "accion", label: "Acción: qué hiciste vos", hint: "Por ejemplo: crucé de vereda y le di distancia.", type: "textarea" },
+  { key: "resultado", label: "Resultado: cómo terminó", hint: "Por ejemplo: a los 30 segundos se calmó y siguió caminando.", type: "textarea" },
 ];
 
 function emptyObservation(view) {
@@ -2349,7 +2343,7 @@ function AvisosSection(view) {
           `).join("")}
         </fieldset>
         <label class="sv-field" for="sv-aviso-mensaje">Qué pasa
-          <textarea id="sv-aviso-mensaje" rows="2" data-sv-aviso="mensaje" placeholder="Ej.: corte en la entrada sur hasta las 12" required>${esc(draft.mensaje)}</textarea>
+          <textarea id="sv-aviso-mensaje" rows="2" data-sv-aviso="mensaje" placeholder="Por ejemplo: corte en la entrada sur hasta las 12" required>${esc(draft.mensaje)}</textarea>
         </label>
         <label class="sv-field sv-field-short" for="sv-aviso-hasta">Vale hasta
           <input type="date" id="sv-aviso-hasta" data-sv-aviso="vigenteHasta" value="${esc(draft.vigenteHasta)}" min="${view.fecha}" required />
@@ -2414,10 +2408,10 @@ function ObservationSection(view, dogs) {
 const OBS_SHORT = { lugar: "Lugar", estimulo: "Qué pasó antes", reaccion: "Qué hizo el perro", accion: "Qué hiciste vos", resultado: "Cómo terminó" };
 const OBS_PLACEHOLDER = {
   lugar: "Calle o plaza. Sin domicilios.",
-  estimulo: "Ej.: pasó un perro suelto a 5 m",
-  reaccion: "Ej.: ladró y tiró de la correa",
-  accion: "Ej.: crucé de vereda",
-  resultado: "Ej.: a los 30 s se calmó",
+  estimulo: "Por ejemplo: pasó un perro suelto a 5 metros",
+  reaccion: "Por ejemplo: ladró y tiró de la correa",
+  accion: "Por ejemplo: crucé de vereda",
+  resultado: "Por ejemplo: a los 30 segundos se calmó",
 };
 
 function ObservationCard(obs) {
@@ -2553,7 +2547,7 @@ function ClosureSheet(view) {
   const body = `
     <p class="sv-line ${closure?.cerrado ? "is-ok" : "is-info"}">
       ${icon(closure?.cerrado ? "checkCircle" : "fileText", "sv-icon")}
-      <span>${closure?.cerrado ? esc(`Cerrado ${closedAt} hs. ${lastMark(closure, "Lo cerró")}`) : "Resumen listo. Copialo y cerrá."}</span>
+      <span>${closure?.cerrado ? esc(`Cerrado a las ${closedAt}. ${lastMark(closure, "Lo cerró")}`) : "Resumen listo. Copialo y cerrá."}</span>
     </p>
     <label class="sv-field" for="sv-close-summary"><span class="visually-hidden">Resumen del turno</span>
       <textarea id="sv-close-summary" class="sv-summary" rows="9" readonly>${esc(closureSummary(view))}</textarea>

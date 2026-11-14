@@ -27,6 +27,7 @@ import {
   plantillasDesdePlanilla,
   sumarMinutos,
 } from "../data/realData.js";
+import { routeName, sinCodigosDeRuta } from "../ui/rutas.js";
 import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros, usuarios, mensajes } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
@@ -1995,7 +1996,7 @@ function RouteCard(r, fecha, { detalle = false, filtro = false } = {}) {
   return `
     <li class="cd-card cd-route ${w.list.length ? "is-alert" : ""}">
       <div class="cd-route-top">
-        <strong class="cd-route-code">${esc(r.ruta)}</strong>
+        <strong class="cd-route-code">${esc(routeName(r.ruta))}</strong>
         ${chip(esc(r.turno), "info")}
         ${r.origen === "dia" ? chip("Cambio del día", "warn") : ""}
         ${w.list.length ? chip(`${w.list.length} ${w.list.length === 1 ? "alerta" : "alertas"}`, "alert", "alertTriangle") : ""}
@@ -2036,7 +2037,7 @@ function BaseCard(p, fecha, { detalle = false } = {}) {
   return `
     <li class="cd-card cd-route is-base">
       <div class="cd-route-top">
-        <strong class="cd-route-code">${esc(p.ruta)}</strong>
+        <strong class="cd-route-code">${esc(routeName(p.ruta))}</strong>
         ${chip(esc(p.turno), "info")}
         ${chip("Sin cargar", "neutral")}
       </div>
@@ -2144,7 +2145,7 @@ function WeekRouteButton(p, dia, turno) {
   return `
     <li>
       <button type="button" class="cd-wroute ${warns ? "is-alert" : ""}" id="coord-wr-${esc(p.id)}" data-coord-edit-plantilla="${esc(p.id)}" aria-label="Editar ${esc(p.ruta)}, ${dia.toLowerCase()} ${turno.toLowerCase()}, ${n} perros">
-        <span class="cd-wroute-top"><strong>${esc(p.ruta)}</strong>${warns ? chip(String(warns), "alert", "alertTriangle") : ""}<span class="cd-wroute-n">${n} ${n === 1 ? "perro" : "perros"}</span></span>
+        <span class="cd-wroute-top"><strong>${esc(routeName(p.ruta))}</strong>${warns ? chip(`${warns} ${warns === 1 ? "alerta" : "alertas"}`, "alert", "alertTriangle") : ""}<span class="cd-wroute-n">${n} ${n === 1 ? "perro" : "perros"}</span></span>
         <span class="cd-wroute-meta">${esc(routeSpan(p))} · ${esc(firstName(p.paseador) || "Sin paseador")}</span>
         ${Thumbs(sortedStops(p), 6)}
       </button>
@@ -2157,7 +2158,7 @@ function WeekBaseItem(p) {
   const n = (p.paradas || []).length;
   return `
     <li class="cd-wroute is-base">
-      <span class="cd-wroute-top"><strong>${esc(p.ruta)}</strong>${chip("Sin cargar", "neutral")}<span class="cd-wroute-n">${n} ${n === 1 ? "perro" : "perros"}</span></span>
+      <span class="cd-wroute-top"><strong>${esc(routeName(p.ruta))}</strong>${chip("Sin cargar", "neutral")}<span class="cd-wroute-n">${n} ${n === 1 ? "perro" : "perros"}</span></span>
       <span class="cd-wroute-meta">${esc(routeSpan(p))} · Sin paseador</span>
       ${Thumbs(sortedStops(p), 6)}
       ${BaseEditButton(p, "")}
@@ -2182,8 +2183,8 @@ function WeekView() {
         return `
           <details class="cd-fold cd-wday ${dia === today ? "is-today" : ""}" ${isOpen(`wd-${slugDia(dia)}`, dia === today) ? "open" : ""}>
             <summary data-coord-toggle="wd-${slugDia(dia)}">
-              <span class="cd-wday-title"><b>${dia}</b>${dia === today ? chip("Hoy", "info") : ""}${warns ? chip(String(warns), "alert", "alertTriangle") : ""}</span>
-              <span class="cd-muted">${del.length} ${del.length === 1 ? "ruta" : "rutas"} · ${perros}</span>
+              <span class="cd-wday-title"><b>${dia}</b>${dia === today ? chip("Hoy", "info") : ""}${warns ? chip(`${warns} ${warns === 1 ? "alerta" : "alertas"}`, "alert", "alertTriangle") : ""}</span>
+              <span class="cd-muted">${del.length} ${del.length === 1 ? "ruta" : "rutas"} · ${perros} ${perros === 1 ? "perro" : "perros"}</span>
               ${ic("chevronDown", "coord-icon cd-chev")}
             </summary>
             <div class="cd-fold-body">
@@ -2308,7 +2309,7 @@ function RouteEditor() {
       <div class="cd-subhead">
         <button type="button" class="cd-back" id="coord-ed-close" data-coord-ed-close>${ic("arrowLeft")}<span>Volver</span></button>
         <div>
-          <h1 id="coord-view-title" tabindex="-1">${esc(e.ruta)} · ${esc(e.turno)}</h1>
+          <h1 id="coord-view-title" tabindex="-1">${esc(routeName(e.ruta))} · ${esc(e.turno)}</h1>
           <p class="cd-muted">${isPlantilla ? `Todos los ${esc(e.dia.toLowerCase())}` : esc(dayLabel(e.fecha))}${e.nuevo ? " · nueva" : ""}</p>
         </div>
       </div>
@@ -2324,7 +2325,7 @@ function RouteEditor() {
 
       ${solicitud ? `
         <div class="cd-sol-box" role="note">
-          <p>${ic("bell")}<span><b>${esc(firstName(solicitud.creadoPorNombre) || "Supervisor")}:</b> ${esc(solicitud.titulo || solicitud.tipo || "")}${solicitud.detalle ? ` · ${esc(solicitud.detalle)}` : ""}</span></p>
+          <p>${ic("bell")}<span><b>${esc(firstName(solicitud.creadoPorNombre) || "Supervisor")}:</b> ${esc(sinCodigosDeRuta(solicitud.titulo || solicitud.tipo || ""))}${solicitud.detalle ? ` · ${esc(solicitud.detalle)}` : ""}</span></p>
           ${e.precarga ? `<p class="cd-done">${ic("checkCircle")}<span>${esc(e.precarga)}</span></p>` : ""}
           <div class="coord-field">
             <label for="coord-ed-respuesta">Respuesta</label>
@@ -2427,7 +2428,7 @@ function DogPicker() {
         <button type="button" class="cd-back" id="coord-picker-back" data-coord-ed-picker-close>${ic("arrowLeft")}<span>Ruta</span></button>
         <div>
           <h1 id="coord-view-title" tabindex="-1">Agregar perro</h1>
-          <p class="cd-muted">${esc(e.ruta)} · ${esc(e.turno)} · ${e.paradas.length} perros</p>
+          <p class="cd-muted">${esc(routeName(e.ruta))} · ${esc(e.turno)} · ${e.paradas.length} ${e.paradas.length === 1 ? "perro" : "perros"}</p>
         </div>
       </div>
       <div class="cd-picker-tools">
@@ -2721,7 +2722,7 @@ function MasView() {
         ${ic("eye")}<span>Accesibilidad</span>
       </button>
     </div>
-    ${fold("mas-fuentes", `${ic("help")}<b>Fuentes</b>`, `<p class="cd-foot">Rutas: ${esc(BUSINESS_INFO.officialSources.routes)} (${DATA_UPDATED}). Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Carnets y documentos: privados.</p>`)}
+    ${fold("mas-fuentes", `${ic("help")}<b>Fuentes</b>`, `<p class="cd-foot">Rutas: ${esc(String(BUSINESS_INFO.officialSources.routes).replace(/Planilla RPJ,\s*hoja BASE RUTAS/gi, "Planilla de rutas"))} (${DATA_UPDATED}). Perros: ${esc(BUSINESS_INFO.officialSources.dogs)}. Carnets y documentos: privados.</p>`)}
   `;
 }
 
@@ -3238,7 +3239,7 @@ function ActivityItem(record, kind) {
         <div class="cd-row-main"><strong>${esc(dogName || title)}</strong><small>${esc(fmtDate(record.fecha).slice(0, 5))}${record.hora ? ` · ${esc(record.hora)}` : ""}</small></div>
       </div>
       <p class="cd-chips">${chip(kind === "incidente" ? "Incidente" : "Observación", kind === "incidente" ? "alert" : "info")}${riesgo ? chip(`Riesgo ${esc(riesgo)}`, /alto|grave/i.test(riesgo) ? "alert" : "warn") : ""}</p>
-      ${dogName && record.titulo ? `<p class="cd-line">${esc(record.titulo)}</p>` : ""}
+      ${dogName && record.titulo ? `<p class="cd-line">${esc(sinCodigosDeRuta(record.titulo))}</p>` : ""}
       ${cardMore(memKey, "Detalle", `${dataList(rows)}${whoLine(record)}`)}
     </li>
   `;

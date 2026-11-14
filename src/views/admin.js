@@ -37,6 +37,7 @@ import {
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
 import { pestanaMensajes } from "./mensajes.js";
+import { routeName, sinCodigosDeRuta } from "../ui/rutas.js";
 import { session, registros, usuarios, archivos, fotosPerros, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS, clientesAcceso, datosPago, mensajes } from "../api/client.js";
 
 const DONE_KEY = "paseosJuanAdmin_prioridadesHechas";
@@ -922,8 +923,8 @@ function buildPriorities(live = liveData()) {
     const turno = live.nowMin < MIDDAY ? "mañana" : "tarde";
     const sorted = live.lateNow.slice().sort((x, y) => y.atraso - x.atraso);
     const worst = sorted[0];
-    const names = sorted.slice(0, 3).map((stop) => `${stop.perroNombre} (${stop.hora}, ${stop.route.ruta})`);
-    const routes = [...new Set(sorted.map((stop) => stop.route.ruta))];
+    const names = sorted.slice(0, 3).map((stop) => `${stop.perroNombre} (${stop.hora}, ${routeName(stop.route.ruta)})`);
+    const routes = [...new Set(sorted.map((stop) => routeName(stop.route.ruta)))];
     const contact = worst.route.supervisor || nameOf(worst.route.paseador) || "el supervisor del turno";
     // Si hoy nadie marcó ningún paseo en la app, lo más probable es que no se esté usando:
     // se dice así en vez de dar a todos por atrasados.
@@ -946,7 +947,7 @@ function buildPriorities(live = liveData()) {
       short: `${plural(count, "atrasado", "atrasados")} (${turno})`,
       title: `${plural(count, "perro atrasado", "perros atrasados")} en el turno ${turno}`,
       detail: `${listJoin(names)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Pasaron más de ${LATE_MINUTES} minutos de la hora prevista y nadie marcó el retiro.`,
-      action: `Preguntale a ${contact} qué pasa con ${worst.perroNombre} (retiro ${worst.hora}, ruta ${routes.join(" y ")}).`,
+      action: `Preguntale a ${contact} qué pasa con ${worst.perroNombre} (retiro ${worst.hora}, ${routes.join(" y ")}).`,
       target: "adm-cumplimiento",
       targetLabel: count === 1 ? "Ver atraso" : "Ver atrasos",
     });
@@ -1029,15 +1030,15 @@ function buildPriorities(live = liveData()) {
     const center = Object.keys(counts).sort((x, y) => counts[y] - counts[x])[0];
     const others = [...new Set(conflicts.flatMap((c) => [c.a, c.b]).filter((name) => name !== center))];
     const shifts = [...new Set(conflicts.map((c) => c.shift))];
-    const routes = shifts.map(routeFor).join(" y ");
+    const routes = shifts.map((shift) => routeName(routeFor(shift))).join(" y ");
     priorities.push({
       id: "seguridad-cruces",
       tag: "Seguridad",
       tone: "red",
       short: `${center}: no juntar`,
       title: `${center} comparte turno con perros marcados “no juntar”`,
-      detail: `Según la Planilla de rutas, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (ruta ${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
-      action: `Confirmá con Sebastián cómo se separa a ${center} de ${listJoin(others)} en la ruta ${routes}.`,
+      detail: `Según la Planilla de rutas, ${center} sale en el turno ${shifts.map((s) => s.toLowerCase()).join(" y ")} (${routes}) los mismos días que ${listJoin(others)}. Hay ${plural(conflicts.length, "cruce", "cruces")} en la semana.`,
+      action: `Confirmá con Sebastián cómo se separa a ${center} de ${listJoin(others)} en ${routes}.`,
       target: "adm-seguridad",
       targetLabel: "Ver cruces",
     });
@@ -1520,7 +1521,7 @@ function RouteCard(item) {
   return `
     <article class="adm-route ${late.length ? "has-late" : ""}" aria-labelledby="adm-route-${esc(route.ruta)}">
       <div class="adm-route-head">
-        <h3 id="adm-route-${esc(route.ruta)}">${esc(route.ruta || "Ruta")} <span>${esc(route.turno || "")}</span></h3>
+        <h3 id="adm-route-${esc(route.ruta)}">${esc(routeName(route.ruta) || "Ruta")} <span>${esc(route.turno || "")}</span></h3>
         <span class="adm-chip adm-chip--gray">${esc(ROUTE_SOURCE[route.fuente] || "")}</span>
       </div>
       <p class="adm-row-meta">${esc(people)}</p>
@@ -1600,7 +1601,7 @@ function PedidosFold(live) {
         return `
           <li class="adm-row">
             <div class="adm-row-main">
-              <strong class="adm-row-title">${esc(pedido.titulo || pedido.tipo || "Pedido sin título")}</strong>
+              <strong class="adm-row-title">${esc(sinCodigosDeRuta(pedido.titulo || pedido.tipo || "Pedido sin título"))}</strong>
               <span class="adm-row-meta">${esc(ymdToAR(pedido.fecha) || dateAR(pedido.creadoEn))} · ${pedido.origen === "web" ? "Web" : esc(pedido.creadoPorNombre || "App")}</span>
               ${carnetId ? `<span class="adm-chips"><span class="adm-chip adm-chip--green">${ico("fileCheck", "adm-icon-xs")} Trae carnet</span></span>` : ""}
             </div>
@@ -1868,7 +1869,7 @@ function CrearSheet() {
     <form class="adm-sheet-form" id="adm-create" data-adm-form="crear" novalidate aria-labelledby="adm-sheet-title">
       <label class="adm-field" for="adm-crear-nombre">
         <span>Nombre</span>
-        <input class="adm-input adm-input--big" id="adm-crear-nombre" name="nombre" autocomplete="off" maxlength="60" required placeholder="Ej. Sebastián" value="${esc(d.nombre)}" data-adm-draft="crear" data-adm-key="nombre" />
+        <input class="adm-input adm-input--big" id="adm-crear-nombre" name="nombre" autocomplete="off" maxlength="60" required placeholder="Por ejemplo: Sebastián" value="${esc(d.nombre)}" data-adm-draft="crear" data-adm-key="nombre" />
       </label>
       <fieldset class="adm-field">
         <legend>Rol</legend>
@@ -1884,7 +1885,7 @@ function CrearSheet() {
       </fieldset>
       <label class="adm-field" for="adm-crear-usuario">
         <span>Usuario <small>para entrar</small></span>
-        <input class="adm-input" id="adm-crear-usuario" name="usuario" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="31" required placeholder="Ej. sebastian" value="${esc(d.usuario)}" data-adm-draft="crear" data-adm-key="usuario" />
+        <input class="adm-input" id="adm-crear-usuario" name="usuario" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="31" required placeholder="Por ejemplo: sebastian" value="${esc(d.usuario)}" data-adm-draft="crear" data-adm-key="usuario" />
       </label>
       <div class="adm-field">
         <label for="adm-crear-pin"><span>PIN <small>6 a 8 números</small></span></label>
@@ -2329,7 +2330,7 @@ function PagoSheet() {
         <div class="adm-seg adm-seg--wrap" role="group" aria-label="Conceptos rápidos">
           ${PAGO_CONCEPTOS.map((concepto) => `<button class="adm-seg-item ${d.concepto === concepto ? "is-on" : ""}" type="button" data-adm-concepto="${esc(concepto)}" aria-pressed="${d.concepto === concepto}">${esc(concepto)}</button>`).join("")}
         </div>
-        <input class="adm-input" id="adm-pago-concepto" autocomplete="off" maxlength="120" required placeholder="Ej. Plan 2, semana del 09/11" value="${esc(d.concepto)}" data-adm-draft="pago" data-adm-key="concepto" />
+        <input class="adm-input" id="adm-pago-concepto" autocomplete="off" maxlength="120" required placeholder="Por ejemplo: Plan 2, semana del 09/11" value="${esc(d.concepto)}" data-adm-draft="pago" data-adm-key="concepto" />
       </div>
       <fieldset class="adm-field">
         <legend>Fecha</legend>
@@ -2511,7 +2512,7 @@ function CargaView() {
     </ul>
     ${Help(`<p>Perros por día y turno, de la Planilla de rutas (${DATA_UPDATED}). Solo perros activos.</p>
       <p>${listJoin(load.twoShifts.map((dog) => esc(dog.name)))} ${load.twoShifts.length === 1 ? "sale" : "salen"} en los dos turnos: cuentan dos veces en el total.</p>
-      <p>Mañana: ruta ${SHIFTS.manana.route} (${SHIFTS.manana.from} a ${SHIFTS.manana.to}), supervisa ${SHIFTS.manana.supervisor}. Tarde: rutas ${SHIFTS.tarde.routes.join(" y ")} (${SHIFTS.tarde.from} a ${SHIFTS.tarde.to}), supervisa ${SHIFTS.tarde.supervisor}.</p>
+      <p>Mañana: ${routeName(SHIFTS.manana.route)} (${SHIFTS.manana.from} a ${SHIFTS.manana.to}), supervisa ${SHIFTS.manana.supervisor}. Tarde: ${SHIFTS.tarde.routes.map((code) => routeName(code)).join(" y ")} (${SHIFTS.tarde.from} a ${SHIFTS.tarde.to}), supervisa ${SHIFTS.tarde.supervisor}.</p>
       <p>Máximo diario histórico: ${esc(BUSINESS_FACTS.find((f) => /máximo/i.test(f.label))?.value || PENDIENTE)} perros.</p>`, "Cómo se cuenta")}
   `;
 }

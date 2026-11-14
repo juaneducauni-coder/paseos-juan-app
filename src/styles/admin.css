@@ -1958,9 +1958,16 @@ html[data-theme="dark"] .adm-btn--undo {
 
 .adm-alta-perro-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* La ayuda abierta ocupa todo el ancho y no aplasta "Sumar otro perro". */
+.adm-alta-perro-foot > details[open],
+.adm-alta-perro-foot > .adm-help[open] {
+  flex-basis: 100%;
 }
 
 /* Días: casillas grandes con el nombre completo. */

@@ -646,9 +646,9 @@ function CTASection() {
             </p>
             <p class="google-or" aria-hidden="true" ${googleSession ? "hidden" : ""}>o completá a mano</p>
           </div>
-          ${textField({ name: "perro", label: "Nombre del perro", draft, voice, required: true, placeholder: "Ej. Luna", what: "el nombre del perro" })}
+          ${textField({ name: "perro", label: "Nombre del perro", draft, voice, required: true, placeholder: "Por ejemplo: Luna", what: "el nombre del perro" })}
           ${textField({ name: "responsable", label: "Tu nombre", draft, voice, required: true, placeholder: "Tu nombre", autocomplete: "name", what: "tu nombre" })}
-          ${textField({ name: "telefono", label: "Tu WhatsApp", draft, voice, required: true, placeholder: "Ej. 11 5555 5555", autocomplete: "tel", type: "tel", inputmode: "tel", help: "Con característica, sin 0 ni 15." })}
+          ${textField({ name: "telefono", label: "Tu WhatsApp", draft, voice, required: true, placeholder: "Por ejemplo: 11 5555 5555", autocomplete: "tel", type: "tel", inputmode: "tel", help: "Con característica, sin 0 ni 15." })}
         </fieldset>
 
         <details class="quick-optional-fold" ${optionalOpen ? "open" : ""}>
@@ -673,10 +673,10 @@ function CTASection() {
             <details class="quick-more" ${foldedOpen ? "open" : ""}>
               <summary>Datos extras del perro y carnet (opcional)</summary>
               <div class="form-grid">
-                ${textField({ name: "edad", label: "Edad", draft, voice, placeholder: "Ej. 4 años", what: "la edad" })}
-                ${textField({ name: "raza", label: "Raza o cruza", draft, voice, placeholder: "Ej. Mestizo", what: "la raza" })}
-                ${textField({ name: "zona", label: "Barrio o zona", draft, voice, placeholder: "Ej. Pilar", what: "el barrio" })}
-                ${textField({ name: "referencia", label: "Barrio privado o referencia", draft, voice, placeholder: "Ej. nombre del barrio", what: "la referencia" })}
+                ${textField({ name: "edad", label: "Edad", draft, voice, placeholder: "Por ejemplo: 4 años", what: "la edad" })}
+                ${textField({ name: "raza", label: "Raza o cruza", draft, voice, placeholder: "Por ejemplo: Mestizo", what: "la raza" })}
+                ${textField({ name: "zona", label: "Barrio o zona", draft, voice, placeholder: "Por ejemplo: Pilar", what: "el barrio" })}
+                ${textField({ name: "referencia", label: "Barrio privado o referencia", draft, voice, placeholder: "Por ejemplo: nombre del barrio", what: "la referencia" })}
                 ${textField({ name: "email", label: "Correo", draft, voice, placeholder: "Se completa solo con Google", autocomplete: "email", type: "email", inputmode: "email" })}
                 <label class="span-2">Carnet de vacunas
                   <input name="carnet" type="file" accept="image/*,application/pdf" capture="environment" />

@@ -45,3 +45,10 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
   - **E-056 Paseador y supervisor:** en curso.
 - Pruebas: 41 del servidor OK, armado OK, recorrido sin fallas, portal del cliente revisado con captura.
 - Sigue: unir E-056 y una segunda auditoría corta.
+
+## 14/11/2026 — 01:30 aprox.
+
+- **E-056 Paseador y supervisor:** avisos que ya no tapan botones, "Ruta 1" en vez de "PJ_1M", riesgo y lesión obligatorios a la vista (sin marcar de antemano), "Hasta 2", supervisor con encabezado completo, "Tema y movimiento" en Más, pedido "Cambiar de ruta", "Foto del perro" distinta de "Foto del paseo".
+- **Segunda auditoría en el celular:** confirmó arreglados el alta del admin, los avisos que tapaban, el encabezado del supervisor, los precios, las preguntas frecuentes, el portal del cliente y la edición de rutas sin cargar. Sin abreviaturas en pantalla.
+- Arreglado después de esa auditoría: "PJ_1M" en coordinador y admin (nombre de ruta compartido en `src/ui/rutas.js`, también en pedidos viejos), "Planilla RPJ", "Ej." en ejemplos, "hs.", "5 m", "30 s", aviso de riesgo repetido, ayuda del alta que aplastaba "Sumar otro perro", "3 rutas · 23 perros" y "4 alertas" en la semana del coordinador.
+- Pendiente para revisar en un celular real: los campos de fecha y hora deberían verse en formato argentino si el celular está en español.

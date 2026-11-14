@@ -159,7 +159,7 @@ function HeaderMinimal(activeRole) {
       </a>
       <div class="header-actions">
         ${session.user()?.rol === "cliente" ? `<a class="header-cta" href="/cliente" data-link>Mi página</a>` : `<a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>`}
-        <button class="menu-button ${state.menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${state.menuOpen}" aria-label="Abrir menu">
+        <button class="menu-button ${state.menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${state.menuOpen}" aria-label="Abrir menú">
           <span></span>
           <span></span>
           <span></span>
@@ -181,7 +181,7 @@ function MobileMenu() {
             <small>Más que un simple paseo</small>
           </span>
         </a>
-        <button class="menu-close" type="button" data-menu-close aria-label="Cerrar menu">${icon("x")}</button>
+        <button class="menu-close" type="button" data-menu-close aria-label="Cerrar menú">${icon("x")}</button>
       </div>
       <nav class="menu-nav" aria-label="Menu principal">
         ${MENU_ITEMS.map(([label, href, iconName]) => `

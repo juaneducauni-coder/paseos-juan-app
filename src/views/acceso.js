@@ -35,8 +35,8 @@ export function loginPage() {
           : "Entrá con tu usuario y tu PIN. Si no tenés usuario, pedíselo a Juan."}</p>
         ${estado.necesitaConfiguracion === null ? `<p class="acc-status" role="status">Conectando…</p>` : `
         <form class="acc-form" data-acc-form="${setup ? "setup" : "login"}" novalidate>
-          ${setup ? `<label>Tu nombre <input name="nombre" autocomplete="name" required placeholder="Ej. Tu nombre y apellido" /></label>` : ""}
-          <label>Usuario <input name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required placeholder="Ej. tu usuario" /></label>
+          ${setup ? `<label>Tu nombre <input name="nombre" autocomplete="name" required placeholder="Por ejemplo: Tu nombre y apellido" /></label>` : ""}
+          <label>Usuario <input name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required placeholder="Por ejemplo: tu usuario" /></label>
           ${campoPin("PIN", "pin", setup ? "new-password" : "current-password", "6 a 8 números")}
           ${setup ? `${campoPin("Repetí el PIN", "pin2", "new-password", "El mismo PIN otra vez")}
           <p class="acc-help">Elegí 6 a 8 números que no sean fáciles de adivinar (nada de 123456 ni tu fecha de nacimiento).</p>

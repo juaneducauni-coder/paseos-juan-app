@@ -1080,7 +1080,7 @@ function couponsSection(ctx) {
       <div class="cl-coupon-redeem">
         <label for="cl-coupon-input">¿Tenés un código de cupón o alianza?
           <div class="cl-coupon-input-row">
-            <input id="cl-coupon-input" type="text" maxlength="40" placeholder="Ej. PRIMERPASEO o VERANO" data-cl-coupon-input />
+            <input id="cl-coupon-input" type="text" maxlength="40" placeholder="Por ejemplo: PRIMERPASEO o VERANO" data-cl-coupon-input />
             <button type="button" class="cl-btn is-small" data-cl-coupon-apply>Activar cupón</button>
           </div>
         </label>

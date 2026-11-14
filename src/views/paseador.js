@@ -2257,7 +2257,7 @@ function IncidentScreen({ sel }) {
         ${INCIDENT_STEPS.map((label, index) => `<li class="${index + 1 < step ? "is-done" : ""} ${index + 1 === step ? "is-on" : ""}" ${index + 1 === step ? 'aria-current="step"' : ""}><span>${index + 1}</span>${label}</li>`).join("")}
       </ol>
       ${body}
-      ${step === 3 ? IncidentNeeds(draft) : ""}
+      ${step === 3 && !(view.incidentWarn && view.incidentStatus) ? IncidentNeeds(draft) : ""}
       <p class="pw-status ${warn ? "is-warn" : ""}" role="status" data-pw-incident-status>${esc(view.incidentStatus)}</p>
       <div class="pw-wizard-nav">
         ${step > 1 ? `<button class="pw-btn pw-btn--ghost" type="button" data-pw-inc-back>${ic("arrowLeft", "pw-icon")}Atrás</button>` : `
