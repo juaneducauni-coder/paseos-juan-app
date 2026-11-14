@@ -36,6 +36,7 @@ import {
 } from "../data/realData.js";
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
+import { pestanaMensajes } from "./mensajes.js";
 import { session, registros, usuarios, archivos, fotosPerros, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS, clientesAcceso, datosPago, mensajes } from "../api/client.js";
 
 const DONE_KEY = "paseosJuanAdmin_prioridadesHechas";
@@ -1149,6 +1150,7 @@ function BottomNav() {
           </button>
         `;
       }).join("")}
+      ${pestanaMensajes("adm")}
     </nav>
   `;
 }

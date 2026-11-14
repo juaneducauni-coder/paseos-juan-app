@@ -1323,7 +1323,7 @@ html[data-theme="dark"] .adm-btn--danger {
   left: 0;
   z-index: 70;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   padding: 6px 8px calc(6px + var(--adm-safe-bottom));
   border-top: 1px solid var(--adm-line);
@@ -1334,6 +1334,7 @@ html[data-theme="dark"] .adm-btn--danger {
 }
 
 .adm-nav-item {
+  text-decoration: none;
   display: grid;
   min-height: 60px;
   justify-items: center;
@@ -2668,7 +2669,7 @@ html[data-theme="dark"] .adm-btn--undo {
     right: 50%;
     bottom: 16px;
     left: auto;
-    width: 480px;
+    width: 560px;
     transform: translateX(50%);
     border: 1px solid var(--adm-line);
     border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);

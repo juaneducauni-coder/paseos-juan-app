@@ -44,10 +44,10 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 | E-040 Arreglos chicos de paseador, ayudante y admin | Claude | A MEDIAS: se cortó la sesión; revisar qué quedó |
 | E-029 Investigación: chats de las IAs, Drive, tienda importada, diseño profesional | Claude | HECHO (`asistente/investigacion/2026-11-14-investigacion.md`) |
 | E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | SERVIDOR LISTO E INTEGRADO (4debe51); pantallas en E-047, E-048 y E-049: faltan las pantallas de chat, la de aprobar altas en el admin y el alias en el panel. Contrato en `docs/datos-compartidos.md` |
-| E-046 Manual con historias ilustradas | Claude | EN CURSO |
-| E-047 Pantalla de chats del equipo | Claude | EN CURSO |
-| E-048 Admin: altas de clientes, alias y moderación | Claude | EN CURSO |
-| E-049 Página del cliente con datos reales | Claude | EN CURSO |
+| E-046 Manual con historias ilustradas | Claude | HECHO |
+| E-047 Pantalla de chats del equipo | Claude | HECHO |
+| E-048 Admin: altas de clientes, alias y moderación | Claude | HECHO |
+| E-049 Página del cliente con datos reales | Claude | HECHO |
 | E-050 Auditoría visual con capturas | Gemini | PARA TOMAR (encargo en `asistente/encargos/2026-11-14-gemini-chatgpt.md`) |
 | E-051 Ilustraciones vectoriales (manual y estaciones) | Gemini | PARA TOMAR |
 | E-052 Borrador de términos y privacidad (P-05) | ChatGPT | PARA TOMAR |
@@ -57,14 +57,14 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 
 | N° | Tarea | IA sugerida | Estado |
 |---|---|---|---|
-| P-01 | Cuentas de clientes: pedir alta → aprobar → horario → acceso | Claude | PENDIENTE |
+| P-01 | Cuentas de clientes: pedir alta → aprobar → horario → acceso | Claude | HECHO (14/11) |
 | P-02 | Aviso por correo a Juan al pedir alta | Claude | BLOQUEADO: falta elegir servicio de correo (Juan) |
 | P-03 | Cobro online con Naranja X (link o QR por plan) + comprobante | Claude | ESPERA A JUAN: datos del link de pago |
 | P-04 | "Primer paseo gratis" en inicio y precios | Claude | HECHO en inicio; falta en precios |
 | P-05 | Términos y Privacidad (borrador) | ChatGPT | PENDIENTE |
 | P-06 | Página de Alianzas y contacto | ChatGPT (texto) + Gemini (diseño) | PENDIENTE: faltan las alianzas reales |
 | P-07 | Cupones | Claude | PENDIENTE |
-| P-08 | Chat grupal de clientes con moderación | Claude | PENDIENTE (depende de P-01) |
+| P-08 | Chat grupal de clientes con moderación | Claude | HECHO (14/11) |
 | P-09 | Formas de manchas y olas en vez de rectángulos | Gemini | HECHO (falta revisar con capturas) |
 | P-10 | Ilustraciones por estación (verano primero) | Gemini | HECHO verano; faltan otoño, invierno y primavera y el cambio automático |
 | P-11 | Música opcional, apagada por defecto | Gemini o Claude | PENDIENTE: falta la música (con derechos de uso) |

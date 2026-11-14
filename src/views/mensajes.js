@@ -180,10 +180,13 @@ export function pestanaMensajes(tipo) {
   if (session.token()) mensajes.watchResumen();
   const n = mensajes.sinLeer();
   const etiqueta = n ? `Mensajes, ${n} sin leer` : "Mensajes";
-  const insignia = `<b class="${{ pw: "pw-tab-badge", sv: "sv-badge", cd: "cd-tab-n" }[tipo] || "msj-insignia"} msj-tab-n" data-msj-badge aria-hidden="true" ${n ? "" : "hidden"}>${n > 99 ? "99+" : n}</b>`;
+  const insignia = `<b class="${{ pw: "pw-tab-badge", sv: "sv-badge", cd: "cd-tab-n", adm: "adm-nav-badge adm-nav-badge--red" }[tipo] || "msj-insignia"} msj-tab-n" data-msj-badge aria-hidden="true" ${n ? "" : "hidden"}>${n > 99 ? "99+" : n}</b>`;
   const comun = `href="/mensajes" data-link data-msj-tab aria-label="${etiqueta}"`;
   if (tipo === "pw") {
     return `<a class="pw-tab pw-tab--mensajes msj-tab" ${comun}><span class="pw-tab-icon">${icon("message", "pw-icon")}${insignia}</span><span class="pw-tab-label">Mensajes</span></a>`;
+  }
+  if (tipo === "adm") {
+    return `<a class="adm-nav-item msj-tab" ${comun}><span class="adm-nav-icon">${icon("message", "adm-icon")}${insignia}</span><span class="adm-nav-label">Mensajes</span></a>`;
   }
   if (tipo === "sv") {
     return `<a class="sv-nav-item msj-tab" ${comun}><span class="sv-nav-icon">${icon("message", "sv-icon")}${insignia}</span><span>Mensajes</span></a>`;

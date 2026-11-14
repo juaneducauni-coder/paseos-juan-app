@@ -151,11 +151,12 @@ export const session = {
 
 // Qué páginas puede abrir cada rol. El admin ve todo.
 export const ROLE_PAGES = {
-  admin: ["admin", "coordinador", "supervisor", "paseador", "cliente"],
-  coordinador: ["coordinador", "cliente"],
-  supervisor: ["supervisor", "paseador", "cliente"],
-  paseador: ["paseador"],
-  ayudante: ["paseador"],
+  // "mensajes" va al final: la primera página es la de inicio de cada rol.
+  admin: ["admin", "coordinador", "supervisor", "paseador", "cliente", "mensajes"],
+  coordinador: ["coordinador", "cliente", "mensajes"],
+  supervisor: ["supervisor", "paseador", "cliente", "mensajes"],
+  paseador: ["paseador", "mensajes"],
+  ayudante: ["paseador", "mensajes"],
   marketing: [],
   cliente: ["cliente"],
 };
