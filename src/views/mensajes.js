@@ -559,8 +559,8 @@ function Mensaje(m, { me, info, mostrarAutor }) {
     const quien = m.automatico || m.autor === "sistema" ? "" : `Aviso de ${primerNombre(m.autorNombre) || "el equipo"}: `;
     return `
       <li class="msj-item msj-item--sistema">
-        <div class="msj-aviso">
-          ${ic("bell")}
+        <div class="msj-aviso ${/^URGENTE\b/.test(m.texto || "") ? "is-urgente" : ""}">
+          ${ic(/^URGENTE\b/.test(m.texto || "") ? "alertTriangle" : "bell")}
           <p><span>${esc(quien)}${esc(m.texto)}</span>${cuando}</p>
         </div>
         ${m.adjuntoId ? FotoAdjunta(m) : ""}

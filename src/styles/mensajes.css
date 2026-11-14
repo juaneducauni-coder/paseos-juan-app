@@ -970,3 +970,10 @@ html[data-motion="calm"] .msj-shell *::after {
     animation: none;
   }
 }
+
+/* Aviso automático urgente (incidente con riesgo alto, pedido urgente): rojo, como "Perro suelto". */
+.msj-aviso.is-urgente {
+  border: 2px solid var(--msj-danger);
+  background: var(--msj-danger-bg);
+  color: var(--msj-danger-ink);
+}
