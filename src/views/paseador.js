@@ -73,8 +73,9 @@ const EXTERNAL_DOG = "Perro externo";
 const FORBIDDEN_WORDS = /\b(agresiv\w*|mal[oa]s?|dominantes?)\b/i;
 const INCIDENT_STEPS = ["Qué pasó", "Perros", "Lesión"];
 
-// Checklist del ayudante antes de salir (definido por Juan el 13/11/2026): 4 interruptores.
+// Checklist del ayudante antes de salir (definido por Juan): el ayudante lleva la MUSLERA.
 const HELPER_ITEMS = [
+  { item: "Muslera", label: "Muslera", icon: "briefcaseMedical" },
   { item: "Botiquín", label: "Botiquín", sub: "agua oxigenada y gasa", icon: "briefcaseMedical" },
   { item: "Botella bebedero", label: "Botella bebedero", icon: "droplets" },
   { item: "Bolsas", label: "Bolsas", icon: "shoppingBag" },
@@ -88,7 +89,8 @@ const CURE_TYPES = ["Raspón", "Corte chico", "Pata", "Otro"];
 const HERD_LINES = ["Dividan los perros y pasen de a grupos", "Calmá a los que se alteran"];
 
 // Checklist del paseador: su equipo según el inventario, agrupado.
-const MY_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian > 0);
+// El paseador lleva la PECHERA; la muslera la lleva el ayudante (definido por Juan).
+const MY_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian > 0 && !/^musler/i.test(row.item));
 const OTHER_EQUIPMENT = EQUIPMENT.filter((row) => row.sebastian === 0 && row.juan > 0);
 const MY_MUZZLES = EQUIPMENT.filter((row) => /^bozal/i.test(row.item)).reduce((sum, row) => sum + row.sebastian, 0);
 const WALKER_GROUPS = [

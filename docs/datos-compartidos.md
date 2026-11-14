@@ -47,7 +47,8 @@ await registros.save("paseos", { id, fecha: hoy, ...datos });
 5. **Levantar caca** (no todas: el paseador también levanta).
 6. **Prevenir accidentes**: si se cruza otra manada o un perro externo, dividir los perros con el paseador y pasar de a grupos; calmar a los perros alterados de la manada.
 
-Checklist del ayudante antes de salir (corto): botiquín (agua oxigenada y gasa) · botella bebedero · bolsas · celular cargado.
+Checklist del ayudante antes de salir (corto): **muslera** · botiquín (agua oxigenada y gasa) · botella bebedero · bolsas · celular cargado.
+El **paseador** lleva la **pechera** (la muslera la lleva el ayudante).
 
 ## Rutas y horarios
 
