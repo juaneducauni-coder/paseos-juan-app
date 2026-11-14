@@ -2079,3 +2079,528 @@ html[data-theme="dark"] .cl-page select option {
 .cl-community-row input {
   flex: 1 1 200px;
 }
+
+/* ======================================================================
+   Página de ejemplo: aviso bien visible y pedido del primer paseo gratis
+   ====================================================================== */
+
+.cl-demo-intro {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  border: 2px dashed var(--cl-green-line);
+  border-radius: var(--radius-blob-a, 34px 22px 38px 24px / 24px 36px 22px 32px);
+  background: var(--cl-card);
+  padding: 24px 22px;
+}
+
+.cl-demo-tag {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--cl-warn-line);
+  border-radius: 999px;
+  background: var(--cl-warn-bg);
+  color: var(--cl-warn-ink);
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 4px 12px;
+  text-transform: uppercase;
+}
+
+.cl-demo-title {
+  margin: 0;
+  color: var(--cl-ink);
+  font-size: clamp(1.4rem, 6vw, 1.9rem);
+  font-weight: 950;
+  line-height: 1.15;
+}
+
+.cl-demo-text {
+  max-width: min(100%, var(--measure, 64ch));
+  color: var(--cl-text);
+}
+
+.cl-btn.cl-demo-cta {
+  width: 100%;
+  max-width: 440px;
+  min-height: 60px;
+  font-size: 1.1rem;
+}
+
+.cl-demo-login {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--cl-ink);
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.cl-demo-login .cl-icon-xs {
+  margin-top: 3px;
+  color: var(--cl-green-ink);
+}
+
+/* ======================================================================
+   Página del cliente con datos reales (E-049) — prefijo clr-
+   ====================================================================== */
+
+.clr-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cl-page.clr-page {
+  gap: 20px;
+  padding-bottom: 48px;
+}
+
+/* El chat flotante de ejemplo no va en la página real: el chat de verdad es "Avisos". */
+body:has(.clr-page) .floating-chat {
+  display: none !important;
+}
+
+.clr-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.clr-hola {
+  margin: 0;
+  color: var(--cl-ink);
+  font-size: clamp(1.8rem, 7vw, 2.6rem);
+  font-weight: 950;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.clr-fecha {
+  margin-top: 4px;
+  color: var(--cl-muted);
+  font-weight: 800;
+}
+
+.cl-btn.clr-salir {
+  min-height: var(--touch-min, 48px);
+}
+
+/* ---- Hoy ---- */
+
+.clr-hoy > div {
+  display: grid;
+  gap: 16px;
+}
+
+.clr-perro {
+  display: grid;
+  gap: 14px;
+}
+
+.clr-perro-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.clr-avatar {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 3px solid var(--cl-card);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--cl-green-line);
+  object-fit: cover;
+}
+
+.clr-avatar.is-empty {
+  background: var(--cl-green-soft);
+  color: var(--cl-green-ink);
+  font-size: 1.9rem;
+  font-weight: 950;
+}
+
+.clr-perro-nombre {
+  margin: 0;
+  color: var(--cl-ink);
+  font-size: clamp(1.8rem, 8vw, 2.6rem);
+  font-weight: 950;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.clr-perro-linea {
+  max-width: min(100%, var(--measure, 64ch));
+  color: var(--cl-text);
+  font-size: 1.04rem;
+  line-height: 1.5;
+}
+
+.clr-paseo {
+  display: grid;
+  gap: 12px;
+}
+
+.clr-chip {
+  width: fit-content;
+  border: 1px solid var(--cl-green-line);
+  border-radius: 999px;
+  background: var(--cl-green-soft);
+  color: var(--cl-green-ink);
+  font-size: 1.05rem;
+  font-weight: 900;
+  padding: 8px 14px;
+}
+
+.clr-chip.is-run {
+  border-color: var(--cl-green);
+  background: var(--cl-green);
+  color: var(--cl-on-green);
+}
+
+.clr-chip.is-done {
+  border-color: var(--cl-line-strong);
+  background: var(--cl-card-2);
+  color: var(--cl-ink);
+}
+
+.clr-chip.is-off {
+  border-color: var(--cl-warn-line);
+  background: var(--cl-warn-bg);
+  color: var(--cl-warn-ink);
+}
+
+.clr-pasos li > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.clr-pasos b {
+  font-size: 1.05rem;
+  font-weight: 950;
+}
+
+.clr-foto {
+  display: grid;
+  width: 100%;
+  max-width: 520px;
+  overflow: hidden;
+  border: 1px solid var(--cl-line-strong);
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
+  background: var(--cl-card-2);
+  color: var(--cl-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.clr-foto img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.clr-foto.is-small {
+  max-width: 280px;
+}
+
+.clr-foto-vacia {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--cl-muted);
+  font-weight: 800;
+  padding: 16px;
+}
+
+.clr-foto-ver {
+  display: flex;
+  min-height: var(--touch-min, 48px);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-top: 1px solid var(--cl-line);
+  color: var(--cl-green-ink);
+  font-weight: 850;
+  padding: 8px 12px;
+}
+
+.clr-foto:hover .clr-foto-ver {
+  background: var(--cl-green-soft);
+}
+
+.clr-proximo {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--cl-line);
+  padding-top: 12px;
+}
+
+.clr-proximo span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--cl-muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.clr-proximo strong {
+  color: var(--cl-ink);
+  font-size: 1.08rem;
+}
+
+/* ---- Accesos ---- */
+
+.clr-quick {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+/* ---- Avisos y chats ---- */
+
+.clr-compose {
+  display: grid;
+  gap: 10px;
+}
+
+.clr-compose label {
+  font-size: 1.02rem;
+}
+
+.clr-compose textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+}
+
+.clr-compose .cl-btn {
+  min-width: 160px;
+}
+
+.clr-compose .cl-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.clr-msgs {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clr-msg {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--cl-line);
+  border-radius: 20px 20px 20px 8px;
+  background: var(--cl-card);
+  padding: 12px 14px;
+}
+
+.clr-msg.is-auto {
+  border-color: var(--cl-green-line);
+  background: var(--cl-green-soft);
+}
+
+.clr-msg.is-team {
+  border-color: var(--cl-green-line);
+}
+
+.clr-msg.is-mine {
+  border-radius: 20px 20px 8px 20px;
+  background: var(--cl-card-2);
+}
+
+.clr-msgs.is-chat .clr-msg {
+  margin-right: 28px;
+}
+
+.clr-msgs.is-chat .clr-msg.is-mine {
+  margin-right: 0;
+  margin-left: 28px;
+}
+
+.clr-msg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  color: var(--cl-muted);
+  font-size: 0.86rem;
+}
+
+.clr-msg-meta strong {
+  color: var(--cl-ink);
+  font-size: 0.92rem;
+}
+
+.clr-msg-meta time {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.clr-msg-text {
+  color: var(--cl-ink);
+  font-size: 1.02rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.clr-msg-text.is-deleted {
+  color: var(--cl-muted);
+  font-style: italic;
+}
+
+.clr-vacio {
+  border: 1px dashed var(--cl-line-strong);
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 15px / 15px 22px 14px 20px);
+  padding: 14px 16px;
+}
+
+.cl-btn.clr-mas {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.clr-board {
+  padding: 12px;
+}
+
+.clr-board .clr-vacio {
+  border: 0;
+}
+
+.clr-reglas {
+  display: grid;
+  gap: 6px;
+  border: 1px dashed var(--cl-line-strong);
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 15px / 15px 22px 14px 20px);
+  background: var(--cl-card-2);
+  padding: 14px 16px;
+}
+
+.clr-reglas ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--cl-text);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+/* ---- Pagar ---- */
+
+.clr-alias-box {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--cl-green-line);
+  border-radius: var(--radius-blob-soft, 28px 18px 30px 20px / 20px 30px 18px 28px);
+  background: var(--cl-green-soft);
+  padding: 20px;
+}
+
+.clr-alias {
+  color: var(--cl-ink);
+  font-size: clamp(1.6rem, 8vw, 2.3rem);
+  font-weight: 950;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.clr-alias.is-pending {
+  font-size: 1.25rem;
+  user-select: auto;
+}
+
+.clr-instrucciones {
+  color: var(--cl-text);
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.clr-nota {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cl-green-ink);
+  font-size: 1.04rem;
+  font-weight: 850;
+}
+
+.cl-status.is-error {
+  color: var(--cl-alert-ink);
+}
+
+.clr-salir-pie {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .cl-demo-intro {
+    padding: 20px 18px;
+  }
+
+  .clr-head .clr-salir {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .clr-quick {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clr-quick .cl-quick-btn {
+    min-height: 84px;
+  }
+
+  .clr-compose .cl-btn,
+  .clr-pago .cl-btn,
+  .clr-carnet .cl-btn,
+  .clr-salir-pie .cl-btn,
+  .clr-perro .cl-btn {
+    width: 100%;
+  }
+
+  .clr-alias-box {
+    padding: 16px;
+  }
+
+  .clr-pasos li {
+    min-height: 64px;
+  }
+}
+
+html[data-motion="calm"] .clr-page *,
+html[data-motion="calm"] .cl-demo-intro * {
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clr-page * {
+    transition: none !important;
+  }
+}

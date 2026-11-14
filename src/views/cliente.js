@@ -1,10 +1,12 @@
 // Vista del rol Cliente (tutor de un perro).
 //
-// Es la cara del servicio: arranca por lo más importante del día (el paseo de hoy y el
-// próximo), muestra el plan con los precios oficiales y deja que el tutor complete la ficha
-// de su perro. Todo lo que el tutor carga se guarda solo en su dispositivo (localStorage).
+// Dos modos:
+// - Con sesión de cliente (entró por su enlace /c/<token>): datos reales del servidor
+//   (paseo de hoy, avisos, alias de pago, comunidad). Está en ./cliente-real.js (E-049).
+// - Sin sesión de cliente: página de EJEMPLO, rotulada como tal, con el pedido del primer
+//   paseo gratis. Lo que se carga en el ejemplo se guarda solo en el dispositivo (localStorage).
 //
-// Para la demo se usa un perro de ejemplo ("Tu perro") con un plan real. No se usan perros
+// En el ejemplo se usa un perro ficticio ("Tu perro") con un plan real. No se usan perros
 // reales, ni nombres de tutores, ni alias o datos de pago.
 import {
   BUSINESS_INFO,
@@ -20,6 +22,8 @@ import {
 import { PROMO } from "../data/mock.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { isCalmMotion } from "../ui/accesibilidad.js";
+import { session } from "../api/client.js";
+import { esClienteReal, clienteRealPage, registerClienteRealEvents } from "./cliente-real.js";
 
 // ---------------------------------------------------------------------------
 // Datos guardados en el dispositivo del tutor
@@ -440,6 +444,7 @@ function statusRegion(region) {
 // ---------------------------------------------------------------------------
 
 export function clientDashboard() {
+  if (esClienteReal()) return clienteRealPage();
   const ctx = getContext();
   return `
     <div class="cl-page" data-cl-root>
@@ -450,14 +455,11 @@ export function clientDashboard() {
 
 function pageContent(ctx) {
   return `
+    ${demoIntro()}
     <div class="cl-season-strip">
       <span class="cl-season-badge">☀️ Ahora Verano</span>
       <p>Paseos con sombra, botella bebedero en ruta y seguimiento con foto.</p>
     </div>
-    <p class="cl-demo-note">
-      ${icon("help", "cl-icon-sm")}
-      <span><strong>Página de ejemplo.</strong> El perro, el plan, los cupones y el chat son de demostración. Lo que cargás se guarda solo en este dispositivo.</span>
-    </p>
     ${todaySection(ctx)}
     ${quickActions(ctx)}
     <div class="cl-more-list" aria-label="Más opciones">
@@ -473,6 +475,22 @@ function pageContent(ctx) {
       ${morePanel("cl-accesibilidad", "eye", "Accesibilidad", accessibilityNote())}
       ${morePanel("cl-privacidad", "lock", "Términos y mis datos", privacySection())}
     </div>
+  `;
+}
+
+// Ejemplo bien rotulado: invita a pedir el primer paseo gratis y explica cómo entra un cliente.
+function demoIntro() {
+  const user = session.user();
+  const esEquipo = Boolean(user && user.rol && user.rol !== "cliente");
+  return `
+    <section class="cl-demo-intro" aria-labelledby="cl-demo-title">
+      <p class="cl-demo-tag">${icon("eye", "cl-icon-xs")} Ejemplo</p>
+      <h2 id="cl-demo-title" class="cl-demo-title">Así se ve la página de un cliente</h2>
+      <p class="cl-demo-text">Todo lo de abajo es de muestra: no es un perro real. Lo que cargues queda solo en este dispositivo.</p>
+      <a class="cl-btn cl-demo-cta" href="/#evaluacion" data-link>${icon("pawPrint", "cl-icon-sm")} Pedí tu primer paseo gratis</a>
+      <p class="cl-demo-login">${icon("lock", "cl-icon-xs")} ¿Ya sos cliente? Entrá con el enlace que te mandó Juan.</p>
+      ${esEquipo ? `<p class="cl-fine">Entraste con tu usuario del equipo: por eso ves el ejemplo. Cada cliente ve lo suyo con su enlace.</p>` : ""}
+    </section>
   `;
 }
 
@@ -544,7 +562,7 @@ function todaySection(ctx) {
   return `
     <section class="cl-today" aria-labelledby="cl-today-heading">
       <div class="cl-today-main cl-card">
-        <p class="cl-eyebrow" id="cl-today-heading">Hoy</p>
+        <p class="cl-eyebrow" id="cl-today-heading">Hoy · ejemplo</p>
         <div class="cl-dog-hero">
           <div class="cl-photo-wrap">
             ${dogPhoto
@@ -1531,6 +1549,7 @@ function handleClienteToggle(event) {
 }
 
 export function registerClienteEvents() {
+  registerClienteRealEvents(clickHandlers);
   clickHandlers.push(handleClienteClick);
   changeHandlers.push(handleClienteChange);
   document.addEventListener("input", handleClienteInput);
