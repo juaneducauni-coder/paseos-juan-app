@@ -36,6 +36,7 @@ import {
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
 import { session, registros, onDataChange, fotosPerros, fotosPaseo, archivos } from "../api/client.js";
+import { pestanaMensajes } from "./mensajes.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
 // Claves de la versión anterior (todo en el celular). Solo se leen una vez para migrar.
@@ -1090,6 +1091,7 @@ function TabBar({ sel, stops }) {
           <span class="pw-tab-label">${tab.label}</span>
         </button>
       `).join("")}
+      ${pestanaMensajes("pw")}
     </nav>
   `;
 }

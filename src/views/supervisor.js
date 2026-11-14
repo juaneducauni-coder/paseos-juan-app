@@ -38,6 +38,7 @@ import {
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
 import { session, registros, onDataChange, hoyAR, fotosPerros, archivos } from "../api/client.js";
+import { pestanaMensajes } from "./mensajes.js";
 
 const TIME_ZONE = "America/Argentina/Buenos_Aires";
 const SHIFT_KEYS = ["manana", "tarde"];
@@ -1497,6 +1498,7 @@ function BottomNav(view, active, items) {
           </button>
         `;
       }).join("")}
+      ${pestanaMensajes("sv")}
     </nav>
   `;
 }

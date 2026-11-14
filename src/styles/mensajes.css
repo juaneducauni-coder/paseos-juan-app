@@ -1,0 +1,860 @@
+/* Chats del equipo (/mensajes, E-047). Celular primero (360 px), tipo app de reparto:
+   filas grandes, burbujas, campo para escribir siempre abajo y "Enviar" grande.
+   Todo va con el prefijo .msj- (este CSS se carga en toda la app). */
+
+/* ---------- tokens: claro ---------- */
+.msj-shell {
+  --msj-bg: #eef1ed;
+  --msj-card: #ffffff;
+  --msj-ink: var(--ink, #0f1311);
+  --msj-muted: #3b423d;
+  --msj-line: #7b867e;
+  --msj-line-soft: #c9d0cb;
+  --msj-accent: var(--green, #025f40);
+  --msj-on-accent: #ffffff;
+  --msj-accent-soft: #e1f0e8;
+  --msj-mine: #d4eddf;
+  --msj-mine-ink: #0b2a1c;
+  --msj-danger: #a3191b;
+  --msj-on-danger: #ffffff;
+  --msj-danger-ink: #7d1012;
+  --msj-danger-bg: #fde7e5;
+  --msj-warn-ink: #573900;
+  --msj-warn-bg: #ffefc4;
+  --msj-system-bg: #e6ebf6;
+  --msj-system-ink: #1d2f57;
+  --msj-focus: #1a5fd0;
+  --msj-shadow: 0 2px 6px rgba(15, 31, 19, 0.05), 0 10px 26px rgba(15, 31, 19, 0.07);
+  --msj-gutter: 16px;
+
+  min-height: 100svh;
+  background: var(--msj-bg);
+  color: var(--msj-ink);
+  font-size: 1.0625rem;
+  line-height: 1.45;
+}
+
+/* ---------- tokens: oscuro ---------- */
+html[data-theme="dark"] .msj-shell {
+  --msj-bg: var(--beige, #0f1512);
+  --msj-card: var(--card, #161e1a);
+  --msj-ink: var(--ink, #eef3ef);
+  --msj-muted: #c3cdc6;
+  --msj-line: #6f7d74;
+  --msj-line-soft: #2e3a33;
+  --msj-accent: var(--green, #5cc497);
+  --msj-on-accent: #06130d;
+  --msj-accent-soft: #183427;
+  --msj-mine: #1d3d2d;
+  --msj-mine-ink: #e6f5ec;
+  --msj-danger: #ff8a7e;
+  --msj-on-danger: #2a0705;
+  --msj-danger-ink: #ffb4ab;
+  --msj-danger-bg: #3a1411;
+  --msj-warn-ink: #ffd98a;
+  --msj-warn-bg: #33260a;
+  --msj-system-bg: #1c2740;
+  --msj-system-ink: #cbd9ff;
+  --msj-focus: #8ab4ff;
+  --msj-shadow: 0 4px 10px rgba(0, 0, 0, 0.28), 0 12px 28px rgba(0, 0, 0, 0.36);
+}
+
+/* En esta página no hay relleno general abajo y el botón flotante de accesibilidad se
+   abre desde el encabezado (si no, tapa el botón "Enviar"). */
+body:has(.msj-shell) #app {
+  padding-bottom: 0;
+}
+
+body:has(.msj-shell) .a11y-toggle {
+  display: none;
+}
+
+body:has(.msj-shell) #a11y-root {
+  top: 64px;
+  right: 12px;
+  bottom: auto;
+  left: auto;
+  z-index: 80;
+}
+
+body:has(.msj-shell) #a11y-root .a11y-panel {
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: auto;
+  max-width: calc(100vw - 24px);
+}
+
+.msj-shell *,
+.msj-shell *::before,
+.msj-shell *::after {
+  box-sizing: border-box;
+}
+
+.msj-shell h1,
+.msj-shell h2,
+.msj-shell p,
+.msj-shell ul,
+.msj-shell ol {
+  margin: 0;
+}
+
+.msj-shell ul,
+.msj-shell ol {
+  padding: 0;
+  list-style: none;
+}
+
+.msj-shell :where(button, input, textarea) {
+  font: inherit;
+}
+
+.msj-shell :focus-visible {
+  outline: 3px solid var(--msj-focus);
+  outline-offset: 2px;
+}
+
+.msj-shell [tabindex="-1"]:focus {
+  outline: none;
+}
+
+.msj-shell [hidden] {
+  display: none !important;
+}
+
+.msj-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.msj-icon {
+  display: block;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+}
+
+.msj-icon--sm {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  vertical-align: -3px;
+}
+
+/* ---------- encabezado ---------- */
+.msj-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+  border-bottom: 1px solid var(--msj-line-soft);
+  background: var(--msj-card);
+  box-shadow: 0 2px 12px rgba(15, 31, 19, 0.05);
+  padding: 8px max(8px, calc((100vw - 760px) / 2));
+}
+
+.msj-back,
+.msj-head-btn {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  background: transparent;
+  color: var(--msj-ink);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.msj-back .msj-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.msj-back:hover,
+.msj-head-btn:hover {
+  background: var(--msj-accent-soft);
+}
+
+.msj-head-text {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.msj-head-text h1 {
+  overflow: hidden;
+  font-size: 1.3rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msj-head-text p {
+  overflow: hidden;
+  color: var(--msj-muted);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- lista de chats ---------- */
+.msj-main {
+  display: grid;
+  width: 100%;
+  max-width: 760px;
+  gap: 18px;
+  margin: 0 auto;
+  padding: 16px var(--msj-gutter) 40px;
+}
+
+.msj-canales {
+  display: grid;
+  gap: 20px;
+}
+
+.msj-seccion {
+  display: grid;
+  gap: 8px;
+}
+
+.msj-seccion h2 {
+  padding-left: 4px;
+  color: var(--msj-muted);
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.msj-filas {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--msj-line-soft);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  background: var(--msj-card);
+  box-shadow: var(--msj-shadow);
+}
+
+.msj-filas > li + li {
+  border-top: 1px solid var(--msj-line-soft);
+}
+
+.msj-fila {
+  display: flex;
+  width: 100%;
+  min-height: 76px;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--msj-ink);
+  padding: 10px 14px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.msj-fila:hover {
+  background: var(--msj-accent-soft);
+}
+
+.msj-fila:focus-visible {
+  outline-offset: -3px;
+}
+
+.msj-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  background: var(--msj-accent-soft);
+  color: var(--msj-accent);
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+
+.msj-avatar .msj-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.msj-avatar--persona {
+  border-radius: 50%;
+  background: var(--msj-accent);
+  color: var(--msj-on-accent);
+}
+
+.msj-avatar--cliente {
+  background: var(--msj-warn-bg);
+  color: var(--msj-warn-ink);
+}
+
+.msj-fila-texto {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.msj-fila-top {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.msj-fila-top strong,
+.msj-fila-texto > strong {
+  overflow: hidden;
+  font-size: 1.08rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msj-fila-top time {
+  flex: 0 0 auto;
+  color: var(--msj-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.msj-fila-prev {
+  overflow: hidden;
+  color: var(--msj-muted);
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msj-fila.tiene-nuevos .msj-fila-prev {
+  color: var(--msj-ink);
+  font-weight: 700;
+}
+
+.msj-fila.tiene-nuevos .msj-fila-top time {
+  color: var(--msj-accent);
+}
+
+.msj-insignia {
+  display: grid;
+  flex: 0 0 auto;
+  min-width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--msj-danger);
+  color: var(--msj-on-danger);
+  padding: 0 7px;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.msj-fila-flecha {
+  color: var(--msj-muted);
+}
+
+.msj-vacio {
+  color: var(--msj-muted);
+  padding: 4px;
+}
+
+/* ---------- botones ---------- */
+.msj-btn {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  background: var(--msj-accent);
+  color: var(--msj-on-accent);
+  padding: 8px 18px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.msj-btn--grande {
+  width: 100%;
+  min-height: 60px;
+  font-size: 1.1rem;
+  box-shadow: var(--msj-shadow);
+}
+
+.msj-btn--grande .msj-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.msj-btn--chico {
+  min-height: 48px;
+  padding: 6px 14px;
+  font-size: 0.95rem;
+}
+
+.msj-nota {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 12px 14px;
+  font-weight: 700;
+}
+
+.msj-nota > span {
+  flex: 1 1 180px;
+}
+
+.msj-nota--error {
+  background: var(--msj-danger-bg);
+  color: var(--msj-danger-ink);
+}
+
+.msj-nota--aviso {
+  background: var(--msj-warn-bg);
+  color: var(--msj-warn-ink);
+}
+
+/* ---------- chat abierto ---------- */
+.msj-shell--chat {
+  display: flex;
+  height: 100svh;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.msj-shell--chat > .msj-main {
+  align-content: start;
+}
+
+.msj-chat {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px max(var(--msj-gutter), calc((100vw - 760px) / 2)) 16px;
+}
+
+.msj-reglas {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  border: 1.5px solid var(--msj-line-soft);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  background: var(--msj-card);
+  padding: 12px 16px;
+  font-size: 0.95rem;
+}
+
+.msj-reglas h2 {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.msj-reglas ul {
+  display: grid;
+  gap: 4px;
+  padding-left: 1.1em;
+  list-style: disc;
+}
+
+.msj-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msj-vacio-chat {
+  margin: 24px auto;
+  color: var(--msj-muted);
+  text-align: center;
+}
+
+.msj-dia {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 4px;
+}
+
+.msj-dia span {
+  border-radius: 999px;
+  background: var(--msj-card);
+  color: var(--msj-muted);
+  padding: 2px 12px;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.msj-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.msj-item--mio {
+  align-items: flex-end;
+}
+
+.msj-item--otro {
+  align-items: flex-start;
+}
+
+.msj-item:not(.is-seguido):not(.msj-item--sistema) {
+  margin-top: 6px;
+}
+
+.msj-burbuja {
+  display: grid;
+  max-width: min(86%, 520px);
+  gap: 4px;
+  border-radius: 22px 22px 22px 8px;
+  background: var(--msj-card);
+  box-shadow: 0 1px 3px rgba(15, 31, 19, 0.08);
+  padding: 8px 12px 6px;
+  overflow-wrap: anywhere;
+}
+
+.msj-item--mio .msj-burbuja {
+  border-radius: 22px 22px 8px 22px;
+  background: var(--msj-mine);
+  color: var(--msj-mine-ink);
+}
+
+.msj-burbuja.is-urgente {
+  border: 2px solid var(--msj-danger);
+  background: var(--msj-danger-bg);
+  color: var(--msj-danger-ink);
+  font-weight: 800;
+}
+
+.msj-autor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--msj-accent);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.msj-rol {
+  color: var(--msj-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.msj-texto-burbuja {
+  white-space: pre-wrap;
+}
+
+.msj-hora {
+  justify-self: end;
+  color: var(--msj-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.msj-item--mio .msj-hora {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* Avisos automáticos y avisos del equipo al cliente: nota del sistema, centrada. */
+.msj-item--sistema {
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.msj-aviso {
+  display: flex;
+  max-width: min(92%, 560px);
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  background: var(--msj-system-bg);
+  color: var(--msj-system-ink);
+  padding: 8px 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.msj-aviso p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.msj-aviso .msj-hora {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.msj-aviso.is-borrado {
+  background: transparent;
+  color: var(--msj-muted);
+  font-style: italic;
+  font-weight: 600;
+}
+
+/* Fotos */
+.msj-foto {
+  display: block;
+  width: min(240px, 100%);
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px;
+  background: var(--msj-accent-soft);
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.msj-foto img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 320px;
+  object-fit: cover;
+}
+
+.msj-foto-cargando {
+  display: flex;
+  min-height: 120px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--msj-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+/* ---------- campo para escribir (siempre abajo) ---------- */
+.msj-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--msj-line-soft);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  background: var(--msj-card);
+  box-shadow: 0 -6px 22px rgba(15, 31, 19, 0.08);
+  padding: 10px max(10px, calc((100vw - 760px) / 2)) calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.msj-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  background: var(--msj-danger-bg);
+  color: var(--msj-danger-ink);
+  padding: 8px 12px;
+  font-weight: 800;
+}
+
+/* Respuestas rápidas: siempre todas a la vista (dos filas a 360 px), las rojas al final. */
+.msj-rapidas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.msj-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 48px;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--msj-line);
+  border-radius: 999px;
+  background: var(--msj-card);
+  color: var(--msj-ink);
+  padding: 6px 14px;
+  font-size: 0.98rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.msj-chip .msj-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.msj-chip:hover {
+  background: var(--msj-accent-soft);
+}
+
+.msj-chip.is-urgente {
+  border-color: var(--msj-danger);
+  background: var(--msj-danger);
+  color: var(--msj-on-danger);
+}
+
+.msj-chip:disabled,
+.msj-enviar:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.msj-fila-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.msj-texto {
+  display: block;
+  min-width: 0;
+  min-height: 52px;
+  max-height: 150px;
+  flex: 1 1 auto;
+  border: 1.5px solid var(--msj-line);
+  border-radius: 22px;
+  background: var(--msj-bg);
+  color: var(--msj-ink);
+  padding: 12px 14px;
+  line-height: 1.35;
+  resize: none;
+}
+
+.msj-texto::placeholder {
+  color: var(--msj-muted);
+  opacity: 1;
+}
+
+.msj-texto:focus-visible {
+  outline-offset: 0;
+}
+
+.msj-dictar {
+  display: grid;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border: 1.5px solid var(--msj-line);
+  border-radius: 50%;
+  background: var(--msj-card);
+  color: var(--msj-ink);
+  cursor: pointer;
+}
+
+.msj-dictar .msj-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.msj-dictar.is-activo {
+  border-color: var(--msj-danger);
+  background: var(--msj-danger);
+  color: var(--msj-on-danger);
+  animation: msj-escucha 1.2s ease-in-out infinite;
+}
+
+@keyframes msj-escucha {
+  50% {
+    box-shadow: 0 0 0 6px var(--msj-danger-bg);
+  }
+}
+
+.msj-enviar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 52px;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  background: var(--msj-accent);
+  color: var(--msj-on-accent);
+  padding: 0 16px;
+  font-size: 1.02rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.msj-enviar .msj-icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* Pantallas muy angostas: "Enviar" queda solo con el ícono (el nombre sigue para el lector). */
+@media (max-width: 340px) {
+  .msj-enviar span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}
+
+/* ---------- pestaña "Mensajes" en las barras de paseador, supervisor y coordinador ---------- */
+.msj-tab {
+  position: relative;
+  text-decoration: none;
+}
+
+.msj-tab [hidden] {
+  display: none !important;
+}
+
+/* Con la pestaña "Mensajes" son 5: un poco menos de separación para que entren a 360 px. */
+.pw-tabbar:has(.msj-tab),
+.sv-nav:has(.msj-tab),
+.cd-tabbar:has(.msj-tab) {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.pw-tabbar:has(.msj-tab) .pw-tab,
+.sv-nav:has(.msj-tab) .sv-nav-item,
+.cd-tabbar:has(.msj-tab) .cd-tab {
+  min-width: 0;
+  padding-right: 0;
+  padding-left: 0;
+  font-size: 0.8rem;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- modo calmo: sin animaciones ---------- */
+html[data-motion="calm"] .msj-shell *,
+html[data-motion="calm"] .msj-shell *::before,
+html[data-motion="calm"] .msj-shell *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msj-dictar.is-activo {
+    animation: none;
+  }
+}

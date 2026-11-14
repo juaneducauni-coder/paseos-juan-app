@@ -27,6 +27,7 @@ import { walkerShell, walkerDashboard, registerPaseadorEvents } from "./views/pa
 import { supervisorShell, supervisorDashboard, registerSupervisorEvents } from "./views/supervisor.js";
 import { coordinatorShell, coordinatorDashboard, registerCoordinadorEvents } from "./views/coordinador.js";
 import { adminShell, adminDashboard, registerAdminEvents } from "./views/admin.js";
+import { mensajesPage, registerMensajesEvents, ROLES_MENSAJES } from "./views/mensajes.js";
 
 const app = document.querySelector("#app");
 let entrandoCliente = null;
@@ -73,6 +74,7 @@ registerPaseadorEvents();
 registerSupervisorEvents();
 registerCoordinadorEvents();
 registerAdminEvents();
+registerMensajesEvents();
 
 document.addEventListener("click", (event) => {
   if (runHandlers(clickHandlers, event)) return;
@@ -152,6 +154,13 @@ export function render() {
     return;
   }
 
+  // Chats del equipo (E-047): /mensajes y /mensajes?c=<canal>.
+  if (path === "/mensajes") {
+    app.innerHTML = guardedMensajes();
+    hydrateAfterRender();
+    return;
+  }
+
   if (path === "/registro" || path === "/register") {
     app.innerHTML = registroPage();
     hydrateAfterRender();
@@ -181,6 +190,16 @@ function guardedDashboard(roleKey) {
   }
   if (!(ROLE_PAGES[user.rol] || []).includes(roleKey)) return sinPermisoPage(roleKey);
   return dashboardPage(roleKey);
+}
+
+function guardedMensajes() {
+  const user = session.user();
+  if (!user) {
+    window.history.replaceState({}, "", "/login?volver=/mensajes");
+    return loginPage();
+  }
+  if (!ROLES_MENSAJES.includes(user.rol)) return sinPermisoPage("mensajes");
+  return mensajesPage();
 }
 
 function hydrateAfterRender() {

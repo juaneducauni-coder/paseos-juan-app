@@ -30,6 +30,7 @@ import {
 import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros, usuarios } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
+import { pestanaMensajes } from "./mensajes.js";
 
 /* ------------------------------------------------------------------ */
 /* Almacenamiento local (solo preferencias de pantalla)                */
@@ -1776,6 +1777,7 @@ function TabBar() {
         <button type="button" class="cd-tab ${v.tab === tab ? "is-on" : ""}" data-coord-go="${tab}" ${v.tab === tab ? 'aria-current="page"' : ""}>
           ${ic(iconName)}<span>${label}</span>${n ? `<b class="cd-tab-n" aria-label="${n} para resolver">${n}</b>` : ""}
         </button>`).join("")}
+      ${pestanaMensajes("cd")}
     </nav>
   `;
 }
