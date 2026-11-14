@@ -1,7 +1,7 @@
 // GET /api/auth/me → usuario de la sesión. También dice si falta crear el primer admin.
-import { handler, send } from "../_lib/http.js";
-import { requireUser, publicUser } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
+import { handler, send } from "../../_lib/http.js";
+import { requireUser, publicUser } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
 
 export default handler({ GET: 1 }, async (req, res) => {
   if (!req.headers?.authorization) {

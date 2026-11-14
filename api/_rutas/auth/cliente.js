@@ -3,9 +3,9 @@
 // o al renovarlo (/api/clientes/acceso, admin o coordinador).
 // La sesión dura 90 días y deja de valer si el enlace se revoca o se genera uno nuevo.
 import { timingSafeEqual } from "node:crypto";
-import { handler, send, readJson, HttpError, clientIp, ipClave, limitador } from "../_lib/http.js";
-import { issueClientToken, hashTokenCliente, publicUser, usuarioCliente, TOKEN_CLIENTE } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
+import { handler, send, readJson, HttpError, clientIp, ipClave, limitador } from "../../_lib/http.js";
+import { issueClientToken, hashTokenCliente, publicUser, usuarioCliente, TOKEN_CLIENTE } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
 
 // Hasta 10 enlaces inválidos cada 15 minutos por conexión (los ingresos correctos no cuentan).
 const porIp = limitador(10, 15 * 60 * 1000, "Demasiados intentos desde esta conexión. Esperá 15 minutos y probá de nuevo.");

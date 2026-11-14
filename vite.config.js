@@ -12,7 +12,9 @@ function apiDevPlugin() {
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith("/api/")) return next();
         const route = new URL(req.url, "http://localhost").pathname.replace(/^\/api\//, "").replace(/\/$/, "");
-        const file = path.resolve("api", `${route}.js`);
+        let file = path.resolve("api", `${route}.js`);
+        // Igual que las reglas de vercel.json: /api/auth/login la atiende api/auth.js.
+        if (!existsSync(file) && route.includes("/")) file = path.resolve("api", `${route.split("/")[0]}.js`);
         if (route.includes("..") || route.startsWith("_") || !existsSync(file)) {
           res.statusCode = 404;
           res.setHeader("Content-Type", "application/json");

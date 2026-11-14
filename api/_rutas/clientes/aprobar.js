@@ -5,10 +5,10 @@
 //   → aprueba un cliente que ya estaba cargado (por ejemplo, de la planilla)
 // Sin horario asignado (días y turno) no se aprueba. Respuesta: { cliente, enlace: "/c/<token>", acceso }.
 // El enlace se muestra UNA vez: en el servidor queda solo su hash.
-import { handler, send, readJson, HttpError } from "../_lib/http.js";
-import { requireUser, perrosDeCliente } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
-import { validarHorario, validarPerros, activarAcceso, sinHash } from "../_lib/clientes.js";
+import { handler, send, readJson, HttpError } from "../../_lib/http.js";
+import { requireUser, perrosDeCliente } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
+import { validarHorario, validarPerros, activarAcceso, sinHash } from "../../_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,79}$/i;
 const texto = (v, max) => String(v ?? "").replace(/[<>]/g, "").trim().slice(0, max);

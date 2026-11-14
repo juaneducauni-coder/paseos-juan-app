@@ -5,10 +5,10 @@
 // POST /api/clientes/acceso { clienteId, revocar: true } → desactiva el enlace y cierra sus sesiones.
 // Cortar el acceso: admin y coordinador. Generar un enlace nuevo: SOLO el admin, porque quien
 // tiene el enlace entra como el cliente (ve el alias de pago y escribe en su nombre).
-import { handler, send, readJson, HttpError } from "../_lib/http.js";
-import { requireUser } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
-import { activarAcceso } from "../_lib/clientes.js";
+import { handler, send, readJson, HttpError } from "../../_lib/http.js";
+import { requireUser } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
+import { activarAcceso } from "../../_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,79}$/i;
 

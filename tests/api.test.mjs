@@ -14,19 +14,19 @@ delete process.env.BLOB_READ_WRITE_TOKEN;
 delete process.env.SHEETS_API_URL;
 
 const routes = {
-  setup: (await import("../api/auth/setup.js")).default,
-  login: (await import("../api/auth/login.js")).default,
-  me: (await import("../api/auth/me.js")).default,
-  pin: (await import("../api/auth/pin.js")).default,
+  setup: (await import("../api/_rutas/auth/setup.js")).default,
+  login: (await import("../api/_rutas/auth/login.js")).default,
+  me: (await import("../api/_rutas/auth/me.js")).default,
+  pin: (await import("../api/_rutas/auth/pin.js")).default,
   usuarios: (await import("../api/usuarios.js")).default,
   registros: (await import("../api/registros.js")).default,
   evaluacion: (await import("../api/publico/evaluacion.js")).default,
   archivos: (await import("../api/archivos.js")).default,
-  google: (await import("../api/auth/google.js")).default,
+  google: (await import("../api/_rutas/auth/google.js")).default,
   mensajes: (await import("../api/mensajes.js")).default,
-  authCliente: (await import("../api/auth/cliente.js")).default,
-  acceso: (await import("../api/clientes/acceso.js")).default,
-  aprobar: (await import("../api/clientes/aprobar.js")).default,
+  authCliente: (await import("../api/_rutas/auth/cliente.js")).default,
+  acceso: (await import("../api/_rutas/clientes/acceso.js")).default,
+  aprobar: (await import("../api/_rutas/clientes/aprobar.js")).default,
 };
 const { store } = await import("../api/_lib/store.js");
 

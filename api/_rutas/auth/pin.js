@@ -1,9 +1,9 @@
 // POST /api/auth/pin { actual, nuevo } → cambia el PIN propio y cierra las otras sesiones.
 // El PIN actual tiene el mismo límite que el ingreso (5 fallos → 15 minutos de bloqueo), así
 // alguien con una sesión robada no puede adivinarlo probando todos.
-import { handler, send, readJson, HttpError } from "../_lib/http.js";
-import { requireUser, checkPin, hashPin, validatePin, issueToken, publicUser, estaBloqueado, contarIntento } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
+import { handler, send, readJson, HttpError } from "../../_lib/http.js";
+import { requireUser, checkPin, hashPin, validatePin, issueToken, publicUser, estaBloqueado, contarIntento } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
 
 const BLOQUEADO = "Demasiados intentos con el PIN actual. Esperá 15 minutos y probá de nuevo.";
 

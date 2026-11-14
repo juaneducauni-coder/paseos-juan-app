@@ -1,9 +1,9 @@
 // POST /api/auth/google { credential } → entra con la cuenta de Google vinculada al usuario.
 // El admin vincula el Gmail de cada persona desde "Usuarios y accesos".
-import { handler, send, readJson, HttpError } from "../_lib/http.js";
-import { issueToken, publicUser } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
-import { verificarGoogle } from "../_lib/google.js";
+import { handler, send, readJson, HttpError } from "../../_lib/http.js";
+import { issueToken, publicUser } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
+import { verificarGoogle } from "../../_lib/google.js";
 
 export default handler({ POST: 1 }, async (req, res) => {
   const { credential } = await readJson(req);

@@ -3,9 +3,9 @@
 // - en desarrollo local, o
 // - en una versión de prueba de Vercel sin SETUP_CODE (protegida con la cuenta de Vercel), o
 // - con el código SETUP_CODE (obligatorio en producción y en todo Vercel si está configurado).
-import { handler, send, readJson, HttpError } from "../_lib/http.js";
-import { hashPin, validatePin, normalizeUser, issueToken, publicUser } from "../_lib/auth.js";
-import { store } from "../_lib/store.js";
+import { handler, send, readJson, HttpError } from "../../_lib/http.js";
+import { hashPin, validatePin, normalizeUser, issueToken, publicUser } from "../../_lib/auth.js";
+import { store } from "../../_lib/store.js";
 
 export default handler({ POST: 1 }, async (req, res) => {
   const body = await readJson(req);

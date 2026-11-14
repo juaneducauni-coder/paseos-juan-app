@@ -1,6 +1,6 @@
 // POST /api/auth/login { usuario, pin } → { token, user }
-import { handler, send, readJson, clientIp, ipClave, limitador } from "../_lib/http.js";
-import { login } from "../_lib/auth.js";
+import { handler, send, readJson, clientIp, ipClave, limitador } from "../../_lib/http.js";
+import { login } from "../../_lib/auth.js";
 
 // Hasta 10 intentos fallidos cada 15 minutos por conexión (los ingresos correctos no cuentan).
 // Así el bloqueo de la cuenta no es la única defensa, y desde una sola IP no se pueden probar
