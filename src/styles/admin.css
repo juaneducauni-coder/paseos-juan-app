@@ -1813,6 +1813,251 @@ html[data-theme="dark"] .adm-btn--undo {
   outline: none;
 }
 
+/* ---------- Altas de clientes, enlace, alias de pago y moderación (E-048) ---------- */
+
+.adm-altas {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-alta {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--adm-radius);
+  background: var(--adm-surface);
+  box-shadow: var(--adm-shadow);
+}
+
+.adm-alta.is-off {
+  background: var(--adm-surface-2);
+  box-shadow: none;
+}
+
+.adm-alta-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.adm-alta-head .adm-row-main {
+  flex: 1 1 auto;
+}
+
+.adm-alta .adm-row-title {
+  font-size: 18px;
+}
+
+/* El enlace del cliente: se ve entero y se puede seleccionar de un toque. */
+.adm-enlace-url {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--adm-line-strong);
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  background: var(--adm-surface-2);
+  color: var(--adm-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* Que el encabezado fijo no tape lo que se enfoca o a donde lleva un "Ver". */
+.adm-view,
+.adm-enlace,
+.adm-confirm,
+.adm-shell .adm-fold {
+  scroll-margin-top: 88px;
+}
+
+.adm-enlace .adm-warn-line {
+  width: 100%;
+}
+
+/* Hoja "Aprobar alta". */
+.adm-alta-who {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  background: var(--adm-surface);
+}
+
+.adm-alta-who:focus {
+  outline: none;
+}
+
+.adm-alta-who:focus-visible {
+  outline: 3px solid var(--adm-focus);
+  outline-offset: 3px;
+}
+
+.adm-alta-who > .adm-btn-row {
+  margin-top: 6px;
+}
+
+.adm-shell .adm-alta-name {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.adm-alta-datos {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--adm-line);
+}
+
+.adm-alta-datos dt {
+  color: var(--adm-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.adm-alta-datos dd {
+  margin: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.adm-alta-perro {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.adm-alta-perro-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.adm-alta-perro-row > .adm-field {
+  flex: 1 1 auto;
+}
+
+.adm-alta-perro-row > .adm-btn--icon {
+  min-height: 52px;
+  height: 52px;
+}
+
+.adm-alta-perro-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Días: casillas grandes con el nombre completo. */
+.adm-dias {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (min-width: 480px) {
+  .adm-dias {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.adm-dia {
+  position: relative;
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--adm-line-strong);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  background: var(--adm-surface);
+  color: var(--adm-ink);
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.adm-dia input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.adm-dia-check {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid var(--adm-line-strong);
+  border-radius: 8px;
+  background: var(--adm-surface);
+}
+
+.adm-dia-check svg {
+  visibility: hidden;
+}
+
+.adm-dia.is-on,
+.adm-dia:has(input:checked) {
+  border-color: var(--adm-green);
+  background: var(--adm-green-soft);
+  color: var(--adm-green);
+  box-shadow: inset 0 0 0 1.5px var(--adm-green);
+}
+
+.adm-dia.is-on .adm-dia-check,
+.adm-dia:has(input:checked) .adm-dia-check {
+  border-color: var(--adm-green);
+  background: var(--adm-green);
+  color: var(--adm-on-green);
+}
+
+.adm-dia.is-on .adm-dia-check svg,
+.adm-dia:has(input:checked) .adm-dia-check svg {
+  visibility: visible;
+}
+
+.adm-dia:focus-within {
+  outline: 3px solid var(--adm-focus);
+  outline-offset: 2px;
+}
+
+/* Alias de pago (Plata). */
+.adm-alias-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+
+.adm-alias-value {
+  font-size: 22px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.adm-textarea {
+  min-height: 104px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
 /* ---------- Equipo ---------- */
 
 .adm-users {

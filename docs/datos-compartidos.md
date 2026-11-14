@@ -188,6 +188,7 @@ Al guardar un `paseos` de **hoy** de un perro que figura en `clientes.perros` (c
 1. El tutor pide el alta con el formulario de la web (queda en `pedidos`).
 2. Juan aprueba con `clientesAcceso.aprobar({ pedidoId, perros, dias, turno, hora?, plan? })` (solo admin). Sin días y turno no se aprueba. Crea el cliente con los datos del pedido, marca el pedido "aprobado" y devuelve el enlace `/c/<token>`, que se ve **una sola vez** (en el servidor queda solo su hash SHA-256). Para un cliente ya cargado: `{ clienteId, dias, turno, ... }`.
 3. Juan (o el coordinador) le manda el enlace al cliente. Al abrirlo, `src/app.js` hace `session.loginCliente(token)` y lleva a `/cliente`. La sesión dura 90 días.
+   Pantalla (E-048): `/admin` → Más → **Altas de clientes** (aprobar, enlace con "Copiar" y "Mandar por WhatsApp", "Renovar enlace" y "Cortar acceso"); el alias se carga en Plata → **Alias de pago**; los silenciados de la comunidad, en Más → **Moderación**.
 4. Si lo pierde: `clientesAcceso.crear(clienteId)` (admin o coordinador, solo clientes aprobados) da un enlace nuevo y corta el anterior. `clientesAcceso.revocar(clienteId)` corta todo. Si el cliente pasa a "baja", su sesión deja de valer.
 
 El cliente ve **solo**: `paseos` y `fotos` de sus perros (sin ruta, notas ni usuarios del equipo), las fotos de sus perros en `/api/archivos?id=`, su chat `cliente_<id>`, la comunidad `clientes` y el alias de pago (`ajustes/pagos`). Nada de rutas, otros perros, pagos, contaduría ni equipo.

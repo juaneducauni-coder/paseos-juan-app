@@ -9,6 +9,10 @@
 // Archivos recibidos (carnets, comprobantes, documentos): colección "archivos" (admin y coordinador;
 // los comprobantes de pago los abre solo el admin). Se suben con archivos.subir: sin señal no se encolan.
 // Fotos de los perros: colección "fotos" (fotosPerros.de / fotosPerros.subir), necesitan señal.
+// Altas de clientes (P-01, E-048): los pedidos del formulario web se aprueban en "Más → Altas de
+// clientes" con clientesAcceso.aprobar (días, turno, hora y plan) y sale el enlace /c/<token>, que se
+// ve UNA sola vez. Ahí mismo se renueva o se corta el acceso. Moderación de la comunidad de clientes
+// (mensajes.silenciados / silenciar) en "Más → Moderación". Alias de pago (datosPago) en Plata.
 // Lo que no está confirmado se rotula como "Pendiente de confirmar".
 // Las marcas de "hecho" de las prioridades, la pestaña elegida y las secciones abiertas se guardan
 // solo en este dispositivo.
@@ -32,7 +36,7 @@ import {
 } from "../data/realData.js";
 import { icon, getStoredArray, actionClickHandlers, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
-import { session, registros, usuarios, archivos, fotosPerros, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS } from "../api/client.js";
+import { session, registros, usuarios, archivos, fotosPerros, onDataChange, hoyAR, ROLE_PAGES, ROLE_LABELS, clientesAcceso, datosPago, mensajes } from "../api/client.js";
 
 const DONE_KEY = "paseosJuanAdmin_prioridadesHechas";
 const FOLD_KEY = "paseosJuanAdmin_plegables";
@@ -91,6 +95,8 @@ const MAS_VIEWS = {
   datos: { title: "Datos a revisar", icon: "clipboardCheck" },
   clientes: { title: "Clientes por barrio", icon: "mapPin" },
   indicadores: { title: "Indicadores", icon: "activity" },
+  altas: { title: "Altas de clientes", icon: "userPlus" },
+  moderacion: { title: "Moderación", icon: "shieldCheck" },
 };
 
 // A qué pestaña (y pantalla de "Más") lleva cada destino de los botones "Ver".
@@ -105,7 +111,20 @@ const TARGETS = {
   "adm-datos": ["mas", "datos"],
   "adm-clientes": ["mas", "clientes"],
   "adm-indicadores": ["mas", "indicadores"],
+  "adm-altas": ["mas", "altas"],
+  "adm-moderacion": ["mas", "moderacion"],
+  "adm-alias": ["plata"],
 };
+
+// Altas de clientes. Los mismos días y turnos que valida el servidor (api/_lib/clientes.js).
+const ALTA_DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const ALTA_TURNOS = ["Mañana", "Tarde"];
+const ALTA_PLANES = ["Plan 1", "Plan 2", "Plan 3"];
+const PERRO_CODIGO = /^[A-Za-z0-9_.-]{1,40}$/;
+const ALTA_MAX_PERROS = 10;
+// Alias de pago: lo mismo que valida el servidor (ALIAS en api/registros.js).
+const ALIAS_OK = /^[a-z0-9.-]{6,20}$/;
+const ALIAS_MAX_INSTRUCCIONES = 400;
 
 // Último mensaje de estado (se escribe en la región aria-live después de cada render).
 let pendingStatus = "";
@@ -142,7 +161,21 @@ const ui = {
   lateSignature: "",
   navBadges: {},
   undo: null, // { text, run }
-  msgs: { users: null, live: null, pagos: null, conta: null, archivos: null, fotos: null },
+  msgs: { users: null, live: null, pagos: null, conta: null, archivos: null, fotos: null, altas: null, alta: null, alias: null, moderacion: null },
+  // Altas de clientes.
+  altaFuente: null, // { pedidoId } o { clienteId } de la hoja "Aprobar alta"
+  altaVerDatos: false, // datos de contacto a la vista (solo dentro de la hoja)
+  enlace: null, // { tipo: "alta"|"renovar", nombre, perro, url } — se muestra una sola vez
+  cortarFor: null, // clienteId esperando confirmación para cortar el acceso
+  accesoBusy: null, // clienteId con un pedido al servidor en curso
+  // Alias de pago.
+  alias: { estado: "cargando", alias: "", instrucciones: "" }, // estado: "cargando" | "listo" | "error"
+  savingAlias: false,
+  // Moderación de la comunidad de clientes.
+  silenciados: null, // { usuario: ISO hasta } | null (sin traer)
+  silLoading: false,
+  silError: false,
+  silBusy: null, // usuario al que se le está quitando el silencio
 };
 
 // Lo que se va escribiendo en los formularios, para no perderlo si la página se vuelve a dibujar.
@@ -158,6 +191,8 @@ const drafts = {
   pagoArchivo: null,
   pagoSubido: null,
   mov: emptyMov(),
+  alta: { perros: [], dias: [], turno: "", hora: "", plan: "" },
+  alias: { alias: "", instrucciones: "", tocado: false },
 };
 
 /* ---------- Íconos que no están en el set compartido ---------- */
@@ -173,6 +208,7 @@ const LOCAL_ICONS = {
   minus: `<path d="M5 12h14" />`,
   download: `<path d="M12 4v11" /><path d="m7 11 5 5 5-5" /><path d="M5 20h14" />`,
   trash: `<path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /><path d="M10 11v5" /><path d="M14 11v5" />`,
+  link: `<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />`,
   wifiOff: `<path d="M3 3l18 18" /><path d="M8.5 16.5a5 5 0 0 1 7 0" /><path d="M5 12.5a10 10 0 0 1 4.2-2.4" /><path d="M14.8 10.1A10 10 0 0 1 19 12.5" /><path d="M2 8.8a15 15 0 0 1 4.3-2.6" /><path d="M10.7 5.1A15 15 0 0 1 22 8.8" /><path d="M12 20h.01" />`,
 };
 
@@ -540,7 +576,9 @@ function liveData() {
   // Hoy en números: perros que salen según la ruta de hoy, entregados, atrasados e incidentes.
   const perrosHoy = compliance.reduce((sum, item) => sum + item.stops.length - item.noSale, 0);
   const entregados = paseos.filter((paseo) => paseo.estado === "entregado").length;
-  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos, carnetsWeb, perrosHoy, entregados };
+  // Altas pedidas en la web que esperan la aprobación de Juan.
+  const altas = altasPendientes();
+  return { hoy, paseos, incidentes, checklists, pedidosNuevos, shifts, nowMin, effective, compliance, late, lateNow, avisos, carnetsWeb, perrosHoy, entregados, altas };
 }
 
 function lateSignature(live) {
@@ -553,6 +591,7 @@ function startLive() {
   const hoy = hoyAR();
   if (!ui.adminLoaded) {
     ui.adminLoaded = true;
+    loadAlias();
     refreshAdminData().finally(() => {
       ADMIN_COLS.forEach((col) => registros.watch(col, liveOpts(col, hoy)));
     });
@@ -912,25 +951,48 @@ function buildPriorities(live = liveData()) {
     });
   }
 
+  // Altas pedidas por la web: las aprueba Juan (elige días y turno) y sale el enlace de su página.
+  if (live.altas.length) {
+    const count = live.altas.length;
+    const oldest = live.altas[count - 1];
+    const perros = live.altas.slice(0, 3).map((pedido) => altaPerroNombre(pedido));
+    priorities.push({
+      id: `altas-${live.altas[0].id}-${count}`,
+      tag: "Altas",
+      tone: "blue",
+      short: count === 1 ? `Alta de ${altaPerroNombre(oldest)}` : `${count} altas para aprobar`,
+      title: count === 1 ? `${altaPerroNombre(oldest)} pidió el alta por la web` : `${count} altas pedidas por la web`,
+      detail: `${listJoin(perros)}${count > 3 ? ` y ${plural(count - 3, "más", "más")}` : ""}. Al aprobar elegís días y turno, y sale el enlace de su página.`,
+      action: count === 1
+        ? `Aprobá el alta de ${altaPerroNombre(oldest)} y mandale su enlace.`
+        : `Aprobá las ${count} altas, empezando por ${altaPerroNombre(oldest)}.`,
+      target: "adm-altas",
+      targetLabel: count === 1 ? "Ver alta" : "Ver altas",
+    });
+  }
+
   // Pedidos nuevos. Un carnet que llegó por la web en las últimas 24 h cuenta como "pedido nuevo
   // con carnet" dentro de esta misma prioridad (no suma una prioridad aparte).
+  // Las altas de la web ya tienen su prioridad: acá no se cuentan dos veces.
   const pedidoIds = new Set(live.pedidosNuevos.map((pedido) => pedido.id));
-  const carnetsSueltos = live.carnetsWeb.filter((archivo) => !pedidoIds.has(archivo.pedidoId));
-  if (live.pedidosNuevos.length || carnetsSueltos.length) {
-    const count = live.pedidosNuevos.length;
-    const conCarnet = live.pedidosNuevos.filter((pedido) => hasCarnet(pedido, live));
+  const altaIds = new Set(live.altas.map((pedido) => pedido.id));
+  const pedidosNuevos = live.pedidosNuevos.filter((pedido) => !altaIds.has(pedido.id));
+  const carnetsSueltos = live.carnetsWeb.filter((archivo) => !pedidoIds.has(archivo.pedidoId) && !altaIds.has(archivo.pedidoId));
+  if (pedidosNuevos.length || carnetsSueltos.length) {
+    const count = pedidosNuevos.length;
+    const conCarnet = pedidosNuevos.filter((pedido) => hasCarnet(pedido, live));
     const titleOf = (pedido) => pedido.titulo || pedido.tipo || "Pedido sin título";
     const sueltosNames = [...new Set(carnetsSueltos.map((archivo) => archivo.perroNombre || "perro sin nombre"))];
     const sueltosText = carnetsSueltos.length
       ? `${count ? "Además, l" : "L"}${carnetsSueltos.length === 1 ? "legó 1 carnet de vacunas" : `legaron ${carnetsSueltos.length} carnets de vacunas`} por la web en las últimas 24 h (${listJoin(sueltosNames)}) de ${carnetsSueltos.length === 1 ? "un pedido que" : "pedidos que"} ya no ${carnetsSueltos.length === 1 ? "está" : "están"} como nuevo${carnetsSueltos.length === 1 ? "" : "s"}.`
       : "";
     if (count) {
-      const titles = live.pedidosNuevos.slice(0, 3).map((pedido) => `${titleOf(pedido)}${hasCarnet(pedido, live) ? " (con carnet)" : ""}`);
-      const oldestPedido = live.pedidosNuevos[count - 1];
+      const titles = pedidosNuevos.slice(0, 3).map((pedido) => `${titleOf(pedido)}${hasCarnet(pedido, live) ? " (con carnet)" : ""}`);
+      const oldestPedido = pedidosNuevos[count - 1];
       const oldest = titleOf(oldestPedido);
       const carnetCount = conCarnet.length + carnetsSueltos.length;
       priorities.push({
-        id: `pedidos-${live.pedidosNuevos[0].id}-${count}-${carnetCount}`,
+        id: `pedidos-${pedidosNuevos[0].id}-${count}-${carnetCount}`,
         tag: "Pedidos",
         tone: "blue",
         short: `${plural(count, "pedido nuevo", "pedidos nuevos")}${conCarnet.length ? " · con carnet" : ""}`,
@@ -1126,6 +1188,7 @@ export function adminDashboard() {
       ? { count: live.incidentes.length + live.lateNow.length, tone: "red", label: `${plural(live.incidentes.length, "incidente", "incidentes")} y ${plural(live.lateNow.length, "atrasado", "atrasados")}` }
       : null,
     plata: sinLibro ? { count: sinLibro, tone: "yellow", label: `${plural(sinLibro, "registro sin pasar", "registros sin pasar")} al Libro` } : null,
+    mas: live.altas.length ? { count: live.altas.length, tone: "blue", label: plural(live.altas.length, "alta para aprobar", "altas para aprobar") } : null,
   };
   // Los mensajes nuevos se escriben un instante después, para que el lector de pantalla los lea.
   setTimeout(flushMsgs, 60);
@@ -1143,6 +1206,7 @@ export function adminDashboard() {
     ${ui.sheet === "pago" ? PagoSheet() : ""}
     ${ui.sheet === "mov" ? MovSheet() : ""}
     ${ui.sheet === "crear" ? CrearSheet() : ""}
+    ${ui.sheet === "alta" ? AltaSheet() : ""}
   `;
 }
 
@@ -1535,6 +1599,7 @@ function PedidosFold(live) {
       }).join("")}
     </ul>
     ${pedidosNuevos.length > 6 ? `<p class="adm-row-meta">Y ${plural(pedidosNuevos.length - 6, "más", "más")}. Los responde el coordinador.</p>` : ""}
+    ${live.altas.length ? `<button class="adm-btn adm-btn--soft adm-btn--block" type="button" data-adm-goto="adm-altas">${ico("userPlus")} ${live.altas.length === 1 ? "Aprobar 1 alta" : `Aprobar ${live.altas.length} altas`}</button>` : ""}
   ` : `<p class="adm-empty">Sin pedidos nuevos.</p>`);
 }
 
@@ -1944,6 +2009,7 @@ function PlataTab(data, conta) {
       ${data.filtered.length > shown.length ? `<button class="adm-btn adm-btn--ghost adm-btn--block" type="button" data-adm-pagos-todos>Ver los ${data.filtered.length}</button>` : ""}
     ` : `<p class="adm-empty">Sin pagos en ${esc(mesText.toLowerCase())}.</p>`}
     ${data.deOtros.length ? `<p class="adm-row-meta">${plural(data.deOtros.length, "pago lo cargó", "pagos los cargó")} otro rol antes del cambio de roles (el coordinador ya no ve plata).</p>` : ""}
+    ${AliasBlock()}
     ${FinanceFold()}
   `;
 }
@@ -2299,6 +2365,11 @@ function MasTab() {
     { id: "clientes", sub: `${clientesResumen().totals.activo} activos` },
     { id: "indicadores", sub: "Con fuente" },
   ];
+  const altas = altasPendientes().length;
+  tiles.unshift(
+    { id: "altas", sub: altas ? plural(altas, "para aprobar", "para aprobar") : `${clientesAprobados().length} con página`, tone: altas ? "blue" : "" },
+    { id: "moderacion", sub: "Comunidad" },
+  );
   return `
     <div class="adm-title-row">
       <h1 id="adm-title" tabindex="-1">Más</h1>
@@ -2349,6 +2420,8 @@ function MasView(view) {
     datos: DatosView,
     clientes: ClientesView,
     indicadores: IndicadoresView,
+    altas: AltasView,
+    moderacion: ModeracionView,
   }[view]();
   return `
     <button class="adm-btn adm-btn--link adm-back" type="button" data-adm-mas-back>${ico("arrowLeft")} Más</button>
@@ -2614,6 +2687,626 @@ function ClientesView() {
   `;
 }
 
+/* ---------- Altas de clientes (P-01): aprobar, enlace, renovar y cortar ---------- */
+
+const emptyAlta = () => ({ perros: [], dias: [], turno: "", hora: "", plan: "" });
+
+// Pedidos del formulario web que esperan la aprobación de Juan (sin cliente creado todavía).
+function altasPendientes() {
+  return registros.cached("pedidos", liveOpts("pedidos"))
+    .filter((pedido) => pedido.origen === "web" && !pedido.clienteId && ["nuevo", "en-curso"].includes(pedido.estado || "nuevo"))
+    .sort(byNewest);
+}
+
+function clientesCache() {
+  return registros.cached("clientes", liveOpts("clientes"));
+}
+
+function clientesAprobados() {
+  return clientesCache().filter((cliente) => cliente.aprobado?.en)
+    .sort((a, b) => String(b.aprobado.en).localeCompare(String(a.aprobado.en)));
+}
+
+// Clientes cargados por el coordinador (o la planilla) que todavía no tienen su página.
+function clientesSinPagina() {
+  return clientesCache().filter((cliente) => !cliente.aprobado?.en && cliente.estado !== "baja")
+    .sort((a, b) => String(a.nombre || "").localeCompare(String(b.nombre || "")));
+}
+
+function altaPerroNombre(pedido) {
+  return String(pedido?.datos?.perro || "").trim() || String(pedido?.titulo || "").replace(/^Evaluación:\s*/, "").trim() || "Perro sin nombre";
+}
+
+function clientePerros(cliente) {
+  const nombres = (cliente.perros || []).map((id) => dogById(id)?.name).filter(Boolean);
+  return String(cliente.perroNombre || "").trim() || listJoin(nombres) || listJoin(cliente.perros || []) || "Perro sin nombre";
+}
+
+// "Lunes, Miércoles" (texto del formulario) o ["lunes", "miércoles"] (servidor) → ["Lunes", "Miércoles"].
+function parseDias(value) {
+  const text = normText(Array.isArray(value) ? value.join(" ") : value);
+  return ALTA_DIAS.filter((dia) => new RegExp(`(^|[^a-z])${normText(dia)}([^a-z]|$)`).test(text));
+}
+
+function turnoDe(value) {
+  return ALTA_TURNOS.find((turno) => normText(turno) === normText(value)) || "";
+}
+
+// Lo que pidió el tutor en el formulario: "Lunes y Miércoles · Mañana".
+function altaDeseo(pedido) {
+  const dias = parseDias(pedido.datos?.dias);
+  const horario = String(pedido.datos?.horario || "").trim();
+  const turno = turnoDe(horario) || (horario ? `Turno ${horario.toLowerCase()}` : "");
+  return [dias.length ? daysText(dias) : "", turno].filter(Boolean).join(" · ");
+}
+
+function horarioCliente(cliente) {
+  const dias = parseDias(cliente.dias);
+  return [dias.length ? daysText(dias) : "", [cliente.turno, cliente.hora].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
+}
+
+// Siguiente código libre "PJ-0xx" (mirando la planilla, los clientes y lo que ya está en la hoja).
+function nextCodigo(extra = []) {
+  const usados = [...REAL_DOGS.map((dog) => dog.id), ...clientesCache().flatMap((cliente) => cliente.perros || []), ...extra];
+  const max = usados.reduce((top, codigo) => {
+    const match = /^PJ-(\d+)$/i.exec(String(codigo || "").trim());
+    return match ? Math.max(top, Number(match[1])) : top;
+  }, 0);
+  return `PJ-${String(max + 1).padStart(3, "0")}`;
+}
+
+function normCodigo(value) {
+  const codigo = String(value || "").trim();
+  return /^pj-\d+$/i.test(codigo) ? codigo.toUpperCase() : codigo;
+}
+
+// "Rocco y Luna" → ["Rocco", "Luna"].
+function splitPerros(text) {
+  const nombres = String(text || "").split(/\s*(?:,|\/|&|\+|\s+y\s+)\s*/i).map((name) => name.trim()).filter(Boolean);
+  return nombres.length ? nombres.slice(0, 4) : [""];
+}
+
+function altaFuenteRecord(fuente = ui.altaFuente) {
+  if (fuente?.pedidoId) return registros.cached("pedidos", liveOpts("pedidos")).find((pedido) => pedido.id === fuente.pedidoId) || null;
+  if (fuente?.clienteId) return clientesCache().find((cliente) => cliente.id === fuente.clienteId) || null;
+  return null;
+}
+
+// Borrador de la hoja a partir del pedido (lo que pidió el tutor) o del cliente ya cargado.
+function initAlta(fuente) {
+  const record = altaFuenteRecord(fuente);
+  const draft = emptyAlta();
+  if (!record) return draft;
+  if (fuente.pedidoId) {
+    const codigos = [];
+    draft.perros = splitPerros(record.datos?.perro).map((nombre) => {
+      const codigo = nextCodigo(codigos);
+      codigos.push(codigo);
+      return { nombre, codigo };
+    });
+    draft.dias = parseDias(record.datos?.dias);
+    draft.turno = turnoDe(record.datos?.horario);
+  } else {
+    draft.perros = (record.perros || []).map((id) => ({ nombre: dogById(id)?.name || "", codigo: id }));
+    if (!draft.perros.length) draft.perros = [{ nombre: record.perroNombre || "", codigo: nextCodigo() }];
+    draft.dias = parseDias(record.dias);
+    draft.turno = turnoDe(record.turno);
+    draft.hora = /^\d{1,2}:\d{2}$/.test(record.hora || "") ? record.hora : "";
+    draft.plan = String(record.plan || "");
+  }
+  return draft;
+}
+
+// Datos para la hoja: lo de contacto solo se ve con "Ver datos".
+function altaInfo() {
+  const record = altaFuenteRecord();
+  if (!record) return null;
+  if (ui.altaFuente.pedidoId) {
+    const d = record.datos || {};
+    const campos = [
+      ["Tutor", d.responsable], ["WhatsApp", d.telefono], ["Correo", d.email], ["Zona", d.zona], ["Referencia", d.referencia],
+      ["Edad", d.edad], ["Tamaño", d.tamano], ["Raza o cruza", d.raza], ["Energía", d.energia],
+      ["Con otros perros", d.perros], ["Mordió o intentó morder", d.mordida], ["Sobre el perro", d.conducta], ["Comentario", d.comentario],
+    ];
+    return {
+      perro: altaPerroNombre(record),
+      barrio: String(d.zona || "").trim(),
+      deseo: altaDeseo(record),
+      carnetId: record.carnet?.id || "",
+      datos: campos.filter(([, value]) => String(value || "").trim()),
+    };
+  }
+  return {
+    perro: clientePerros(record),
+    barrio: String(record.barrio || "").trim(),
+    deseo: horarioCliente(record),
+    carnetId: "",
+    datos: [["Tutor", record.nombre], ["WhatsApp", record.telefono], ["Correo", record.email], ["Notas", record.notas]].filter(([, value]) => String(value || "").trim()),
+  };
+}
+
+function enlaceMensaje(url) {
+  return `Hola, ya podés entrar a tu página de Paseos Juan: ${url}. Guardala, es personal.`;
+}
+
+// El enlace se ve UNA sola vez (en el servidor queda solo su hash).
+function EnlaceBox() {
+  const e = ui.enlace;
+  if (!e) return "";
+  const texto = enlaceMensaje(e.url);
+  return `
+    <section class="adm-card adm-cred adm-enlace" id="adm-enlace" tabindex="-1" aria-labelledby="adm-enlace-title">
+      <span class="adm-chip adm-chip--yellow">Solo se ve ahora</span>
+      <h2 class="adm-h2" id="adm-enlace-title">${e.tipo === "alta" ? `Listo: ${esc(e.perro)} ya tiene su página` : `Enlace nuevo de ${esc(e.perro)}`}</h2>
+      <p class="adm-enlace-url"><span class="adm-sr-only">Enlace: </span>${esc(e.url)}</p>
+      <p class="adm-warn-line">${ico("lock")} <span>Es personal y no se vuelve a mostrar. Mandalo ahora.</span></p>
+      <a class="adm-btn adm-btn--whatsapp adm-btn--block adm-btn--big" href="https://wa.me/?text=${encodeURIComponent(texto)}" target="_blank" rel="noopener noreferrer">${ico("message", "adm-icon")} Mandar por WhatsApp</a>
+      <button class="adm-btn adm-btn--ghost adm-btn--block adm-btn--big" id="adm-enlace-copiar" type="button" data-adm-enlace-copy>${ico("copy", "adm-icon")} Copiar enlace</button>
+      <button class="adm-btn adm-btn--soft adm-btn--block" type="button" data-adm-enlace-hide>${ico("check")} Listo, ya lo mandé</button>
+      ${Help(`<p>Mensaje: “${esc(texto)}”</p><p>Si lo pierde, tocá “Renovar enlace”: sale uno nuevo y el anterior deja de andar.</p>`, "Ver el mensaje")}
+    </section>
+  `;
+}
+
+function AltaHead(perro, lines, avatarId = "") {
+  const foto = avatarId ? fotoDe(avatarId) : null;
+  return `
+    <div class="adm-alta-head">
+      ${foto ? `<img class="adm-avatar adm-avatar--md" src="${esc(foto)}" alt="" />` : `<span class="adm-avatar adm-avatar--md adm-avatar--empty" aria-hidden="true">${esc(initial(perro))}</span>`}
+      <div class="adm-row-main">
+        <strong class="adm-row-title">${esc(perro)}</strong>
+        ${lines.filter(Boolean).map((line) => `<span class="adm-row-meta">${line}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function AltaRow(pedido) {
+  const perro = altaPerroNombre(pedido);
+  const barrio = String(pedido.datos?.zona || "").trim();
+  const deseo = altaDeseo(pedido);
+  const fecha = ymdToAR(pedido.fecha) || dateAR(pedido.creadoEn);
+  const carnet = Boolean(pedido.carnet?.id);
+  return `
+    <li class="adm-alta">
+      ${AltaHead(perro, [
+        `${esc(barrio || `Barrio: ${PENDIENTE.toLowerCase()}`)}${fecha ? ` · Pidió el ${esc(fecha)}` : ""}`,
+        deseo ? `Quiere: ${esc(deseo)}` : "",
+      ])}
+      ${carnet || pedido.estado === "en-curso" ? `
+        <span class="adm-chips">
+          ${carnet ? `<span class="adm-chip adm-chip--green">${ico("fileCheck", "adm-icon-xs")} Trae carnet</span>` : ""}
+          ${pedido.estado === "en-curso" ? `<span class="adm-chip adm-chip--blue">En curso</span>` : ""}
+        </span>
+      ` : ""}
+      <button class="adm-btn adm-btn--primary adm-btn--block" id="adm-alta-${esc(pedido.id)}" type="button" data-adm-sheet="alta" data-adm-alta-pedido="${esc(pedido.id)}" aria-label="Aprobar el alta de ${esc(perro)}">${ico("check")} Aprobar</button>
+    </li>
+  `;
+}
+
+function ConfirmCortar(cliente) {
+  const perro = clientePerros(cliente);
+  return `
+    <div class="adm-confirm" id="adm-cortar-confirm" tabindex="-1" role="group" aria-labelledby="adm-cortar-text">
+      <p id="adm-cortar-text"><strong>¿Cortar el acceso de ${esc(perro)}?</strong> Su enlace deja de andar y se cierra su sesión.</p>
+      <div class="adm-btn-row">
+        <button class="adm-btn adm-btn--danger" type="button" data-adm-cortar-si="${esc(cliente.id)}" ${ui.accesoBusy ? "disabled" : ""}>${ico("off")} Cortar acceso</button>
+        <button class="adm-btn adm-btn--ghost" id="adm-cortar-no" type="button" data-adm-cortar-no>Cancelar</button>
+      </div>
+    </div>
+  `;
+}
+
+function ClienteAccesoRow(cliente) {
+  const perro = clientePerros(cliente);
+  const activo = cliente.acceso?.activo === true;
+  const baja = cliente.estado === "baja";
+  const busy = ui.accesoBusy === cliente.id;
+  return `
+    <li class="adm-alta ${activo && !baja ? "" : "is-off"}">
+      ${AltaHead(perro, [
+        [cliente.nombre, cliente.barrio].filter(Boolean).map(esc).join(" · "),
+        horarioCliente(cliente) ? esc(horarioCliente(cliente)) : "",
+      ], (cliente.perros || [])[0])}
+      <span class="adm-chips">
+        ${baja ? `<span class="adm-chip adm-chip--gray">De baja</span>` : activo ? `<span class="adm-chip adm-chip--green">${ico("checkCircle", "adm-icon-xs")} Con acceso</span>` : `<span class="adm-chip adm-chip--gray">${ico("off", "adm-icon-xs")} Acceso cortado</span>`}
+        ${cliente.estado === "pausa" ? `<span class="adm-chip adm-chip--yellow">En pausa</span>` : ""}
+      </span>
+      ${baja ? "" : `
+        <div class="adm-btn-row">
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" id="adm-renovar-${esc(cliente.id)}" type="button" data-adm-renovar="${esc(cliente.id)}" aria-label="${activo ? "Renovar enlace" : "Dar acceso"} de ${esc(perro)}" ${busy ? "disabled" : ""}>${ico("refresh")} ${busy ? "Un momento…" : activo ? "Renovar enlace" : "Dar acceso"}</button>
+          ${activo ? `<button class="adm-btn adm-btn--ghost adm-btn--sm adm-btn--danger-ghost" id="adm-cortar-${esc(cliente.id)}" type="button" data-adm-cortar="${esc(cliente.id)}" aria-label="Cortar acceso de ${esc(perro)}" aria-expanded="${ui.cortarFor === cliente.id}">${ico("off")} Cortar acceso</button>` : ""}
+        </div>
+      `}
+      ${ui.cortarFor === cliente.id && activo && !baja ? ConfirmCortar(cliente) : ""}
+    </li>
+  `;
+}
+
+function SinPaginaRow(cliente) {
+  const perro = clientePerros(cliente);
+  return `
+    <li class="adm-alta">
+      ${AltaHead(perro, [[cliente.nombre, cliente.barrio].filter(Boolean).map(esc).join(" · ")], (cliente.perros || [])[0])}
+      <button class="adm-btn adm-btn--ghost adm-btn--block" id="adm-alta-cli-${esc(cliente.id)}" type="button" data-adm-sheet="alta" data-adm-alta-cliente="${esc(cliente.id)}" aria-label="Aprobar y dar página a ${esc(perro)}">${ico("check")} Aprobar</button>
+    </li>
+  `;
+}
+
+function AltasView() {
+  const pendientes = altasPendientes();
+  const aprobados = clientesAprobados();
+  const sinPagina = clientesSinPagina();
+  return `
+    ${EnlaceBox()}
+    ${MsgRegion("altas")}
+    <div class="adm-h2-row">
+      <h2 class="adm-h2">Para aprobar <span class="adm-count adm-count--${pendientes.length ? "blue" : "gray"}">${pendientes.length}</span></h2>
+      ${Help(`<p>Pedidos del formulario de la web. Al aprobar elegís días y turno, y sale el enlace de su página.</p><p>Los teléfonos y correos se ven solo con “Ver datos”, adentro de cada alta.</p>`, "Qué es Altas")}
+    </div>
+    ${pendientes.length ? `<ul class="adm-altas">${pendientes.map(AltaRow).join("")}</ul>` : `<p class="adm-empty">Sin altas para aprobar.</p>`}
+    <div class="adm-h2-row">
+      <h2 class="adm-h2">Con página <span class="adm-count adm-count--gray">${aprobados.length}</span></h2>
+      ${Help(`<p>“Renovar enlace”: sale uno nuevo y el anterior deja de andar. “Cortar acceso”: no puede entrar más hasta que le des acceso de nuevo.</p>`, "Qué hace cada botón")}
+    </div>
+    ${aprobados.length ? `<ul class="adm-altas">${aprobados.map(ClienteAccesoRow).join("")}</ul>` : `<p class="adm-empty">Todavía nadie tiene su página.</p>`}
+    ${sinPagina.length ? Fold("sin-pagina", { title: "Clientes sin página", iconName: "users", count: sinPagina.length }, `<ul class="adm-altas">${sinPagina.map(SinPaginaRow).join("")}</ul>`) : ""}
+  `;
+}
+
+function PerroCodigoField(perro, index, total) {
+  const nombre = perro.nombre || `Perro ${index + 1}`;
+  const igual = perro.nombre ? REAL_DOGS.find((dog) => normText(dog.name) === normText(perro.nombre)) : null;
+  return `
+    <div class="adm-alta-perro">
+      <div class="adm-alta-perro-row">
+        <label class="adm-field" for="adm-alta-perro-${index}">
+          <span>${esc(nombre)} <small>código</small></span>
+          <input class="adm-input" id="adm-alta-perro-${index}" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" value="${esc(perro.codigo)}" data-adm-alta-codigo="${index}" />
+        </label>
+        ${total > 1 ? `<button class="adm-btn adm-btn--ghost adm-btn--icon" type="button" data-adm-alta-quitar="${index}" aria-label="Quitar ${esc(nombre)}">${ico("x")}</button>` : ""}
+      </div>
+      ${igual && igual.id !== normCodigo(perro.codigo) ? `<button class="adm-btn adm-btn--soft adm-btn--sm adm-btn--block" type="button" data-adm-alta-usar="${index}" data-adm-codigo="${esc(igual.id)}">¿Es ${esc(igual.name)} de la planilla? Usar ${esc(igual.id)}</button>` : ""}
+    </div>
+  `;
+}
+
+function AltaSheet() {
+  const info = altaInfo();
+  if (!info) {
+    return Sheet("alta", "Aprobar alta", `<p class="adm-empty">Ese pedido ya no está. Actualizá la lista.</p>`);
+  }
+  const d = drafts.alta;
+  const planes = d.plan && !ALTA_PLANES.includes(d.plan) ? ["", ...ALTA_PLANES, d.plan] : ["", ...ALTA_PLANES];
+  return Sheet("alta", "Aprobar alta", `
+    <form class="adm-sheet-form" id="adm-alta-form" data-adm-form="alta" novalidate aria-labelledby="adm-sheet-title">
+      <div class="adm-alta-who" id="adm-alta-who" tabindex="-1">
+        <p class="adm-alta-name">${esc(info.perro)}</p>
+        <p class="adm-row-meta">${esc(info.barrio || `Barrio: ${PENDIENTE.toLowerCase()}`)}</p>
+        ${info.deseo ? `<p class="adm-row-meta">Quiere: ${esc(info.deseo)}</p>` : ""}
+        <div class="adm-btn-row">
+          <button class="adm-btn adm-btn--ghost adm-btn--sm" id="adm-alta-ver" type="button" data-adm-alta-ver aria-expanded="${ui.altaVerDatos}" aria-controls="adm-alta-datos">${ico("eye")} ${ui.altaVerDatos ? "Ocultar datos" : "Ver datos"}</button>
+          ${info.carnetId ? `<button class="adm-btn adm-btn--ghost adm-btn--sm" type="button" data-adm-archivo-abrir="${esc(info.carnetId)}" data-adm-area="alta">${ico("fileCheck")} Carnet</button>` : ""}
+        </div>
+        <div id="adm-alta-datos" ${ui.altaVerDatos ? "" : "hidden"}>
+          ${info.datos.length ? `<dl class="adm-alta-datos">${info.datos.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl>` : `<p class="adm-empty">${PENDIENTE}</p>`}
+        </div>
+      </div>
+      <fieldset class="adm-field">
+        <legend>${d.perros.length > 1 ? "Perros" : "Perro"}</legend>
+        ${d.perros.map((perro, index) => PerroCodigoField(perro, index, d.perros.length)).join("")}
+        <div class="adm-alta-perro-foot">
+          ${d.perros.length < ALTA_MAX_PERROS ? `<button class="adm-btn adm-btn--ghost adm-btn--sm" id="adm-alta-sumar" type="button" data-adm-alta-sumar>${ico("plus")} Sumar otro perro</button>` : ""}
+          ${Help(`<p>Si el perro ya está en la Planilla de rutas, usá su código. Si es nuevo, va el siguiente libre: sumalo a la planilla con ese código para que el cliente vea sus paseos.</p>`, "Qué código va")}
+        </div>
+      </fieldset>
+      <fieldset class="adm-field">
+        <legend>Días</legend>
+        <div class="adm-dias">
+          ${ALTA_DIAS.map((dia) => {
+            const on = d.dias.includes(dia);
+            return `
+              <label class="adm-dia ${on ? "is-on" : ""}">
+                <input type="checkbox" name="dias" value="${dia}" ${on ? "checked" : ""} data-adm-alta-dia="${dia}" />
+                <span class="adm-dia-check" aria-hidden="true">${ico("check", "adm-icon-xs")}</span>
+                <span>${dia}</span>
+              </label>
+            `;
+          }).join("")}
+        </div>
+      </fieldset>
+      <fieldset class="adm-field">
+        <legend>Turno</legend>
+        <div class="adm-role-grid adm-alta-turnos">
+          ${ALTA_TURNOS.map((turno) => `
+            <label class="adm-choice ${d.turno === turno ? "is-on" : ""}">
+              <input type="radio" name="turno" value="${turno}" ${d.turno === turno ? "checked" : ""} data-adm-draft="alta" data-adm-key="turno" />
+              ${ico(turno === "Mañana" ? "sun" : "clock")} <span>${turno}</span>
+            </label>
+          `).join("")}
+        </div>
+      </fieldset>
+      <label class="adm-field" for="adm-alta-hora">
+        <span>Hora de retiro <small>opcional</small></span>
+        <input class="adm-input" id="adm-alta-hora" type="time" value="${esc(d.hora)}" data-adm-draft="alta" data-adm-key="hora" />
+      </label>
+      <fieldset class="adm-field">
+        <legend>Plan <small>opcional</small></legend>
+        <div class="adm-seg">
+          ${planes.map((plan) => `<button class="adm-seg-item ${d.plan === plan ? "is-on" : ""}" type="button" data-adm-alta-plan="${esc(plan)}" aria-pressed="${d.plan === plan}">${plan ? esc(plan) : "Sin definir"}</button>`).join("")}
+        </div>
+      </fieldset>
+      ${MsgRegion("alta")}
+      <div class="adm-sheet-foot">
+        <button class="adm-btn adm-btn--primary adm-btn--block adm-btn--big" type="submit">${ico("check", "adm-icon")} ${ui.busy ? "Aprobando…" : "Aprobar y crear enlace"}</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveAlta(form) {
+  const d = drafts.alta;
+  const fuente = ui.altaFuente;
+  const info = altaInfo();
+  const codigos = d.perros.map((perro) => normCodigo(perro.codigo));
+  const malo = codigos.findIndex((codigo) => codigo && !PERRO_CODIGO.test(codigo));
+  const perros = [...new Set(codigos.filter(Boolean))];
+  let problem = "";
+  let field = "";
+  if (!fuente || !info) problem = "Ese pedido ya no está. Actualizá la lista.";
+  else if (!perros.length) [problem, field] = ["Escribí el código del perro (por ejemplo PJ-032).", "#adm-alta-perro-0"];
+  else if (malo >= 0) [problem, field] = ["El código lleva solo letras, números y guiones (por ejemplo PJ-032).", `#adm-alta-perro-${malo}`];
+  else if (!d.dias.length) [problem, field] = ["Elegí al menos un día.", "[data-adm-alta-dia]"];
+  else if (!ALTA_TURNOS.includes(d.turno)) [problem, field] = ["Elegí el turno: Mañana o Tarde.", '[data-adm-key="turno"]'];
+  else if (d.hora && !/^\d{1,2}:\d{2}$/.test(d.hora)) [problem, field] = ["La hora no es válida.", "#adm-alta-hora"];
+  else if (isOffline()) problem = "Sin señal. Para aprobar hace falta señal.";
+  if (problem) {
+    setMsg("alta", problem, true);
+    rerender();
+    if (field) focusLater(field);
+    return;
+  }
+  setBusy(form, true);
+  try {
+    const dias = ALTA_DIAS.filter((dia) => d.dias.includes(dia)).map((dia) => dia.toLowerCase());
+    const result = await clientesAcceso.aprobar({
+      ...(fuente.pedidoId ? { pedidoId: fuente.pedidoId } : { clienteId: fuente.clienteId }),
+      perros,
+      dias,
+      turno: d.turno,
+      ...(d.hora ? { hora: d.hora } : {}),
+      ...(d.plan ? { plan: d.plan } : {}),
+    });
+    const perro = result.cliente ? clientePerros(result.cliente) : info.perro;
+    ui.enlace = { tipo: "alta", clienteId: result.cliente?.id || "", perro, url: result.url };
+    ui.sheet = null;
+    ui.altaFuente = null;
+    ui.altaVerDatos = false;
+    drafts.alta = emptyAlta();
+    setMsg("altas", `Listo: alta de ${perro} aprobada.`);
+    ui.busy = false;
+    render();
+    focusLater("#adm-enlace");
+    // El pedido queda "aprobado" y aparece el cliente nuevo: se traen las listas al toque.
+    Promise.allSettled([registros.list("pedidos", liveOpts("pedidos")), registros.list("clientes", liveOpts("clientes"))]);
+  } catch (error) {
+    setMsg("alta", error.message || "No se pudo aprobar. Probá de nuevo.", true);
+    ui.busy = false;
+    rerender();
+  }
+}
+
+async function renovarAcceso(clienteId) {
+  if (ui.accesoBusy) return;
+  const cliente = clientesCache().find((item) => item.id === clienteId);
+  if (!cliente) return;
+  const perro = clientePerros(cliente);
+  if (isOffline()) {
+    setMsg("altas", "Sin señal. Para crear el enlace hace falta señal.", true);
+    rerender();
+    return;
+  }
+  ui.accesoBusy = clienteId;
+  ui.cortarFor = null;
+  rerender();
+  try {
+    const result = await clientesAcceso.crear(clienteId);
+    ui.enlace = { tipo: "renovar", clienteId, perro, url: result.url };
+    setMsg("altas", `Enlace nuevo de ${perro}. El anterior ya no anda.`);
+    ui.accesoBusy = null;
+    render();
+    focusLater("#adm-enlace");
+    registros.list("clientes", liveOpts("clientes")).catch(() => {});
+  } catch (error) {
+    ui.accesoBusy = null;
+    setMsg("altas", error.message || "No se pudo crear el enlace.", true);
+    rerender();
+  }
+}
+
+async function cortarAcceso(clienteId) {
+  if (ui.accesoBusy) return;
+  const cliente = clientesCache().find((item) => item.id === clienteId);
+  if (!cliente) return;
+  const perro = clientePerros(cliente);
+  if (isOffline()) {
+    setMsg("altas", "Sin señal. Para cortar el acceso hace falta señal.", true);
+    rerender();
+    return;
+  }
+  ui.accesoBusy = clienteId;
+  rerender();
+  try {
+    await clientesAcceso.revocar(clienteId);
+    ui.cortarFor = null;
+    if (ui.enlace?.clienteId === clienteId) ui.enlace = null;
+    setMsg("altas", `Listo: acceso de ${perro} cortado.`);
+    ui.accesoBusy = null;
+    await registros.list("clientes", liveOpts("clientes")).catch(() => {});
+    render();
+    focusLater(`#adm-renovar-${CSS.escape(clienteId)}`);
+  } catch (error) {
+    ui.accesoBusy = null;
+    setMsg("altas", error.message || "No se pudo cortar el acceso.", true);
+    rerender();
+  }
+}
+
+/* ---------- Alias de pago (ajustes/pagos, solo admin) ---------- */
+
+async function loadAlias() {
+  ui.alias = { ...ui.alias, estado: "cargando" };
+  try {
+    const datos = await datosPago.leer();
+    ui.alias = { estado: "listo", alias: datos.pendiente ? "" : datos.alias, instrucciones: datos.instrucciones || "" };
+    if (!drafts.alias.tocado) drafts.alias = { alias: ui.alias.alias, instrucciones: ui.alias.instrucciones, tocado: false };
+  } catch (error) {
+    ui.alias = { ...ui.alias, estado: "error" };
+    setMsg("alias", `No se pudo traer el alias: ${error.message || "probá de nuevo"}.`, true);
+  }
+  rerender();
+}
+
+function AliasBlock() {
+  const a = ui.alias;
+  const d = drafts.alias;
+  const pendiente = a.estado !== "cargando" && !a.alias;
+  return Fold("alias", { title: "Alias de pago", iconName: "wallet", open: a.estado === "listo" && !a.alias, id: "adm-alias" }, `
+    <div class="adm-alias-now">
+      <span class="adm-row-meta">Ahora</span>
+      ${a.estado === "cargando" ? `<span class="adm-row-meta">Cargando…</span>` : pendiente ? `<span class="adm-chip adm-chip--yellow">${PENDIENTE}</span>` : `<strong class="adm-alias-value">${esc(a.alias)}</strong>`}
+    </div>
+    <form class="adm-sheet-form" data-adm-form="alias" novalidate aria-label="Alias de pago">
+      <label class="adm-field" for="adm-alias-input">
+        <span>Alias <small>6 a 20 letras, números o puntos</small></span>
+        <input class="adm-input adm-input--big" id="adm-alias-input" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="20" value="${esc(d.alias)}" data-adm-draft="alias" data-adm-key="alias" />
+      </label>
+      <label class="adm-field" for="adm-alias-instrucciones">
+        <span>Instrucciones <small>opcional</small></span>
+        <textarea class="adm-input adm-textarea" id="adm-alias-instrucciones" rows="3" maxlength="${ALIAS_MAX_INSTRUCCIONES}" data-adm-draft="alias" data-adm-key="instrucciones">${esc(d.instrucciones)}</textarea>
+      </label>
+      <p class="adm-row-meta">Lo ven solo los clientes con su página. Copialo desde la app de Naranja X.</p>
+      ${MsgRegion("alias")}
+      <button class="adm-btn adm-btn--primary adm-btn--block" type="submit" ${ui.savingAlias || a.estado === "cargando" ? "disabled" : ""}>${ico("check")} ${ui.savingAlias ? "Guardando…" : "Guardar alias"}</button>
+    </form>
+  `);
+}
+
+async function saveAlias(form) {
+  const alias = drafts.alias.alias.trim().toLowerCase();
+  const instrucciones = drafts.alias.instrucciones.trim();
+  let problem = "";
+  let field = "";
+  if (alias && !ALIAS_OK.test(alias)) [problem, field] = ["El alias tiene que tener de 6 a 20 letras, números, puntos o guiones.", "#adm-alias-input"];
+  else if (instrucciones.length > ALIAS_MAX_INSTRUCCIONES) [problem, field] = [`Las instrucciones son muy largas (máximo ${ALIAS_MAX_INSTRUCCIONES} letras).`, "#adm-alias-instrucciones"];
+  if (problem) {
+    setMsg("alias", problem, true);
+    rerender();
+    if (field) focusLater(field);
+    return;
+  }
+  ui.savingAlias = true;
+  setBusy(form, true);
+  try {
+    const saved = await datosPago.guardar({ alias, instrucciones });
+    ui.alias = { estado: "listo", alias, instrucciones };
+    drafts.alias = { alias, instrucciones, tocado: false };
+    setMsg("alias", saved?.pendiente
+      ? "Se enviará cuando haya señal."
+      : alias ? "Alias guardado." : `Alias borrado: los clientes ven “${PENDIENTE}”.`);
+  } catch (error) {
+    setMsg("alias", error.message || "No se pudo guardar el alias.", true);
+  }
+  ui.savingAlias = false;
+  ui.busy = false;
+  rerender();
+}
+
+/* ---------- Moderación de la comunidad de clientes ---------- */
+
+async function loadSilenciados() {
+  ui.silLoading = true;
+  ui.silError = false;
+  try {
+    ui.silenciados = (await mensajes.silenciados()) || {};
+  } catch (error) {
+    ui.silError = true;
+    setMsg("moderacion", `No se pudo traer la lista: ${error.message || "probá de nuevo"}.`, true);
+  }
+  ui.silLoading = false;
+  rerender();
+}
+
+// "cliente:<id>" → nombre del cliente y su perro; usuario del equipo → su nombre.
+function silenciadoInfo(usuario) {
+  if (usuario.startsWith("cliente:")) {
+    const cliente = clientesCache().find((item) => item.id === usuario.slice(8));
+    return cliente ? { nombre: cliente.nombre || "Cliente", meta: clientePerros(cliente) } : { nombre: "Cliente", meta: "" };
+  }
+  return { nombre: nameOf(usuario), meta: "Equipo" };
+}
+
+function ModeracionView() {
+  if (ui.silenciados === null && !ui.silLoading && !ui.silError) loadSilenciados();
+  const lista = Object.entries(ui.silenciados || {}).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  let body;
+  if (ui.silenciados === null && ui.silError) {
+    body = `<button class="adm-btn adm-btn--ghost adm-btn--block" id="adm-sil-reintentar" type="button" data-adm-sil-refresh>${ico("refresh")} Reintentar</button>`;
+  } else if (ui.silenciados === null) {
+    body = `<p class="adm-empty">Cargando…</p>`;
+  } else if (!lista.length) {
+    body = `<p class="adm-empty">Nadie silenciado.</p>`;
+  } else {
+    body = `
+      <ul class="adm-altas">
+        ${lista.map(([usuario, hasta]) => {
+          const info = silenciadoInfo(usuario);
+          const busy = ui.silBusy === usuario;
+          return `
+            <li class="adm-alta">
+              ${AltaHead(info.nombre, [info.meta ? esc(info.meta) : "", `Silenciado hasta el ${esc(dateAR(hasta))} a las ${esc(timeAR(hasta))}`])}
+              <button class="adm-btn adm-btn--ghost adm-btn--block" type="button" data-adm-sil-quitar="${esc(usuario)}" aria-label="Quitar silencio a ${esc(info.nombre)}" ${ui.silBusy ? "disabled" : ""}>${ico("message")} ${busy ? "Un momento…" : "Quitar silencio"}</button>
+            </li>
+          `;
+        }).join("")}
+      </ul>
+    `;
+  }
+  return `
+    <div class="adm-h2-row">
+      <p class="adm-row-meta">Comunidad de clientes.</p>
+      ${Help(`<p>Silenciar y borrar mensajes se hace desde el chat de la comunidad. Acá ves a quién silenciaste y se lo podés quitar.</p>`, "Cómo se modera")}
+    </div>
+    ${MsgRegion("moderacion")}
+    <div class="adm-h2-row">
+      <h2 class="adm-h2">Silenciados ${ui.silenciados ? `<span class="adm-count adm-count--gray">${lista.length}</span>` : ""}</h2>
+      <button class="adm-btn adm-btn--ghost adm-btn--icon" id="adm-sil-refresh" type="button" data-adm-sil-refresh aria-label="Actualizar silenciados">${ico("refresh")}</button>
+    </div>
+    ${body}
+  `;
+}
+
+async function quitarSilencio(usuario) {
+  if (ui.silBusy) return;
+  const { nombre } = silenciadoInfo(usuario);
+  if (isOffline()) {
+    setMsg("moderacion", "Sin señal. Probá cuando vuelva.", true);
+    rerender();
+    return;
+  }
+  ui.silBusy = usuario;
+  rerender();
+  try {
+    ui.silenciados = (await mensajes.silenciar(usuario, 0)) || {};
+    setMsg("moderacion", `Listo: ${nombre} puede volver a escribir.`);
+  } catch (error) {
+    setMsg("moderacion", error.message || "No se pudo quitar el silencio.", true);
+  }
+  ui.silBusy = null;
+  rerender();
+  focusLater("#adm-sil-refresh");
+}
+
 function kindTone(kind) {
   if (/meta/i.test(kind)) return "blue";
   if (/hist/i.test(kind)) return "gray";
@@ -2773,6 +3466,16 @@ function resetSession() {
   ui.contaTodos = false;
   ui.contaBorrar = null;
   drafts.crear = emptyCrear();
+  ui.enlace = null;
+  ui.altaFuente = null;
+  ui.altaVerDatos = false;
+  ui.cortarFor = null;
+  ui.accesoBusy = null;
+  drafts.alta = emptyAlta();
+  ui.alias = { estado: "cargando", alias: "", instrucciones: "" };
+  drafts.alias = { alias: "", instrucciones: "", tocado: false };
+  ui.silenciados = null;
+  ui.silError = false;
 }
 
 // Clicks que tienen que cortar la cadena (por ejemplo, antes de la navegación por data-link).
@@ -2814,11 +3517,27 @@ function openSheet(kind, opener) {
     setMsg("users", "");
   }
   if (kind === "pago") setMsg("pagos", "");
+  if (kind === "alta") {
+    const data = opener?.dataset || {};
+    const fuente = data.admAltaPedido ? { pedidoId: data.admAltaPedido } : data.admAltaCliente ? { clienteId: data.admAltaCliente } : ui.altaFuente;
+    if (!fuente) {
+      ui.sheet = null;
+      return;
+    }
+    // Otro pedido: borrador nuevo. El mismo: se conserva lo que ya se eligió.
+    if (JSON.stringify(fuente) !== JSON.stringify(ui.altaFuente)) {
+      drafts.alta = initAlta(fuente);
+      ui.altaVerDatos = false;
+    }
+    ui.altaFuente = fuente;
+    ui.cortarFor = null;
+    setMsg("alta", "");
+  }
   // La animación de entrada va solo al abrir (no en cada redibujo).
   ui.sheetEnter = true;
   render();
   ui.sheetEnter = false;
-  focusLater(kind === "pago" ? "#adm-pago-monto" : kind === "mov" ? "#conta-monto" : "#adm-crear-nombre");
+  focusLater({ pago: "#adm-pago-monto", mov: "#conta-monto", alta: "#adm-alta-who" }[kind] || "#adm-crear-nombre");
 }
 
 function closeSheet() {
@@ -2842,6 +3561,16 @@ async function handleUsersSubmit(event) {
 
   if (tipo === "mov") {
     await saveMov();
+    return;
+  }
+
+  if (tipo === "alta") {
+    await saveAlta(form);
+    return;
+  }
+
+  if (tipo === "alias") {
+    await saveAlias(form);
     return;
   }
 
@@ -3402,6 +4131,26 @@ function handleDraftInput(event) {
     else choosePagoArchivo(event.target);
     return;
   }
+  // Hoja "Aprobar alta": días (casillas) y códigos de los perros. Al corregir, se borra el error.
+  if (ui.msgs.alta?.error && event.target.closest?.('[data-adm-form="alta"]')) {
+    ui.msgs.alta = null;
+    const region = document.querySelector('[data-adm-msg="alta"]');
+    if (region) region.textContent = "";
+  }
+  const dia = event.target.closest?.("[data-adm-alta-dia]");
+  if (dia) {
+    const value = dia.dataset.admAltaDia;
+    drafts.alta.dias = dia.checked ? [...new Set([...drafts.alta.dias, value])] : drafts.alta.dias.filter((item) => item !== value);
+    dia.closest(".adm-dia")?.classList.toggle("is-on", dia.checked);
+    return;
+  }
+  const codigo = event.target.closest?.("[data-adm-alta-codigo]");
+  if (codigo) {
+    const perro = drafts.alta.perros[Number(codigo.dataset.admAltaCodigo)];
+    if (perro) perro.codigo = codigo.value;
+    if (event.type === "change") rerender();
+    return;
+  }
   const field = event.target.closest?.("[data-adm-draft]");
   if (!field) return;
   const form = field.dataset.admDraft;
@@ -3416,6 +4165,12 @@ function handleDraftInput(event) {
     if (input) input.value = drafts.crear.usuario;
   }
   if (form === "crear" && key === "usuario") drafts.crear.usuarioTocado = value.trim() !== "";
+  if (form === "alias") drafts.alias.tocado = true;
+  if (form === "alta" && key === "turno") {
+    document.querySelectorAll(".adm-alta-turnos .adm-choice").forEach((label) => {
+      label.classList.toggle("is-on", label.querySelector("input")?.checked === true);
+    });
+  }
   if (form === "crear" && key === "rol") {
     document.querySelectorAll('.adm-role-grid .adm-choice').forEach((label) => {
       label.classList.toggle("is-on", label.querySelector("input")?.checked === true);
@@ -3536,6 +4291,8 @@ function handleAdminActionClick(event) {
     refreshLive(true);
     refreshAdminData();
     if (ui.tab === "equipo") loadUsers();
+    if (ui.tab === "plata") loadAlias();
+    if (ui.mas === "moderacion") loadSilenciados();
     announce("Actualizando…");
     return true;
   }
@@ -3674,6 +4431,8 @@ function handleAdminActionClick(event) {
     return true;
   }
 
+  if (handleAltasClick(event)) return true;
+
   if (handleUsersClick(event)) return true;
 
   if (event.target.closest("[data-adm-copy]")) {
@@ -3685,6 +4444,102 @@ function handleAdminActionClick(event) {
     return true;
   }
 
+  return false;
+}
+
+// Botones de Altas de clientes, el enlace y la moderación.
+function handleAltasClick(event) {
+  const t = event.target;
+  if (t.closest("[data-adm-alta-ver]")) {
+    ui.altaVerDatos = !ui.altaVerDatos;
+    rerender();
+    return true;
+  }
+  if (t.closest("[data-adm-alta-sumar]")) {
+    const perros = drafts.alta.perros;
+    if (perros.length >= ALTA_MAX_PERROS) return true;
+    perros.push({ nombre: "", codigo: nextCodigo(perros.map((perro) => normCodigo(perro.codigo))) });
+    rerender();
+    focusLater(`#adm-alta-perro-${perros.length - 1}`);
+    return true;
+  }
+  const quitar = t.closest("[data-adm-alta-quitar]");
+  if (quitar) {
+    const index = Number(quitar.dataset.admAltaQuitar);
+    const [fuera] = drafts.alta.perros.splice(index, 1);
+    rerender();
+    focusLater(`#adm-alta-perro-${Math.max(0, index - 1)}`);
+    announce(`${fuera?.nombre || "Perro"} quitado.`);
+    return true;
+  }
+  const usar = t.closest("[data-adm-alta-usar]");
+  if (usar) {
+    const index = Number(usar.dataset.admAltaUsar);
+    if (drafts.alta.perros[index]) drafts.alta.perros[index].codigo = usar.dataset.admCodigo;
+    rerender();
+    focusLater(`#adm-alta-perro-${index}`);
+    announce(`Código ${usar.dataset.admCodigo}.`);
+    return true;
+  }
+  const plan = t.closest("[data-adm-alta-plan]");
+  if (plan) {
+    drafts.alta.plan = plan.dataset.admAltaPlan;
+    rerender();
+    return true;
+  }
+  if (t.closest("[data-adm-enlace-copy]")) {
+    const url = ui.enlace?.url || "";
+    copyText(url).then((ok) => {
+      announce(ok ? "Enlace copiado." : "No se pudo copiar. Mandalo por WhatsApp.");
+      if (ok) offerUndo("Enlace copiado.", null);
+      rerender();
+    });
+    return true;
+  }
+  if (t.closest("[data-adm-enlace-hide]")) {
+    ui.enlace = null;
+    rerender();
+    focusTitle();
+    announce("Listo.");
+    return true;
+  }
+  const renovar = t.closest("[data-adm-renovar]");
+  if (renovar) {
+    renovarAcceso(renovar.dataset.admRenovar);
+    return true;
+  }
+  const cortar = t.closest("[data-adm-cortar]");
+  if (cortar) {
+    ui.cortarFor = ui.cortarFor === cortar.dataset.admCortar ? null : cortar.dataset.admCortar;
+    rerender();
+    if (ui.cortarFor) focusLater("#adm-cortar-confirm");
+    return true;
+  }
+  if (t.closest("[data-adm-cortar-no]")) {
+    const id = ui.cortarFor || "";
+    ui.cortarFor = null;
+    rerender();
+    focusLater(`#adm-cortar-${CSS.escape(id)}`);
+    announce("Cancelado.");
+    return true;
+  }
+  const cortarSi = t.closest("[data-adm-cortar-si]");
+  if (cortarSi) {
+    cortarAcceso(cortarSi.dataset.admCortarSi);
+    return true;
+  }
+  const silQuitar = t.closest("[data-adm-sil-quitar]");
+  if (silQuitar) {
+    quitarSilencio(silQuitar.dataset.admSilQuitar);
+    return true;
+  }
+  if (t.closest("[data-adm-sil-refresh]")) {
+    ui.silError = false;
+    setMsg("moderacion", "");
+    loadSilenciados();
+    announce("Actualizando…");
+    return true;
+  }
   return false;
 }
 
