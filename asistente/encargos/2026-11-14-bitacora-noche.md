@@ -52,3 +52,11 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - **Segunda auditoría en el celular:** confirmó arreglados el alta del admin, los avisos que tapaban, el encabezado del supervisor, los precios, las preguntas frecuentes, el portal del cliente y la edición de rutas sin cargar. Sin abreviaturas en pantalla.
 - Arreglado después de esa auditoría: "PJ_1M" en coordinador y admin (nombre de ruta compartido en `src/ui/rutas.js`, también en pedidos viejos), "Planilla RPJ", "Ej." en ejemplos, "hs.", "5 m", "30 s", aviso de riesgo repetido, ayuda del alta que aplastaba "Sumar otro perro", "3 rutas · 23 perros" y "4 alertas" en la semana del coordinador.
 - Pendiente para revisar en un celular real: los campos de fecha y hora deberían verse en formato argentino si el celular está en español.
+
+## 14/11/2026 — 01:25 aprox.
+
+- **E-058 Mensajes sin señal:** el chat guarda en el celular lo que no salió y lo manda solo al volver la señal; si un aviso urgente ("Perro suelto", "Necesito ayuda") no salió, aparece un aviso rojo con "Mandar por WhatsApp".
+- Servidor: un reintento del mismo mensaje no se duplica y se guarda la hora en que se escribió (la pantalla muestra "llegó HH:MM" si llegó tarde). Prueba nueva: 42 pruebas del servidor OK.
+- Mensajes: con más de 2000 en un canal (almacenamiento provisorio) se leen los días más recientes.
+- Probado en el navegador sin señal y con señal: llegó una vez, con la hora correcta.
+- Para que Juan confirme: un mensaje que pasa más de 3 horas sin salir ya no se manda solo (para que un "Perro suelto" viejo no confunda).
