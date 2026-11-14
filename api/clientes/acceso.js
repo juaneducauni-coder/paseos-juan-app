@@ -3,7 +3,8 @@
 //   Respuesta: { enlace: "/c/<token>", acceso: { activo, creadoEn } }. El token se muestra UNA vez:
 //   en el cliente queda solo su hash. Generar uno nuevo invalida el enlace y las sesiones anteriores.
 // POST /api/clientes/acceso { clienteId, revocar: true } → desactiva el enlace y cierra sus sesiones.
-// Solo admin y coordinador.
+// Cortar el acceso: admin y coordinador. Generar un enlace nuevo: SOLO el admin, porque quien
+// tiene el enlace entra como el cliente (ve el alias de pago y escribe en su nombre).
 import { handler, send, readJson, HttpError } from "../_lib/http.js";
 import { requireUser } from "../_lib/auth.js";
 import { store } from "../_lib/store.js";
@@ -26,6 +27,7 @@ export default handler({ POST: 1 }, async (req, res) => {
     return send(res, 200, { ok: true, acceso: { activo: false, creadoEn: acceso.creadoEn, revocadoEn: ahora } });
   }
 
+  if (user.rol !== "admin") throw new HttpError(403, "El enlace nuevo lo genera solo Juan (admin).");
   if (!cliente.aprobado?.en) throw new HttpError(409, "Primero Juan tiene que aprobar el alta y asignar el horario.");
   if (cliente.estado === "baja") throw new HttpError(409, "Ese cliente está dado de baja.");
   const { enlace, acceso } = await activarAcceso(cliente, user);

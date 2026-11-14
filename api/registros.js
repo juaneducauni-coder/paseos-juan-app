@@ -4,11 +4,11 @@
 // DELETE ?col=pedidos&id=...               borra
 import { randomBytes } from "node:crypto";
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
-import { requireUser } from "./_lib/auth.js";
+import { requireUser, perrosDeCliente } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
 import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo, CLIENTE_LEE, CAMPOS_CLIENTE, AJUSTES_CLIENTE } from "./_lib/permisos.js";
 import { avisosDePaseo } from "./_lib/mensajes.js";
-import { sinHash } from "./_lib/clientes.js";
+import { sinHash, validarPerros } from "./_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -246,6 +246,14 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (col === "clientes") {
       delete datos.acceso;
       delete datos.aprobado;
+      // Perros del cliente: códigos válidos y cada perro de UN solo cliente (si no, el cliente
+      // vería paseos y fotos de perros ajenos y los avisos irían a otra familia).
+      if (datos.perros !== undefined) {
+        datos.perros = validarPerros(datos.perros);
+        const otros = (await store.list("clientes")).filter((c) => c.id !== id && c.estado !== "baja");
+        const repetido = datos.perros.find((perro) => otros.some((c) => perrosDeCliente(c).includes(perro)));
+        if (repetido) throw new HttpError(409, `El perro ${repetido} ya es de otro cliente.`);
+      }
     }
     const registro = {
       ...(previo || {}),
@@ -259,6 +267,10 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       actualizadoPorNombre: user.nombre,
       actualizadoEn: ahora,
     };
+    // Cliente dado de baja: su enlace se corta en el servidor (si vuelve, Juan genera uno nuevo).
+    if (col === "clientes" && registro.estado === "baja" && registro.acceso?.activo) {
+      registro.acceso = { ...registro.acceso, activo: false, revocadoEn: ahora, revocadoPor: user.usuario };
+    }
     // Paseos: aviso automático al cliente (retiro, paseo con foto, entrega). Si falla, el paseo se guarda igual.
     if (col === "paseos") {
       try {

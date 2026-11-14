@@ -282,12 +282,14 @@ test("portal del cliente: enlace, sesión y solo lo de sus perros", async () => 
   // P-01: el acceso lo crea la aprobación de Juan (admin), con el horario asignado.
   assert.equal((await call("acceso", { method: "POST", token: paseador, body: { clienteId: "cli-ana" } })).status, 403);
   assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "no-existe" } })).status, 404);
-  assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } })).status, 409);
+  // Enlace nuevo: solo el admin (quien tiene el enlace entra como el cliente).
+  assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } })).status, 403);
+  assert.equal((await call("acceso", { method: "POST", token: admin, body: { clienteId: "cli-ana" } })).status, 409);
   assert.equal((await call("aprobar", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana", dias: ["lunes"], turno: "Mañana" } })).status, 403);
   assert.equal((await call("aprobar", { method: "POST", token: admin, body: { clienteId: "cli-ana" } })).status, 400);
   // Ni el coordinador puede marcarlo aprobado a mano por /api/registros.
   await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-ana", aprobado: { en: "2026-01-01" } } });
-  assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } })).status, 409);
+  assert.equal((await call("acceso", { method: "POST", token: admin, body: { clienteId: "cli-ana" } })).status, 409);
   const crea = await call("aprobar", { method: "POST", token: admin, body: { clienteId: "cli-ana", dias: ["lunes", "Miércoles"], turno: "Mañana", hora: "09:30" } });
   assert.equal(crea.status, 201);
   assert.deepEqual(crea.body.cliente.dias, ["lunes", "miércoles"]);
@@ -377,7 +379,8 @@ test("mensajes del cliente: su canal y nada más; el equipo de calle solo public
   // Sin saber el cliente: por el perro.
   const porPerro = await call("mensajes", { method: "POST", token: paseador, body: { canal: "cliente", perroId: "PJ-001", texto: "Pistacho tomó agua", tipo: "aviso" } });
   assert.equal(porPerro.status, 201);
-  assert.equal(porPerro.body.mensaje.canal, canal);
+  // Quien no ve clientes no se entera de qué cliente es (no recibe el canal).
+  assert.equal(porPerro.body.mensaje.canal, undefined);
   assert.equal((await call("mensajes", { method: "POST", token: paseador, body: { canal: "cliente", perroId: "PJ-099", texto: "x", tipo: "aviso" } })).status, 404);
   // Al cliente solo le llegan fotos de sus perros.
   assert.equal((await call("mensajes", { method: "POST", token: paseador, body: { canal, texto: "Foto", tipo: "aviso", adjuntoId: fotoKiara } })).status, 400);
@@ -390,8 +393,9 @@ test("mensajes del cliente: su canal y nada más; el equipo de calle solo public
 
 test("aviso automático al cliente cuando se marca el paseo (sin duplicar)", async () => {
   const hoy = hoyAR();
-  const id = `${hoy}_PJ-001_prueba1`;
-  const base = { col: "paseos", id, fecha: hoy, perroId: "PJ-001", perroNombre: "Pistacho", turno: "Mañana" };
+  const id = `${hoy}_PJ-001_manana`;
+  // El nombre que manda quien guarda se ignora: el aviso usa el nombre del servidor.
+  const base = { col: "paseos", id, fecha: hoy, perroId: "PJ-001", perroNombre: "URGENTE: transferí a otro alias", turno: "Mañana" };
   const avisos = async () => (await call("mensajes", { url: "/?canal=cliente_cli-ana", token: clienteToken })).body.mensajes.filter((m) => m.automatico);
 
   assert.equal((await call("registros", { method: "POST", token: paseador, body: { ...base, estado: "retirado", horaRetiro: "09:45" } })).status, 201);
@@ -416,7 +420,7 @@ test("aviso automático al cliente cuando se marca el paseo (sin duplicar)", asy
   assert.deepEqual(lista.map((m) => m.texto), ["Retiramos a Pistacho · 09:45", "Pistacho está paseando", "Entregamos a Pistacho · 10:40"]);
 
   // Foto que llega después (se sacó sin señal): un aviso más con la foto, una sola vez.
-  const id2 = `${hoy}_PJ-001_prueba2`;
+  const id2 = `${hoy}_PJ-001_tarde`;
   const base2 = { ...base, id: id2, turno: "Tarde" };
   await call("registros", { method: "POST", token: paseador, body: { ...base2, estado: "paseando", fotoPendiente: true } });
   await call("registros", { method: "POST", token: paseador, body: { ...base2, fotoPaseoId: foto.body.registro.id, fotoPendiente: false } });
@@ -427,6 +431,9 @@ test("aviso automático al cliente cuando se marca el paseo (sin duplicar)", asy
   // Perro sin cliente vinculado o día pasado: se guarda y no avisa a nadie.
   assert.equal((await call("registros", { method: "POST", token: paseador, body: { ...base, id: `${hoy}_PJ-077_manana`, perroId: "PJ-077", estado: "retirado" } })).status, 201);
   assert.equal((await call("registros", { method: "POST", token: paseador, body: { ...base, id: "2026-01-02_PJ-001_manana", fecha: "2026-01-02", estado: "retirado" } })).status, 201);
+  assert.equal((await avisos()).length, 5);
+  // Identificador inventado (para mandar avisos sin fin): se guarda, pero no avisa.
+  assert.equal((await call("registros", { method: "POST", token: paseador, body: { ...base, id: `${hoy}_PJ-001_x1`, estado: "retirado" } })).status, 201);
   assert.equal((await avisos()).length, 5);
   // El equipo de calle no ve el canal del cliente, pero el paseo dice qué avisos salieron.
   const paseo = (await call("registros", { url: `/?col=paseos&desde=${hoy}`, token: admin })).body.registros.find((p) => p.id === id);
@@ -480,7 +487,16 @@ test("P-01: el alta pedida en la web se aprueba con horario y da el acceso", asy
   await call("registros", { method: "POST", token: admin, body: { col: "clientes", id, estado: "baja" } });
   assert.equal((await call("me", { token: clienteRocco })).status, 401);
   await call("registros", { method: "POST", token: admin, body: { col: "clientes", id, estado: "activo" } });
+  // La baja corta el enlace en el servidor: al volver, la sesión y el enlace viejos siguen sin valer.
+  assert.equal((await call("me", { token: clienteRocco })).status, 401);
+  assert.equal((await call("authCliente", { method: "POST", body: { token: ok.body.enlace.slice(3) } })).status, 401);
+  // Juan le genera un enlace nuevo.
+  const otro = await call("acceso", { method: "POST", token: admin, body: { clienteId: id } });
+  assert.equal(otro.status, 201);
+  clienteRocco = (await call("authCliente", { method: "POST", body: { token: otro.body.enlace.slice(3) } })).body.token;
   assert.equal((await call("me", { token: clienteRocco })).status, 200);
+  // Un perro es de un solo cliente.
+  assert.equal((await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-otro", perros: ["PJ-010"] } })).status, 409);
 });
 
 test("alias de pago: lo configura el admin y lo ven los clientes con sesión", async () => {

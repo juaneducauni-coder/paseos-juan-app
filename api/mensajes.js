@@ -91,12 +91,22 @@ async function resumen(user) {
   return canales;
 }
 
+// Al cliente no se le muestran usuarios internos (de otros clientes ni del equipo): solo nombre y rol.
+// Su propio usuario sí, para que la pantalla sepa cuáles mensajes son suyos.
+function paraCliente(m, user) {
+  const { autor, clave, ...resto } = m;
+  return autor === user.usuario ? { ...resto, autor } : resto;
+}
+
 export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   const user = await requireUser(req);
 
   if (req.method === "GET") {
     const params = query(req);
-    if (params.get("resumen")) return send(res, 200, { ok: true, canales: await resumen(user) });
+    if (params.get("resumen")) {
+      const canales = await resumen(user);
+      return send(res, 200, { ok: true, canales: user.rol === "cliente" ? canales.map((c) => (c.ultimo ? { ...c, ultimo: paraCliente(c.ultimo, user) } : c)) : canales });
+    }
     if (params.get("contactos")) {
       if (user.rol === "cliente") throw new HttpError(403, "Tu usuario no puede ver el equipo.");
       const contactos = (await store.listUsers())
@@ -114,7 +124,8 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
     if (!permiso.leer) throw new HttpError(403, permiso.soloAvisos ? "Podés mandar avisos a este cliente, pero no leer su conversación." : "No podés ver este chat.");
     const desde = params.get("desde") || "";
     if (desde && !ISO.test(desde)) throw new HttpError(400, "Fecha no válida (ISO).");
-    const respuesta = { ok: true, canal, mensajes: await mensajesDe(canal, desde) };
+    const lista = await mensajesDe(canal, desde);
+    const respuesta = { ok: true, canal, mensajes: user.rol === "cliente" ? lista.map((m) => paraCliente(m, user)) : lista };
     if (canal === CANAL_COMUNIDAD) {
       respuesta.reglas = REGLAS_COMUNIDAD;
       respuesta.silenciadoHasta = (await silenciados())[user.usuario] || null;
@@ -149,6 +160,7 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   if (perroId && !PERRO.test(perroId)) throw new HttpError(400, "Perro no válido.");
 
   // Aviso al cliente de un perro sin conocer el cliente (paseador, ayudante, supervisor).
+  const porPerro = canal === "cliente";
   if (canal === "cliente") {
     if (!perroId) throw new HttpError(400, "Falta el perro para avisarle al cliente.");
     const cliente = await clienteDelPerro(perroId);
@@ -212,14 +224,20 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
     throw new HttpError(400, "Ese perro no es de este cliente.");
   }
 
+  // En la comunidad no se nombran perros (ni propios ni ajenos): es un chat general.
+  const enComunidad = permiso.tipo === "comunidad";
   const mensaje = await publicar({
     canal,
     texto,
     tipo,
     adjuntoId,
-    perroId,
-    perroNombre: limpiarTextoMensaje(body.perroNombre).slice(0, 60),
+    perroId: enComunidad ? "" : perroId,
+    perroNombre: enComunidad ? "" : limpiarTextoMensaje(body.perroNombre).slice(0, 60),
     autor: user,
   });
-  return send(res, 201, { ok: true, mensaje });
+  // Quien avisa por perro y no ve clientes no recibe el canal (no se entera de qué cliente es).
+  if (porPerro && permiso.soloAvisos) {
+    return send(res, 201, { ok: true, mensaje: { id: mensaje.id, texto: mensaje.texto, tipo: mensaje.tipo, perroId: mensaje.perroId, creadoEn: mensaje.creadoEn } });
+  }
+  return send(res, 201, { ok: true, mensaje: user.rol === "cliente" ? paraCliente(mensaje, user) : mensaje });
 });

@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import { HttpError } from "./http.js";
 import { store } from "./store.js";
 import { perrosDeCliente } from "./auth.js";
+import { REAL_DOGS } from "../../src/data/realData.js";
 
 export const TIPOS_MENSAJE = ["texto", "aviso", "foto"];
 export const MAX_TEXTO = 1000;
@@ -169,10 +170,37 @@ const HORA = /^\d{1,2}:\d{2}$/;
 // Avisos automáticos al cliente cuando cambia un paseo (retiro, paseo con foto, entrega).
 // Devuelve las claves de aviso ya enviadas para guardarlas en el paseo (así no se repiten).
 // Solo avisa paseos de hoy (hora de Argentina): las correcciones de días pasados no molestan al cliente.
+// Solo paseos con el identificador de siempre (AAAA-MM-DD_<perro>_<turno>): así hay como máximo
+// un registro por perro y turno, y nadie puede mandar avisos sin fin inventando identificadores.
+const ID_PASEO = /^(\d{4}-\d{2}-\d{2})_([A-Za-z0-9.-]{1,40})_(manana|tarde)$/;
+const NOMBRES_PERROS = new Map(REAL_DOGS.map((perro) => [perro.id, perro.name]));
+
+// Nombre del perro desde los datos del servidor (nunca el que manda quien guarda el paseo).
+async function nombreDelPerro(perroId, cliente) {
+  if (NOMBRES_PERROS.has(perroId)) return NOMBRES_PERROS.get(perroId);
+  if (perrosDeCliente(cliente).length === 1 && cliente.perroNombre) return limpiarTextoMensaje(cliente.perroNombre).slice(0, 60);
+  return "tu perro";
+}
+
+// La foto del aviso tiene que ser una foto de ESE perro (no cualquier archivo).
+async function fotoValida(archivoId, perroId) {
+  if (!archivoId) return "";
+  try {
+    const archivo = await store.get("archivos", String(archivoId));
+    return archivo && archivo.tipo === "foto" && archivo.perroId === perroId ? archivo.id : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function avisosDePaseo(previo, registro) {
   const enviados = new Set(Array.isArray(previo?.avisosCliente) ? previo.avisosCliente : []);
   if (registro.fecha !== hoyAR() || !registro.perroId) return [...enviados];
-  const nombre = String(registro.perroNombre || previo?.perroNombre || "tu perro").slice(0, 60);
+  const partes = ID_PASEO.exec(String(registro.id || ""));
+  if (!partes || partes[1] !== registro.fecha || partes[2] !== registro.perroId) return [...enviados];
+  const cliente = await clienteDelPerro(registro.perroId);
+  if (!cliente) return [...enviados];
+  const nombre = await nombreDelPerro(registro.perroId, cliente);
   const pendientes = [];
   const estado = registro.estado;
   const cambio = estado !== previo?.estado;
@@ -182,19 +210,18 @@ export async function avisosDePaseo(previo, registro) {
     pendientes.push({ clave: "retirado", texto: `Retiramos a ${nombre} · ${hora(registro.horaRetiro)}` });
   }
   const fotoNueva = registro.fotoPaseoId && registro.fotoPaseoId !== previo?.fotoPaseoId;
+  const foto = fotoNueva || estado === "paseando" ? await fotoValida(registro.fotoPaseoId, registro.perroId) : "";
   if (estado === "paseando" && !enviados.has("paseando")) {
-    pendientes.push({ clave: "paseando", texto: `${nombre} está paseando`, adjuntoId: registro.fotoPaseoId || "" });
-    if (registro.fotoPaseoId) enviados.add("foto");
-  } else if (fotoNueva && !enviados.has("foto")) {
-    pendientes.push({ clave: "foto", texto: `Foto del paseo de ${nombre}`, adjuntoId: registro.fotoPaseoId });
+    pendientes.push({ clave: "paseando", texto: `${nombre} está paseando`, adjuntoId: foto });
+    if (foto) enviados.add("foto");
+  } else if (fotoNueva && foto && !enviados.has("foto")) {
+    pendientes.push({ clave: "foto", texto: `Foto del paseo de ${nombre}`, adjuntoId: foto });
   }
   if (estado === "entregado" && cambio && !enviados.has("entregado")) {
     pendientes.push({ clave: "entregado", texto: `Entregamos a ${nombre} · ${hora(registro.horaEntrega)}` });
   }
   if (!pendientes.length) return [...enviados];
 
-  const cliente = await clienteDelPerro(registro.perroId);
-  if (!cliente) return [...enviados];
   const canal = `cliente_${cliente.id}`;
   for (const aviso of pendientes) {
     await publicar({
