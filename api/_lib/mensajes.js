@@ -4,7 +4,7 @@
 // - lecturas: id = usuario (cliente: "cliente_<clienteId>"); { "<canal>": ISO de la última lectura }.
 // - canales:  id = canal; último mensaje de cada canal, para el resumen sin leer todos los mensajes.
 // - moderacion: id = "clientes"; { silenciados: { "<usuario>": ISO hasta } } (lo maneja el admin).
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { HttpError } from "./http.js";
 import { store } from "./store.js";
 import { perrosDeCliente } from "./auth.js";
@@ -56,9 +56,24 @@ export function limpiarTextoMensaje(valor) {
     .trim();
 }
 
-export function idMensaje(canal, date = new Date()) {
+export function idMensaje(canal, date = new Date(), sufijo = "") {
   const compacto = date.toISOString().replace(/[-:.]/g, "");
-  return `${canal}_${compacto}_${randomBytes(3).toString("hex")}`;
+  return `${canal}_${compacto}_${sufijo || randomBytes(3).toString("hex")}`;
+}
+
+// Mensaje escrito sin señal (E-058): el celular manda su identificador (cid) y la hora en que se
+// escribió. El id queda fijo para ese cid, así un reintento no lo duplica. La hora vale si es de
+// las últimas 6 horas (y no del futuro); si no, se usa la hora en que llegó.
+const CID = /^c[a-z0-9]{6,24}$/;
+export function datosDeReintento(body, autor, ahora = new Date()) {
+  const cid = typeof body.cid === "string" && CID.test(body.cid) ? body.cid : "";
+  const escrito = Date.parse(String(body.escritoEn || ""));
+  const valida = Number.isFinite(escrito) && escrito <= ahora.getTime() + 2 * 60 * 1000 && escrito >= ahora.getTime() - 6 * 3600 * 1000;
+  const escritoEn = valida ? new Date(Math.min(escrito, ahora.getTime())) : null;
+  if (!cid) return { cid: "", escritoEn };
+  // El sufijo junta usuario y cid: dos personas con el mismo cid no chocan.
+  const sufijo = createHash("sha256").update(`${autor}:${cid}`).digest("hex").slice(0, 12);
+  return { cid, escritoEn, sufijo };
 }
 
 // Id del registro de lecturas: el usuario del equipo, o cliente_<id> para el cliente.
@@ -78,10 +93,10 @@ function resumenUltimo(m) {
 }
 
 // Guarda un mensaje y actualiza el último mensaje del canal.
-export async function publicar({ canal, texto, tipo = "texto", adjuntoId = "", perroId = "", perroNombre = "", autor, automatico = false, clave = "" }) {
+export async function publicar({ canal, texto, tipo = "texto", adjuntoId = "", perroId = "", perroNombre = "", autor, automatico = false, clave = "", reintento = null }) {
   const ahora = new Date();
   const mensaje = {
-    id: idMensaje(canal, ahora),
+    id: reintento?.sufijo ? idMensaje(canal, reintento.escritoEn || ahora, reintento.sufijo) : idMensaje(canal, ahora),
     col: "mensajes",
     canal,
     fecha: hoyAR(ahora),
@@ -95,6 +110,8 @@ export async function publicar({ canal, texto, tipo = "texto", adjuntoId = "", p
     autorRol: autor.rol,
     automatico: Boolean(automatico),
     ...(clave ? { clave } : {}),
+    // Hora en que se escribió (si se mandó más tarde por falta de señal). creadoEn es cuando llegó.
+    ...(reintento?.escritoEn ? { escritoEn: reintento.escritoEn.toISOString() } : {}),
     creadoEn: ahora.toISOString(),
   };
   await store.put("mensajes", mensaje);

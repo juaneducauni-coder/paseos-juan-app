@@ -1011,3 +1011,22 @@ test("E-039: en Vercel con SETUP_CODE, el primer admin necesita el código", asy
     delete process.env.SETUP_CODE;
   }
 });
+
+test("mensaje escrito sin señal: el reintento no se duplica y guarda la hora en que se escribió", async () => {
+  const escritoEn = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const body = { canal: "equipo", texto: "Llegué a la plaza", cid: "cprueba123abc", escritoEn };
+  const uno = await call("mensajes", { method: "POST", token: supMsj, body });
+  assert.equal(uno.status, 201);
+  assert.equal(uno.body.mensaje.escritoEn, escritoEn);
+  const dos = await call("mensajes", { method: "POST", token: supMsj, body });
+  assert.equal(dos.status, 200);
+  assert.equal(dos.body.repetido, true);
+  assert.equal(dos.body.mensaje.id, uno.body.mensaje.id);
+  const lista = (await call("mensajes", { url: "/?canal=equipo", token: admin })).body.mensajes.filter((m) => m.texto === "Llegué a la plaza");
+  assert.equal(lista.length, 1);
+  // Una hora vieja (más de 6 horas) o del futuro no se acepta: se usa la hora de llegada.
+  const viejo = await call("mensajes", { method: "POST", token: supMsj, body: { canal: "equipo", texto: "Viejo", cid: "cprueba999zzz", escritoEn: "2020-01-01T00:00:00.000Z" } });
+  assert.equal(viejo.status, 201);
+  assert.equal(viejo.body.mensaje.escritoEn, undefined);
+});
+

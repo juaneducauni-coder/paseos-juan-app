@@ -548,7 +548,10 @@ function FotoAdjunta(m) {
 }
 
 function Mensaje(m, { me, info, mostrarAutor }) {
-  const cuando = `<time class="msj-hora" datetime="${esc(m.creadoEn)}">${esc(hora(m.creadoEn))}</time>`;
+  // Si se escribió sin señal y llegó más tarde, se muestra la hora en que se escribió.
+  const escrito = m.escritoEn || m.creadoEn;
+  const tarde = m.escritoEn && Date.parse(m.creadoEn) - Date.parse(m.escritoEn) > 2 * 60 * 1000;
+  const cuando = `<time class="msj-hora" datetime="${esc(escrito)}">${esc(hora(escrito))}${tarde ? ` · llegó ${esc(hora(m.creadoEn))}` : ""}</time>`;
   if (m.borrado) {
     return `<li class="msj-item msj-item--sistema"><p class="msj-aviso is-borrado"><span>Mensaje borrado por el admin</span>${cuando}</p></li>`;
   }

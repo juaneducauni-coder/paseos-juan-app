@@ -222,3 +222,11 @@ await datosPago.guardar({ alias, instrucciones }); // solo admin
 - Sin señal, `enviar` lanza `ApiError` con `status 0`: mostrá "No se envió. Revisá la señal" y dejá el texto en la caja.
 - Límite: 30 mensajes por minuto por persona.
 - La página `/cliente` actual tiene datos de ejemplo (pagos, cupones, chat en `localStorage`, de Codex): estas funciones son las que los reemplazan cuando se haga la pantalla.
+
+### Mensajes sin señal (E-058)
+
+- El celular guarda los mensajes que no salieron en `pj_mensajes_pendientes` (por usuario) y los manda solos al volver la señal (`mensajes.enviar(canal, texto, { encolar: true })`).
+- Cada uno lleva `cid` (identificador del celular) y `escritoEn` (hora en que se escribió). El servidor arma el id del mensaje con ellos: si el mismo mensaje llega dos veces, responde 200 con `repetido: true` y no lo duplica.
+- `escritoEn` se acepta si es de las últimas 6 horas. La pantalla muestra la hora en que se escribió y, si llegó más tarde, "llegó HH:MM".
+- Un mensaje que pasa más de 3 horas sin salir ya no se manda solo: queda "No se pudo enviar" (para que un aviso urgente viejo no confunda). Pendiente de confirmar con Juan.
+- Si un aviso urgente ("Necesito ayuda", "Perro suelto") no salió, el chat muestra un aviso rojo con "Mandar por WhatsApp".

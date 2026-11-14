@@ -2,7 +2,8 @@
 // GET  ?canal=X&desde=ISO   → { canal, mensajes } en orden cronológico (los últimos 200; con desde, solo los posteriores).
 // GET  ?resumen=1           → { canales: [{ canal, tipo, titulo, ultimo, sinLeer, soloAvisos? }] } que el usuario puede ver.
 // GET  ?contactos=1         → { contactos: [{ usuario, nombre, rol }] } del equipo para abrir un directo (no clientes).
-// POST { canal, texto, tipo: "texto"|"aviso"|"foto", adjuntoId?, perroId?, perroNombre? } → { mensaje }
+// POST { canal, texto, tipo: "texto"|"aviso"|"foto", adjuntoId?, perroId?, perroNombre?, cid?, escritoEn? } → { mensaje }
+//      cid + escritoEn (mensaje escrito sin señal): un reintento devuelve el mismo mensaje (200, repetido: true).
 //      canal "cliente" + perroId: el servidor busca el cliente de ese perro (para que el equipo avise sin ver clientes).
 // POST { canal, leido: true } → marca el canal como leído (colección "lecturas").
 // Moderación (SOLO admin):
@@ -18,7 +19,7 @@ import { store } from "./_lib/store.js";
 import { accesoCanal, CANALES_GRUPO, CANAL_COMUNIDAD, COMUNIDAD_ROLES, otroDelDirecto, puedeVerArchivoUsuario } from "./_lib/permisos.js";
 import {
   publicar, mensajesDe, clienteDelPerro, limpiarTextoMensaje, errorTexto, idLectura, TIPOS_MENSAJE,
-  REGLAS_COMUNIDAD, tieneDatosPrivados, borrarMensaje, silenciados, silenciar,
+  REGLAS_COMUNIDAD, tieneDatosPrivados, borrarMensaje, silenciados, silenciar, datosDeReintento, idMensaje,
 } from "./_lib/mensajes.js";
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
@@ -226,6 +227,15 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
 
   // En la comunidad no se nombran perros (ni propios ni ajenos): es un chat general.
   const enComunidad = permiso.tipo === "comunidad";
+  // Reintento de un mensaje escrito sin señal: si ya llegó, se devuelve el mismo (no se duplica).
+  const reintento = datosDeReintento(body, user.usuario);
+  if (reintento.sufijo) {
+    const id = idMensaje(canal, reintento.escritoEn || new Date(), reintento.sufijo);
+    const previo = reintento.escritoEn ? await store.get("mensajes", id) : null;
+    if (previo && previo.autor === user.usuario) {
+      return send(res, 200, { ok: true, repetido: true, mensaje: user.rol === "cliente" ? paraCliente(previo, user) : previo });
+    }
+  }
   const mensaje = await publicar({
     canal,
     texto,
@@ -234,6 +244,7 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
     perroId: enComunidad ? "" : perroId,
     perroNombre: enComunidad ? "" : limpiarTextoMensaje(body.perroNombre).slice(0, 60),
     autor: user,
+    reintento: reintento.sufijo && reintento.escritoEn ? reintento : null,
   });
   // Quien avisa por perro y no ve clientes no recibe el canal (no se entera de qué cliente es).
   if (porPerro && permiso.soloAvisos) {

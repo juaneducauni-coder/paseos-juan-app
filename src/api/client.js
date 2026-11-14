@@ -970,7 +970,8 @@ async function flushMensajes() {
         if (!mensaje) {
           ({ mensaje } = await request("/api/mensajes", {
             method: "POST",
-            body: { canal: item.canal, texto: item.texto, tipo: item.tipo, adjuntoId: item.adjuntoId || undefined, perroId: item.perroId || undefined, perroNombre: item.perroNombre || undefined },
+            // cid y escritoEn: el servidor no lo duplica si ya llegó, y guarda la hora en que se escribió.
+            body: { canal: item.canal, texto: item.texto, tipo: item.tipo, adjuntoId: item.adjuntoId || undefined, perroId: item.perroId || undefined, perroNombre: item.perroNombre || undefined, cid: item.cid, escritoEn: item.createdAt },
           }));
         }
         // Confirmado: se saca de la cola y se suma al chat en el mismo momento (no se ve dos veces).
