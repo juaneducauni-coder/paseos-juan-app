@@ -66,3 +66,9 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - Todo integrado; 43 pruebas del servidor OK, armado OK, recorrido sin fallas.
 - **Coordinación inmediata (pedido de Juan):** un incidente nuevo avisa solo en el chat "Calle" (paseadores, ayudantes, supervisores, coordinador y admin), con "URGENTE" si el riesgo es alto; un pedido de cambio nuevo del supervisor avisa solo en "Coordinación". Cuentan como "sin leer". Editar el registro no repite el aviso.
 - Sigue: revisión con capturas de los chats con estos avisos y repaso de textos del manual.
+
+## 14/11/2026 — 02:36 (revisión de cada hora)
+
+- Avisos automáticos urgentes en rojo en el chat. 43 pruebas del servidor OK, armado OK, recorrido sin fallas.
+- En curso: revisión de código independiente de todo lo hecho esta noche (40 cambios), buscando errores antes de publicar.
+- Sigue: arreglar lo que encuentre y preparar el resumen para Juan.
