@@ -27,6 +27,7 @@ const PUBLIC_MENU = [
   ["Portal de Clientes", "/cliente", "users"],
   ["Cómo trabajamos", "/#como-trabajamos", "shieldCheck"],
   ["Preguntas frecuentes", "/#faq", "help"],
+  ["Manual de la app", "/manual", "play"],
   ["Pedí tu evaluación", "/#evaluacion", "clipboardCheck"],
   ["Ingresar (equipo)", "/login", "logIn"],
 ];
@@ -90,6 +91,7 @@ export function publicFooter() {
         <a href="/#servicios" data-link>Servicios</a>
         <a href="/precios" data-link>Precios</a>
         <a href="/tienda" data-link>Tienda</a>
+        <a href="/manual" data-link>Manual</a>
         <a href="/#alianzas" data-link>Alianzas</a>
         <a href="/cliente" data-link>Portal de Clientes</a>
         <a href="/#terminos-privacidad" data-link>Términos y privacidad</a>
