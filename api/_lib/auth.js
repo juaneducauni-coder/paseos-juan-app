@@ -156,26 +156,46 @@ export async function requireUser(req, roles = null) {
   return user;
 }
 
+// Mismo mensaje para usuario inexistente, inactivo, PIN incorrecto y cuenta bloqueada:
+// así el ingreso no revela qué usuarios existen ni permite saber a quién bloquearon.
+export const MENSAJE_INGRESO = "Usuario o PIN incorrectos. Si fallaste varias veces, esperá 15 minutos.";
+
+let dummy;
+// Sal y hash fijos para gastar el mismo scrypt cuando el usuario no existe.
+function pinFalso() {
+  dummy ||= hashPin("000000000", "paseos-juan-sal-de-relleno");
+  return dummy;
+}
+
+export function estaBloqueado(user, ahora = Date.now()) {
+  return Boolean(user?.bloqueadoHasta && Date.parse(user.bloqueadoHasta) > ahora);
+}
+
+// Cuenta un intento de PIN de forma atómica (en el store) ANTES de compararlo.
+// Devuelve true si la cuenta ya estaba bloqueada.
+export async function contarIntento(usuario) {
+  const { bloqueado } = await store.registrarFallo(usuario, MAX_FAILS, LOCK_MINUTES);
+  return Boolean(bloqueado);
+}
+
 export async function login(usuarioRaw, pin) {
   const usuario = normalizeUser(usuarioRaw);
+  const generic = new HttpError(401, MENSAJE_INGRESO);
   const user = await store.getUser(usuario);
-  const generic = new HttpError(401, "Usuario o PIN incorrectos.");
-  if (!user || !user.activo) throw generic;
-
-  if (user.bloqueadoHasta && Date.parse(user.bloqueadoHasta) > Date.now()) {
-    throw new HttpError(429, "Demasiados intentos. Esperá 15 minutos y probá de nuevo.");
-  }
-  if (!checkPin(pin, user.salt, user.hash)) {
-    const fallos = (user.fallos || 0) + 1;
-    const update = { ...user, fallos };
-    if (fallos >= MAX_FAILS) {
-      update.fallos = 0;
-      update.bloqueadoHasta = new Date(Date.now() + LOCK_MINUTES * 60000).toISOString();
-    }
-    await store.putUser(update);
+  if (!user || !user.activo || !user.salt || !user.hash || estaBloqueado(user)) {
+    const falso = pinFalso();
+    checkPin(pin, falso.salt, falso.hash);
     throw generic;
   }
-  const updated = { ...user, fallos: 0, bloqueadoHasta: null, ultimoIngreso: new Date().toISOString() };
-  await store.putUser(updated);
+  // El intento se suma antes de comparar (atómico en el store), así una tanda de pedidos en
+  // paralelo no prueba más de MAX_FAILS PIN. El ingreso correcto lo vuelve a 0.
+  if (await contarIntento(usuario)) throw generic;
+  if (!checkPin(pin, user.salt, user.hash)) throw generic;
+  // Solo se tocan estos campos (no se reescribe el usuario leído al principio).
+  const updated = await store.patchUser(usuario, { fallos: 0, bloqueadoHasta: null, ultimoIngreso: new Date().toISOString() });
+  // Si mientras tanto el admin lo desactivó o le cambió el PIN, no se entrega sesión.
+  if (!updated || !updated.activo || (updated.version || 1) !== (user.version || 1) || updated.hash !== user.hash) {
+    throw generic;
+  }
   return { token: issueToken(updated), user: publicUser(updated) };
 }

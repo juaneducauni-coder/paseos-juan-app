@@ -15,6 +15,7 @@ import {
 } from "./ui/shared.js";
 import { startLavaLamp, hydrateReveal } from "./ui/lava.js";
 import { initAccessibility, onAccessibilityChange } from "./ui/accesibilidad.js";
+import "./ui/instalar.js";
 import { landingPage, registerLandingEvents } from "./views/landing.js";
 import { preciosPage } from "./views/precios.js";
 import { tiendaPage, registerTiendaEvents } from "./views/tienda.js";

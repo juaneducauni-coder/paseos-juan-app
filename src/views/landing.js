@@ -19,9 +19,12 @@ function esc(value) {
 
 const PUBLIC_MENU = [
   ["Inicio", "/", "home"],
+  ["Temporada Verano", "/#verano", "droplets"],
   ["Servicios", "/#servicios", "pawPrint"],
   ["Precios", "/precios", "dollarSign"],
   ["Tienda", "/tienda", "shoppingBag"],
+  ["Alianzas", "/#alianzas", "medal"],
+  ["Portal de Clientes", "/cliente", "users"],
   ["Cómo trabajamos", "/#como-trabajamos", "shieldCheck"],
   ["Preguntas frecuentes", "/#faq", "help"],
   ["Pedí tu evaluación", "/#evaluacion", "clipboardCheck"],
@@ -39,8 +42,9 @@ export function publicShell(content, current = "/") {
         </span>
       </a>
       <div class="header-actions">
-        <a class="header-link ${current === "/precios" ? "is-current" : ""}" href="/precios" data-link ${current === "/precios" ? 'aria-current="page"' : ""}>Precios</a>
+        <a class="header-link header-link--precios ${current === "/precios" ? "is-current" : ""}" href="/precios" data-link ${current === "/precios" ? 'aria-current="page"' : ""}>Precios</a>
         <a class="header-link" href="/tienda" data-link>Tienda</a>
+        <a class="header-link header-link--cliente" href="/cliente" data-link>Soy cliente</a>
         <a class="header-cta" href="/#evaluacion" data-link>Pedí tu evaluación</a>
         <button class="menu-button ${state.menuOpen ? "is-open" : ""}" type="button" data-menu-toggle aria-expanded="${state.menuOpen}" aria-label="Abrir menú">
           <span></span><span></span><span></span>
@@ -82,13 +86,45 @@ export function publicFooter() {
         </span>
       </a>
       <nav class="footer-links" aria-label="Páginas">
+        <a href="/#verano" data-link>Temporada Verano</a>
         <a href="/#servicios" data-link>Servicios</a>
         <a href="/precios" data-link>Precios</a>
         <a href="/tienda" data-link>Tienda</a>
+        <a href="/#alianzas" data-link>Alianzas</a>
+        <a href="/cliente" data-link>Portal de Clientes</a>
+        <a href="/#terminos-privacidad" data-link>Términos y privacidad</a>
       </nav>
       <p>Paseos grupales, baños y más. ${BUSINESS.zone}.</p>
       <a class="footer-whatsapp" href="${whatsappLink(WHATSAPP_INFO)}" target="_blank" rel="noreferrer">WhatsApp ${BUSINESS.whatsappLabel}</a>
     </footer>
+  `;
+}
+
+// ---------- Divisores orgánicos (olas de mar y manchas fluidas) ----------
+
+function waveDivider(variant = "top", extraClass = "") {
+  const paths = {
+    top: {
+      back: "M0,48 C280,108 520,-18 820,44 C1080,98 1280,12 1440,52 L1440,110 L0,110 Z",
+      front: "M0,64 C240,18 540,104 860,52 C1120,10 1310,78 1440,42 L1440,110 L0,110 Z",
+    },
+    sea: {
+      back: "M0,32 C340,102 660,-10 980,58 C1200,102 1340,24 1440,38 L1440,110 L0,110 Z",
+      front: "M0,58 C320,6 640,98 960,44 C1180,8 1320,70 1440,34 L1440,110 L0,110 Z",
+    },
+    soft: {
+      back: "M0,42 C360,-12 720,98 1080,36 C1260,6 1360,64 1440,48 L1440,110 L0,110 Z",
+      front: "M0,28 C360,96 720,-14 1080,52 C1260,84 1360,38 1440,22 L1440,110 L0,110 Z",
+    },
+  };
+  const chosen = paths[variant] || paths.top;
+  return `
+    <div class="organic-wave ${extraClass}" aria-hidden="true">
+      <svg viewBox="0 0 1440 110" preserveAspectRatio="none" focusable="false">
+        <path class="wave-layer-back" d="${chosen.back}"></path>
+        <path class="wave-layer-front" d="${chosen.front}"></path>
+      </svg>
+    </div>
   `;
 }
 
@@ -97,53 +133,231 @@ export function publicFooter() {
 export function landingPage() {
   return publicShell(`
     <canvas class="lava-lamp" data-lava aria-hidden="true"></canvas>
-    <main class="landing-main">
+    <main class="landing-main landing-organic">
       ${HeroSection()}
+      ${waveDivider("top", "organic-wave--hero")}
       ${ServicesSection()}
       ${PricesStrip()}
+      ${FirstWalkAndClientPortalSection()}
       ${HowWeWorkSection()}
+      ${SummerShowcaseSection()}
+      ${waveDivider("sea", "organic-wave--mid")}
       ${TrustSection()}
+      ${AlliancesSection()}
+      ${waveDivider("soft", "organic-wave--cta")}
       ${CTASection()}
+      ${TermsAndPrivacySection()}
       ${publicFooter()}
       <a class="whatsapp" href="${whatsappLink(WHATSAPP_INFO)}" target="_blank" rel="noreferrer" aria-label="Escribinos por WhatsApp">WhatsApp</a>
     </main>
   `);
 }
 
+function SeasonBanner() {
+  return `
+    <div class="season-banner" role="region" aria-label="Temporada actual">
+      <div class="season-banner-inner">
+        <span class="season-pill">${icon("sun", "pill-icon")}Ahora Verano</span>
+        <p><strong>Paseos de verano:</strong> agua en ruta con botella bebedero en ${BUSINESS.zone}.</p>
+        <a class="season-banner-link" href="#verano" data-link>Ver modo verano</a>
+      </div>
+    </div>
+  `;
+}
+
 function HeroSection() {
   return `
-    <section class="hero" id="inicio">
+    <section class="hero hero--organic" id="inicio">
       <div class="hero-pattern" aria-hidden="true"></div>
+      <div class="organic-blob organic-blob--one" aria-hidden="true"></div>
+      <div class="organic-blob organic-blob--two" aria-hidden="true"></div>
       <div class="hero-copy reveal">
-        <p class="eyebrow">Paseos · Baños · Estadía · Tienda</p>
-        <h1>
-          <span>Disciplina.</span>
-          <span>Libertad.</span>
-          <span>Bienestar.</span>
+        <div class="hero-badges">
+          <span class="hero-free-tag">${icon("gift", "pill-icon")}El primer paseo es gratis</span>
+        </div>
+        <p class="eyebrow">Disciplina. Libertad. Bienestar.</p>
+        <h1 class="hero-title">
+          <span>Paseos grupales</span>
+          <span>seguros para</span>
+          <span>tu perro.</span>
         </h1>
         <p>
           Paseos grupales organizados por conducta, energía y compatibilidad. Cuidado y confianza
           como en casa, en ${BUSINESS.zone}.
         </p>
         <div class="hero-actions">
-          <a class="primary-button" href="#evaluacion" data-link>Pedí tu evaluación</a>
-          <a class="secondary-button" href="#servicios" data-link>Ver servicios</a>
+          <a class="primary-button" href="#evaluacion" data-link>Pedí tu 1.er paseo gratis</a>
+          <a class="secondary-button" href="/cliente" data-link>Ya soy cliente · Entrar</a>
         </div>
       </div>
       <div class="hero-media reveal">
         <div class="dog-frame">
-          <img src="/hero-dog-premium.png" alt="Perro atento con arnés, imagen de Paseos Juan" />
+          <img src="/paseo-grupal-real-hd.png" onerror="this.onerror=null;this.src='/hero-dog-premium.png';" alt="Paseo grupal real de Paseos Juan en una calle de Pilar" />
         </div>
-        <div class="dog-glass-card">
-          <span class="glass-icon">${icon("radar")}</span>
-          <strong>Seguimiento del paseo</strong>
-          <span>Registramos el retiro, la foto del paseo y la entrega.</span>
+        <div class="dog-glass-card dog-glass-card--organic">
+          <span class="glass-icon">${icon("droplets")}</span>
+          <strong>Modo Verano activo</strong>
+          <span>Agua en ruta, retiro, foto del paseo y entrega.</span>
         </div>
       </div>
       <a class="scroll-indicator" href="#servicios" data-link aria-label="Bajar a servicios">
-        <span>Scroll</span>
+        <span>Bajar</span>
         <b>${icon("chevronDown")}</b>
       </a>
+    </section>
+  `;
+}
+
+function FirstWalkAndClientPortalSection() {
+  return `
+    <section class="organic-duo-section reveal" aria-label="Primer paseo gratis y acceso de clientes">
+      <article class="organic-splash-card organic-splash-card--free">
+        <span class="organic-badge">${icon("gift", "pill-icon")}Beneficio de bienvenida</span>
+        <h2>El primer paseo es gratis</h2>
+        <p>
+          Queremos conocer a tu perro con tranquilidad. Hacemos una evaluación inicial y su
+          <strong>primer paseo grupal de adaptación es sin cargo</strong> para asegurar que se sienta cómodo con la manada.
+        </p>
+        <div class="organic-card-actions">
+          <a class="primary-button" href="#evaluacion" data-link>Anotar a mi perro gratis</a>
+        </div>
+      </article>
+
+      <article class="organic-splash-card organic-splash-card--client">
+        <span class="organic-badge organic-badge--sea">${icon("pawPrint", "pill-icon")}Acceso directo</span>
+        <h2>¿Ya sos cliente de Paseos Juan?</h2>
+        <p>
+          Entrá directo y tranquilo a tu panel: mirá el paseo de hoy, subí tu comprobante de pago,
+          elegí horario, canjeá <strong>cupones</strong> y hablá en el <strong>chat grupal de clientes</strong>.
+        </p>
+        <div class="organic-card-actions">
+          <a class="primary-button" href="/cliente" data-link>Entrar al Portal de Clientes</a>
+          <a class="secondary-button" href="/login" data-link>Acceso del equipo</a>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function SummerShowcaseSection() {
+  const summerHighlights = [
+    {
+      title: "Paseos grupales reales",
+      tag: "Ahora Verano · En movimiento",
+      desc: "Una salida real de Paseos Juan, con la manada organizada durante el recorrido.",
+      img: "/paseo-grupal-real-hd.png",
+      fallback: "/hero-dog-premium.png",
+      alt: "Paseo grupal real de Paseos Juan con varios perros",
+      label: "Foto real mejorada en HD",
+    },
+    {
+      title: "Rambo, identidad Paseos Juan",
+      tag: "Compañero de la manada",
+      desc: "Retrato fotorealista creado a partir de la ilustración original de Rambo.",
+      img: "/rambo-fotorealista-hd.png",
+      fallback: "/hero-dog-premium.png",
+      alt: "Representación fotorealista de Rambo con boina y arnés de Paseos Juan",
+      label: "Recreación fotorealista",
+    },
+    {
+      title: "Compañero de la manada",
+      tag: "Identidad Paseos Juan",
+      desc: "Retrato fotorealista creado a partir de la ilustración original del labrador.",
+      img: "/labrador-fotorealista-hd.png",
+      fallback: "/hero-dog-premium.png",
+      alt: "Representación fotorealista de un labrador con boina y arnés de Paseos Juan",
+      label: "Recreación fotorealista",
+    },
+  ];
+
+  return `
+    <section class="summer-section reveal" id="verano" aria-labelledby="verano-titulo">
+      <div class="summer-heading">
+        <p class="eyebrow">Estación actual · Ahora Verano</p>
+        <h2 id="verano-titulo">Viví el verano con la manada</h2>
+        <p>En verano salimos con agua en ruta y registramos cada paseo con una foto.</p>
+      </div>
+      <div class="summer-gallery">
+        ${summerHighlights.map((item, idx) => `
+          <article class="summer-card summer-card--blob-${idx + 1}">
+            <div class="summer-media-blob">
+              <img src="${item.img}" onerror="this.onerror=null;this.src='${item.fallback}';" alt="${esc(item.alt)}" loading="lazy" />
+              <span class="summer-photo-pill">${icon("sun", "pill-icon")}${esc(item.tag)}</span>
+              <span class="summer-ilustra-pill">${esc(item.label)}</span>
+            </div>
+            <div class="summer-card-body">
+              <h3>${esc(item.title)}</h3>
+              <p>${esc(item.desc)}</p>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function AlliancesSection() {
+  const alliances = [
+    {
+      name: "DogPro & CatPro",
+      role: "Alimento y nutrición",
+      detail: "Alimento DogPro y CatPro, disponible en nuestra tienda.",
+      status: "Alianza confirmada",
+    },
+  ];
+
+  return `
+    <section class="alliances-section reveal" id="alianzas" aria-labelledby="alianzas-titulo">
+      <div class="alliances-heading">
+        <p class="eyebrow">Red de beneficios y comunidad</p>
+        <h2 id="alianzas-titulo">Nuestras alianzas</h2>
+        <p>Trabajamos con DogPro y CatPro. Si tenés una veterinaria, pet shop o marca en ${BUSINESS.zone}, sumate.</p>
+      </div>
+      <div class="alliances-grid">
+        ${alliances.map((item) => `
+          <article class="alliance-blob-card">
+            <span class="alliance-status">${esc(item.status)}</span>
+            <h3>${esc(item.name)}</h3>
+            <small class="alliance-role">${esc(item.role)}</small>
+            <p>${esc(item.detail)}</p>
+          </article>
+        `).join("")}
+        <article class="alliance-blob-card alliance-blob-card--cta">
+          <span class="alliance-status">Sumate a la red</span>
+          <h3>¿Tenés una marca, veterinaria o pet shop?</h3>
+          <p>Hacé una alianza con Paseos Juan para llegar a las familias de ${BUSINESS.zone} con cupones y beneficios.</p>
+          <a class="primary-button service-button" href="${whatsappLink("Hola Juan, me gustaría proponer una alianza comercial con Paseos Juan.")}" target="_blank" rel="noreferrer">
+            Contactar por alianzas
+          </a>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function TermsAndPrivacySection() {
+  return `
+    <section class="terms-section reveal" id="terminos-privacidad" aria-labelledby="terminos-titulo">
+      <div class="terms-blob-box">
+        <div>
+          <p class="eyebrow">Transparencia y confianza</p>
+          <h2 id="terminos-titulo">Términos del servicio y privacidad</h2>
+        </div>
+        <div class="terms-columns">
+          <article class="terms-item">
+            <h3>${icon("shieldCheck")} Seguridad y admisión grupal</h3>
+            <p>Todos los paseos son <strong>grupales</strong>. Cada perro ingresa tras una evaluación inicial de compatibilidad y con carnet de vacunas al día. El primer paseo de prueba es sin cargo.</p>
+          </article>
+          <article class="terms-item">
+            <h3>${icon("calendarCheck")} Pagos, aprobación y horarios</h3>
+            <p>El pago del plan se hace por transferencia con alias. Subís el comprobante, Juan lo aprueba y después elegís tu horario.</p>
+          </article>
+          <article class="terms-item">
+            <h3>${icon("lock")} Privacidad de tus datos</h3>
+            <p>Tus teléfonos, domicilio, datos de pago e indicaciones de salud se resguardan de forma privada únicamente para la operación del equipo autorizado de Paseos Juan y nunca se publican.</p>
+          </article>
+        </div>
+      </div>
     </section>
   `;
 }
@@ -178,14 +392,14 @@ function ServicesSection() {
       <span class="anchor-alias" id="sobre-nosotros" aria-hidden="true"></span>
       <div class="services-heading">
         <p class="eyebrow">Servicios</p>
-        <h2 id="servicios-titulo">Todo para tu perro, en un solo lugar.</h2>
+        <h2 id="servicios-titulo">Qué ofrecemos</h2>
       </div>
       <div class="services-grid">
         ${serviceCard({
           iconName: "pawPrint",
           title: "Paseos grupales",
           text: "Grupos armados por conducta, energía y compatibilidad. Antes de sumarlo al grupo, hacemos una evaluación inicial.",
-          action: consultButton("Hola, quiero consultar por los paseos grupales de Paseos Juan."),
+          action: `<a class="primary-button service-button" href="#evaluacion" data-link>Pedir evaluación</a>`,
         })}
         ${serviceCard({
           iconName: "droplets",
@@ -287,12 +501,27 @@ function joinWithY(items) {
   return items.length > 1 ? `${items.slice(0, -1).join(", ")} y ${items.at(-1)}` : items[0] || "";
 }
 
+// WhatsApp válido: al menos 8 números (sin contar espacios, guiones ni el +).
+const MIN_PHONE_DIGITS = 8;
+const PHONE_ERROR = "Revisá tu WhatsApp: tiene que tener al menos 8 números (ej. 11 5555 5555).";
+
+function phoneDigits(value) {
+  return String(value || "").replace(/\D/g, "").length;
+}
+
+function fieldMissing(key, value) {
+  const text = String(value || "").trim();
+  if (key === "telefono") return phoneDigits(text) < MIN_PHONE_DIGITS;
+  return !text;
+}
+
 function missingRequired(values) {
-  return REQUIRED_FIELDS.filter(([key]) => !String(values[key] || "").trim()).map(([, label]) => label);
+  return REQUIRED_FIELDS.filter(([key]) => fieldMissing(key, values[key])).map(([key, label]) =>
+    key === "telefono" && String(values[key] || "").trim() ? "WhatsApp completo (al menos 8 números)" : label);
 }
 
 function missingText(missing) {
-  return missing.length ? `Falta: ${joinWithY(missing)}` : "Listo para enviar";
+  return missing.length ? `Falta: ${joinWithY(missing)}` : "Listo: tocá Enviar";
 }
 
 // Solo para mostrar nombre y correo: el servidor es el que verifica el token con Google.
@@ -307,7 +536,7 @@ function decodeGooglePayload(credential) {
     return { email: "", nombre: "" };
   }
 }
-const DAYS = [["L", "Lunes"], ["M", "Martes"], ["X", "Miércoles"], ["J", "Jueves"], ["V", "Viernes"], ["S", "Sábado"], ["D", "Domingo"]];
+const DAYS = [["Lun", "Lunes"], ["Mar", "Martes"], ["Mié", "Miércoles"], ["Jue", "Jueves"], ["Vie", "Viernes"], ["Sáb", "Sábado"], ["Dom", "Domingo"]];
 
 function readDraft() {
   try {
@@ -344,16 +573,18 @@ const MIC_SVG = `<svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" fi
 
 function micMini(field, what, voice) {
   if (!voice) return "";
-  return `<button class="mic-mini" type="button" data-dictar="${field}" aria-pressed="false" aria-label="Dictar ${what}" title="Dictar ${what}">${MIC_SVG}</button>`;
+  return `<button class="mic-mini" type="button" data-dictar="${field}" aria-pressed="false" aria-label="Dictar ${what}" title="Dictar ${what} con la voz">${MIC_SVG}<span class="mic-mini-text" aria-hidden="true">Dictar</span></button>`;
 }
 
-function textField({ name, label, draft, voice, required = false, placeholder = "", autocomplete = "off", type = "text", inputmode = "", what = "" }) {
+function textField({ name, label, draft, voice, required = false, placeholder = "", autocomplete = "off", type = "text", inputmode = "", what = "", help = "" }) {
+  const helpId = help ? `ayuda-${name}` : "";
   return `
     <label class="quick-field"><span>${label}${required ? ' <span class="req" aria-hidden="true">*</span>' : ""}</span>
       <span class="field-with-mic">
-        <input name="${name}" type="${type}" ${required ? "required" : ""} autocomplete="${autocomplete}" ${inputmode ? `inputmode="${inputmode}"` : ""} placeholder="${placeholder}" value="${esc(draft[name] || "")}" />
+        <input name="${name}" type="${type}" ${required ? "required" : ""} autocomplete="${autocomplete}" ${inputmode ? `inputmode="${inputmode}"` : ""} placeholder="${placeholder}" value="${esc(draft[name] || "")}" ${helpId ? `aria-describedby="${helpId}"` : ""} />
         ${what ? micMini(name, what, voice) : ""}
       </span>
+      ${help ? `<small class="field-help" id="${helpId}">${help}</small>` : ""}
     </label>
   `;
 }
@@ -379,16 +610,19 @@ function choiceGroup({ name, legend, options, draft, multiple = false }) {
 function CTASection() {
   const draft = readDraft();
   const voice = speechSupported();
-  const foldedOpen = OPTIONAL_FOLDED.some((key) => String(draft[key] || "").trim());
+  const hasValue = (key) => (Array.isArray(draft[key]) ? draft[key].length : String(draft[key] || "").trim());
+  const optionalOpen = DRAFT_FIELDS.filter((key) => !REQUIRED_FIELDS.some(([req]) => req === key)).some(hasValue);
+  const foldedOpen = OPTIONAL_FOLDED.some(hasValue);
   const missing = missingRequired(draft);
   return `
-    <section class="contact-section reveal" id="contacto">
+    <section class="contact-section" id="evaluacion" aria-labelledby="evaluacion-titulo">
+      <span class="anchor-alias" id="contacto" aria-hidden="true"></span>
       <div class="evaluation-heading">
         <p class="eyebrow">Evaluación inicial</p>
-        <h2>Pedí tu evaluación en 1 minuto</h2>
-        <p>Con 3 datos alcanza. Lo demás, si querés, lo dictás o nos lo contás por WhatsApp.</p>
+        <h2 id="evaluacion-titulo">Pedí tu 1.er paseo gratis en 1 minuto</h2>
+        <p>Con 3 datos alcanza. Lo demás, si querés, lo sumás abajo o nos lo contás por WhatsApp.</p>
       </div>
-      <form class="evaluation-form quick-form" id="evaluacion" data-evaluation-form novalidate>
+      <form class="evaluation-form quick-form" data-evaluation-form novalidate>
         <label class="visually-hidden" aria-hidden="true">No completar <input name="sitio" tabindex="-1" autocomplete="off" /></label>
         <input type="hidden" name="tipo" value="Grupal" />
 
@@ -404,57 +638,64 @@ function CTASection() {
           </div>
           ${textField({ name: "perro", label: "Nombre del perro", draft, voice, required: true, placeholder: "Ej. Luna", what: "el nombre del perro" })}
           ${textField({ name: "responsable", label: "Tu nombre", draft, voice, required: true, placeholder: "Tu nombre", autocomplete: "name", what: "tu nombre" })}
-          ${textField({ name: "telefono", label: "Tu WhatsApp", draft, voice, required: true, placeholder: "11 0000 0000", autocomplete: "tel", type: "tel", inputmode: "tel" })}
+          ${textField({ name: "telefono", label: "Tu WhatsApp", draft, voice, required: true, placeholder: "Ej. 11 5555 5555", autocomplete: "tel", type: "tel", inputmode: "tel", help: "Con característica, sin 0 ni 15." })}
         </fieldset>
 
-        <fieldset class="evaluation-board quick-optional">
-          <legend>Si querés, sumá más (opcional)</legend>
-          ${choiceGroup({ name: "tamano", legend: "Tamaño", draft, options: [["Chico", "Pequeño"], ["Mediano", "Mediano"], ["Grande", "Grande"]] })}
-          ${choiceGroup({ name: "energia", legend: "Energía", draft, options: [["Baja", "Baja"], ["Media", "Media"], ["Alta", "Alta"]] })}
-          ${choiceGroup({ name: "perros", legend: "¿Se lleva bien con otros perros?", draft, options: [["Sí", "Sí"], ["No", "No"], ["Depende", "Depende"]] })}
-          ${choiceGroup({ name: "mordida", legend: "¿Alguna vez mordió o intentó morder?", draft, options: [["No", "No"], ["Sí", "Sí"], ["No sé", "No estoy seguro"]] })}
-          ${choiceGroup({ name: "horario", legend: "Turno", draft, options: [["Mañana", "Mañana"], ["Tarde", "Tarde"], ["Indistinto", "Indistinto"]] })}
-          ${choiceGroup({ name: "dias", legend: "Días (tocá todos los que quieras)", draft, multiple: true, options: DAYS.map(([short, long]) => [short, long, long]) })}
+        <details class="quick-optional-fold" ${optionalOpen ? "open" : ""}>
+          <summary class="quick-optional-toggle">Sumar más datos (opcional)</summary>
+          <div class="evaluation-board quick-optional">
+            ${choiceGroup({ name: "tamano", legend: "Tamaño", draft, options: [["Pequeño", "Pequeño"], ["Mediano", "Mediano"], ["Grande", "Grande"]] })}
+            ${choiceGroup({ name: "energia", legend: "Energía", draft, options: [["Baja", "Baja"], ["Media", "Media"], ["Alta", "Alta"]] })}
+            ${choiceGroup({ name: "perros", legend: "¿Se lleva bien con otros perros?", draft, options: [["Sí", "Sí"], ["No", "No"], ["Depende", "Depende"]] })}
+            ${choiceGroup({ name: "mordida", legend: "¿Alguna vez mordió o intentó morder?", draft, options: [["No", "No"], ["Sí", "Sí"], ["No sé", "No estoy seguro"]] })}
+            ${choiceGroup({ name: "horario", legend: "Turno", draft, options: [["Mañana", "Mañana"], ["Tarde", "Tarde"], ["Indistinto", "Indistinto"]] })}
+            ${choiceGroup({ name: "dias", legend: "Días (tocá todos los que quieras)", draft, multiple: true, options: DAYS.map(([short, long]) => [short, long, long]) })}
 
-          <div class="voice-field">
-            <label for="campo-conducta">Contanos de tu perro</label>
-            <textarea id="campo-conducta" name="conducta" placeholder="Miedos, si tira de la correa, cómo se porta con otros perros…">${esc(draft.conducta || "")}</textarea>
-            ${voice
-              ? `<button class="voice-button" type="button" data-dictar="conducta" aria-pressed="false">${MIC_SVG}<span data-voice-label>Hablar</span></button>`
-              : `<p class="voice-hint">Tocá el micrófono de tu teclado para dictar.</p>`}
-          </div>
-          <p class="visually-hidden" data-voice-status role="status" aria-live="polite"></p>
-
-          <details class="quick-more" ${foldedOpen ? "open" : ""}>
-            <summary>Contanos más (opcional)</summary>
-            <div class="form-grid">
-              ${textField({ name: "edad", label: "Edad", draft, voice, placeholder: "Ej. 4 años", what: "la edad" })}
-              ${textField({ name: "raza", label: "Raza o cruza", draft, voice, placeholder: "Ej. Mestizo", what: "la raza" })}
-              ${textField({ name: "zona", label: "Barrio o zona", draft, voice, placeholder: "Ej. Pilar", what: "el barrio" })}
-              ${textField({ name: "referencia", label: "Barrio privado o referencia", draft, voice, placeholder: "Ej. nombre del barrio", what: "la referencia" })}
-              ${textField({ name: "email", label: "Correo", draft, voice, placeholder: "Se completa solo con Google", autocomplete: "email", type: "email", inputmode: "email" })}
-              <label class="span-2">Carnet de vacunas
-                <input name="carnet" type="file" accept="image/*,application/pdf" capture="environment" />
-                <small class="field-help">Sacale una foto o subí el PDF. Lo guardamos privado y solo lo ve el equipo.</small>
-              </label>
-              <label class="span-2">Comentario
-                <span class="field-with-mic">
-                  <textarea name="comentario" placeholder="Algo más que quieras contarnos">${esc(draft.comentario || "")}</textarea>
-                  ${micMini("comentario", "un comentario", voice)}
-                </span>
-              </label>
+            <div class="voice-field">
+              <label for="campo-conducta">Contanos de tu perro</label>
+              <textarea id="campo-conducta" name="conducta" placeholder="Miedos, si tira de la correa, cómo se porta con otros perros…">${esc(draft.conducta || "")}</textarea>
+              ${voice
+                ? `<button class="voice-button" type="button" data-dictar="conducta" aria-pressed="false" title="Dictar con la voz">${MIC_SVG}<span data-voice-label>Hablar</span></button>`
+                : `<p class="voice-hint">Tocá el micrófono de tu teclado para dictar.</p>`}
             </div>
-          </details>
+            <p class="visually-hidden" data-voice-status role="status" aria-live="polite"></p>
 
-        </fieldset>
-        <p class="quick-note">Se abre WhatsApp con tus respuestas listas: solo tocás Enviar. Te contestamos para coordinar la evaluación.</p>
-
-        <div class="quick-submit-bar" data-submit-bar>
-          <div class="quick-submit-text">
-            <p class="quick-missing" data-missing aria-live="polite">${missingText(missing)}</p>
-            <p class="evaluation-status" data-evaluation-status role="status" aria-live="polite"></p>
+            <details class="quick-more" ${foldedOpen ? "open" : ""}>
+              <summary>Datos extras del perro y carnet (opcional)</summary>
+              <div class="form-grid">
+                ${textField({ name: "edad", label: "Edad", draft, voice, placeholder: "Ej. 4 años", what: "la edad" })}
+                ${textField({ name: "raza", label: "Raza o cruza", draft, voice, placeholder: "Ej. Mestizo", what: "la raza" })}
+                ${textField({ name: "zona", label: "Barrio o zona", draft, voice, placeholder: "Ej. Pilar", what: "el barrio" })}
+                ${textField({ name: "referencia", label: "Barrio privado o referencia", draft, voice, placeholder: "Ej. nombre del barrio", what: "la referencia" })}
+                ${textField({ name: "email", label: "Correo", draft, voice, placeholder: "Se completa solo con Google", autocomplete: "email", type: "email", inputmode: "email" })}
+                <label class="span-2">Carnet de vacunas
+                  <input name="carnet" type="file" accept="image/*,application/pdf" capture="environment" />
+                  <small class="field-help">Sacale una foto o subí el PDF. Lo guardamos privado y solo lo ve el equipo.</small>
+                </label>
+                <label class="span-2">Comentario
+                  <span class="field-with-mic">
+                    <textarea name="comentario" placeholder="Algo más que quieras contarnos">${esc(draft.comentario || "")}</textarea>
+                    ${micMini("comentario", "un comentario", voice)}
+                  </span>
+                </label>
+              </div>
+            </details>
           </div>
-          <button class="primary-button quick-submit" type="submit" data-quick-submit aria-disabled="${missing.length > 0}">Enviar</button>
+        </details>
+
+        <div class="quick-send">
+          <label class="quick-terms-check">
+            <input type="checkbox" name="aceptaTerminos" required />
+            <span>Acepto los <a href="#terminos-privacidad" data-link>términos del servicio y la política de privacidad</a> (incluye 1.er paseo de adaptación sin cargo).</span>
+          </label>
+          <p class="quick-note">Al tocar Enviar se abre WhatsApp: apretá Enviar ahí para mandarnos el pedido.</p>
+          <div class="quick-submit-bar" data-submit-bar>
+            <div class="quick-submit-text">
+              <p class="quick-missing" data-missing aria-live="polite">${missingText(missing)}</p>
+              <p class="evaluation-status" data-evaluation-status role="status" aria-live="polite"></p>
+            </div>
+            <button class="primary-button quick-submit" type="submit" data-quick-submit aria-disabled="${missing.length > 0}">Enviar</button>
+          </div>
         </div>
       </form>
     </section>
@@ -512,9 +753,31 @@ function updateSubmitBar(form) {
 function handleEvaluationInput(event) {
   const form = event.target.closest?.("[data-evaluation-form]");
   if (!form || event.target.name === "carnet" || event.target.name === "sitio") return;
-  if (event.target.hasAttribute("aria-invalid") && event.target.value.trim()) event.target.removeAttribute("aria-invalid");
+  if (event.target.hasAttribute("aria-invalid") && !fieldMissing(event.target.name, event.target.value)) event.target.removeAttribute("aria-invalid");
   writeDraft(collectDraft(form));
   updateSubmitBar(form);
+  floatSubmitBar(form);
+}
+
+// La barra de "Enviar" queda en su lugar (al final del formulario) y recién flota abajo de la
+// pantalla cuando la persona empezó a completar. Así nunca tapa el primer campo al llegar.
+function floatSubmitBar(form) {
+  const bar = form?.querySelector("[data-submit-bar]");
+  if (bar && !bar.classList.contains("is-floating")) bar.classList.add("is-floating");
+}
+
+// Si el campo que se está completando queda debajo de la barra flotante, se sube un poco.
+function keepFieldAboveBar(event) {
+  const form = event.target.closest?.("[data-evaluation-form]");
+  if (!form || !event.target.matches("input:not([type=radio]):not([type=checkbox]):not([type=file]), textarea")) return;
+  floatSubmitBar(form);
+  requestAnimationFrame(() => {
+    const bar = form.querySelector("[data-submit-bar]");
+    if (!bar) return;
+    const field = event.target.getBoundingClientRect();
+    const barTop = bar.getBoundingClientRect().top;
+    if (field.bottom > barTop - 12 && field.top < barTop) window.scrollBy({ top: field.bottom - barTop + 24, behavior: "instant" });
+  });
 }
 
 // ---------- Continuar con Google ----------
@@ -577,11 +840,15 @@ function handleEvaluationSubmit(event) {
   stopDictation();
 
   const status = form.querySelector("[data-evaluation-status]");
-  const missing = [...form.querySelectorAll("[required]")].filter((field) => !field.value.trim());
+  const missing = [...form.querySelectorAll("[required]")].filter((field) => fieldMissing(field.name, field.value));
   form.querySelectorAll("[required]").forEach((field) => field.toggleAttribute("aria-invalid", missing.includes(field)));
   if (missing.length) {
-    status.textContent = "Completá el nombre del perro, tu nombre y tu WhatsApp para poder contactarte.";
+    const onlyPhone = missing.length === 1 && missing[0].name === "telefono" && missing[0].value.trim();
+    status.textContent = onlyPhone
+      ? PHONE_ERROR
+      : "Completá el nombre del perro, tu nombre y tu WhatsApp (al menos 8 números) para poder contactarte.";
     status.classList.add("is-error");
+    floatSubmitBar(form);
     missing[0].focus();
     return;
   }
@@ -639,7 +906,11 @@ function setListening(button, listening) {
   button.classList.toggle("is-listening", listening);
   const label = button.querySelector("[data-voice-label]");
   if (label) label.textContent = listening ? "Frenar" : "Hablar";
-  if (!label) button.setAttribute("aria-label", listening ? "Frenar el dictado" : button.title);
+  if (!label) {
+    button.setAttribute("aria-label", listening ? "Frenar el dictado" : button.title.replace(/ con la voz$/, ""));
+    const text = button.querySelector(".mic-mini-text");
+    if (text) text.textContent = listening ? "Frenar" : "Dictar";
+  }
 }
 
 function stopDictation() {
@@ -719,6 +990,7 @@ export function registerLandingEvents() {
   document.addEventListener("change", handleEvaluationInput);
   document.addEventListener("click", handleDictationClick);
   document.addEventListener("click", handleGoogleChange);
+  document.addEventListener("focusin", keepFieldAboveBar);
   // Después de cada dibujo de la página, se monta el botón de Google (si está activado).
   const app = document.getElementById("app");
   if (app) new MutationObserver(() => mountGoogle()).observe(app, { childList: true });

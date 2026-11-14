@@ -3,7 +3,7 @@
 // POST { usuario, nombre, rol, pin }    crea o actualiza (si no llega pin, lo deja igual)
 // DELETE ?usuario=...                   desactiva (no borra: queda el historial)
 import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
-import { requireUser, hashPin, validatePin, normalizeUser, publicUser, ROLES } from "./_lib/auth.js";
+import { requireUser, hashPin, validatePin, normalizeUser, publicUser, issueToken, ROLES } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
 
 export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
@@ -48,6 +48,9 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       version += previo ? 1 : 0;
     }
     if (!credenciales) throw new HttpError(400, "Falta el PIN inicial.");
+    // Cambiar o desvincular un Gmail ya vinculado cierra las sesiones abiertas (incluidas las que
+    // se abrieron con ese Gmail). Vincular uno por primera vez no hace falta: no había sesiones con él.
+    const cambioGoogle = Boolean(previo?.google) && google !== previo.google;
     const user = {
       ...(previo || {}),
       usuario,
@@ -56,7 +59,7 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       activo: body.activo === undefined ? previo?.activo ?? true : Boolean(body.activo),
       ...credenciales,
       google,
-      version: body.activo === false ? version + 1 : version,
+      version: version + (cambioGoogle ? 1 : 0) + (body.activo === false ? 1 : 0),
       fallos: 0,
       bloqueadoHasta: null,
       debeCambiarPin: body.pin ? true : previo?.debeCambiarPin || false,
@@ -64,13 +67,16 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       creadoPor: previo?.creadoPor || admin.usuario,
     };
     await store.putUser(user);
-    return send(res, previo ? 200 : 201, { ok: true, usuario: publicUser(user) });
+    // Si el admin se cambió su propio Gmail, su sesión se cerró: le damos una nueva.
+    const propia = usuario === admin.usuario && user.version !== (previo?.version || 1);
+    return send(res, previo ? 200 : 201, { ok: true, usuario: publicUser(user), ...(propia ? { token: issueToken(user) } : {}) });
   }
 
   const usuario = normalizeUser(query(req).get("usuario"));
   if (usuario === admin.usuario) throw new HttpError(400, "No podés desactivar tu propio usuario.");
   const previo = await store.getUser(usuario);
   if (!previo) throw new HttpError(404, "Ese usuario no existe.");
-  await store.putUser({ ...previo, activo: false, version: (previo.version || 1) + 1 });
+  // Parche (no reescribe todo): un ingreso en curso no puede deshacer la desactivación.
+  await store.patchUser(usuario, { activo: false, version: (previo.version || 1) + 1 });
   return send(res, 200, { ok: true });
 });

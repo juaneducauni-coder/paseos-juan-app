@@ -1,6 +1,6 @@
 // Pruebas del servidor con almacenamiento en archivos temporales.
 // Correr: npm run test:api
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,12 +27,20 @@ const routes = {
   authCliente: (await import("../api/auth/cliente.js")).default,
   acceso: (await import("../api/clientes/acceso.js")).default,
 };
+const { store } = await import("../api/_lib/store.js");
 
-async function call(route, { method = "GET", url = "/", body, token } = {}) {
+after(() => rmSync(dir, { recursive: true, force: true }));
+
+// Cada pedido usa su propia IP (salvo que se pase una) para no chocar con los límites por conexión.
+let ipN = 0;
+const nuevaIp = () => { ipN += 1; return `10.0.${Math.floor(ipN / 250)}.${ipN % 250}`; };
+
+async function call(route, { method = "GET", url = "/", body, token, ip } = {}) {
   const req = Readable.from(body ? [JSON.stringify(body)] : []);
   req.method = method;
   req.url = url;
   req.headers = token ? { authorization: `Bearer ${token}` } : {};
+  req.headers["x-forwarded-for"] = ip || nuevaIp();
   req.socket = { remoteAddress: "127.0.0.1" };
   return new Promise((resolve) => {
     const res = {
@@ -137,6 +145,7 @@ test("archivos: subir carnet, abrirlo y bloquear lo que no corresponde", async (
   assert.equal(listaCoord.body.registros.some((r) => r.tipo === "carnet de vacunas"), true);
   const paseadorVe = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: paseador });
   assert.equal(paseadorVe.status, 403);
+  // El tutor puede mandar el carnet desde la web aunque no use Google (lo pidió Juan).
   const web = await call("evaluacion", { method: "POST", body: { perro: "Toby", responsable: "Ana", telefono: "1100000001", carnet: { nombre: "c.png", mime: "image/png", base64: PNG } } });
   assert.equal(web.status, 201);
   assert.equal(web.body.carnet, true);
@@ -187,16 +196,16 @@ test("entrar con Google: solo cuentas vinculadas y del ID de cliente correcto", 
 // ---------- Mensajes y portal del cliente ----------
 const hoyAR = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const tokenDe = async (usuario, pin) => (await call("login", { method: "POST", body: { usuario, pin } })).body.token;
-let coordinador;
-let supervisor;
-let marketing;
+let coordMsj;
+let supMsj;
+let mktMsj;
 
 test("mensajes: canales de grupo según el rol", async () => {
-  coordinador = await tokenDe("coordina", "736195");
+  coordMsj = await tokenDe("coordina", "736195");
   await call("usuarios", { method: "POST", token: admin, body: { usuario: "sole", nombre: "Sole", rol: "supervisor", pin: "620481", crear: true } });
   await call("usuarios", { method: "POST", token: admin, body: { usuario: "mateo", nombre: "Mateo", rol: "marketing", pin: "620482", crear: true } });
-  supervisor = await tokenDe("sole", "620481");
-  marketing = await tokenDe("mateo", "620482");
+  supMsj = await tokenDe("sole", "620481");
+  mktMsj = await tokenDe("mateo", "620482");
 
   const hola = await call("mensajes", { method: "POST", token: paseador, body: { canal: "equipo", texto: "<b>Hola</b> equipo<script>x</script>" } });
   assert.equal(hola.status, 201);
@@ -214,9 +223,9 @@ test("mensajes: canales de grupo según el rol", async () => {
   // El paseador no lee ni escribe en coordinación; marketing no está en los grupos.
   assert.equal((await call("mensajes", { url: "/?canal=coordinacion", token: paseador })).status, 403);
   assert.equal((await call("mensajes", { method: "POST", token: paseador, body: { canal: "coordinacion", texto: "hola" } })).status, 403);
-  assert.equal((await call("mensajes", { url: "/?canal=equipo", token: marketing })).status, 403);
-  assert.equal((await call("mensajes", { method: "POST", token: supervisor, body: { canal: "coordinacion", texto: "Falta retirar a Kiara" } })).status, 201);
-  assert.equal((await call("mensajes", { url: "/?canal=coordinacion", token: coordinador })).body.mensajes.length, 1);
+  assert.equal((await call("mensajes", { url: "/?canal=equipo", token: mktMsj })).status, 403);
+  assert.equal((await call("mensajes", { method: "POST", token: supMsj, body: { canal: "coordinacion", texto: "Falta retirar a Kiara" } })).status, 201);
+  assert.equal((await call("mensajes", { url: "/?canal=coordinacion", token: coordMsj })).body.mensajes.length, 1);
 
   // Validaciones.
   assert.equal((await call("mensajes", { method: "POST", token: paseador, body: { canal: "equipo", texto: "x".repeat(1001) } })).status, 400);
@@ -230,9 +239,9 @@ test("mensajes: los directos son solo de los dos (ni el admin los lee)", async (
   const canal = "dm_coordina__sebastian";
   const dm = await call("mensajes", { method: "POST", token: paseador, body: { canal, texto: "¿Mañana salgo 8:30?" } });
   assert.equal(dm.status, 201);
-  assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: coordinador })).body.mensajes.length, 1);
+  assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: coordMsj })).body.mensajes.length, 1);
   assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: admin })).status, 403);
-  assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: supervisor })).status, 403);
+  assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: supMsj })).status, 403);
   assert.equal((await call("mensajes", { method: "POST", token: admin, body: { canal, texto: "hola" } })).status, 403);
   // Al revés o con uno mismo no vale.
   assert.equal((await call("mensajes", { url: "/?canal=dm_sebastian__coordina", token: paseador })).status, 403);
@@ -240,7 +249,7 @@ test("mensajes: los directos son solo de los dos (ni el admin los lee)", async (
   // Con alguien que no existe, no se crea el chat.
   assert.equal((await call("mensajes", { method: "POST", token: paseador, body: { canal: "dm_nadie__sebastian", texto: "hola" } })).status, 404);
 
-  const resumen = await call("mensajes", { url: "/?resumen=1", token: coordinador });
+  const resumen = await call("mensajes", { url: "/?resumen=1", token: coordMsj });
   const canales = resumen.body.canales.map((c) => c.canal);
   assert.ok(canales.includes(canal) && canales.includes("coordinacion") && canales.includes("equipo"));
   const directo = resumen.body.canales.find((c) => c.canal === canal);
@@ -251,8 +260,8 @@ test("mensajes: los directos son solo de los dos (ni el admin los lee)", async (
   const delPaseador = (await call("mensajes", { url: "/?resumen=1", token: paseador })).body.canales.map((c) => c.canal);
   assert.equal(delPaseador.includes("coordinacion"), false);
 
-  assert.equal((await call("mensajes", { method: "POST", token: coordinador, body: { canal, leido: true } })).status, 200);
-  const despues = (await call("mensajes", { url: "/?resumen=1", token: coordinador })).body.canales.find((c) => c.canal === canal);
+  assert.equal((await call("mensajes", { method: "POST", token: coordMsj, body: { canal, leido: true } })).status, 200);
+  const despues = (await call("mensajes", { url: "/?resumen=1", token: coordMsj })).body.canales.find((c) => c.canal === canal);
   assert.equal(despues.sinLeer, 0);
   const contactos = await call("mensajes", { url: "/?contactos=1", token: paseador });
   assert.ok(contactos.body.contactos.some((c) => c.usuario === "coordina"));
@@ -265,14 +274,14 @@ let fotoPistacho;
 let fotoKiara;
 
 test("portal del cliente: enlace, sesión y solo lo de sus perros", async () => {
-  const alta = await call("registros", { method: "POST", token: coordinador, body: { col: "clientes", id: "cli-ana", nombre: "Ana López", telefono: "1155550000", barrio: "Palermo", perros: ["PJ-001"], estado: "activo" } });
+  const alta = await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-ana", nombre: "Ana López", telefono: "1155550000", barrio: "Palermo", perros: ["PJ-001"], estado: "activo" } });
   assert.equal(alta.status, 201);
-  await call("registros", { method: "POST", token: coordinador, body: { col: "clientes", id: "cli-otro", nombre: "Otro", perros: ["PJ-002"], estado: "activo" } });
+  await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-otro", nombre: "Otro", perros: ["PJ-002"], estado: "activo" } });
 
-  // Solo admin y coordinador generan enlaces.
+  // Solo admin y coordMsj generan enlaces.
   assert.equal((await call("acceso", { method: "POST", token: paseador, body: { clienteId: "cli-ana" } })).status, 403);
-  assert.equal((await call("acceso", { method: "POST", token: coordinador, body: { clienteId: "no-existe" } })).status, 404);
-  const crea = await call("acceso", { method: "POST", token: coordinador, body: { clienteId: "cli-ana" } });
+  assert.equal((await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "no-existe" } })).status, 404);
+  const crea = await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana" } });
   assert.equal(crea.status, 201);
   assert.match(crea.body.enlace, /^\/c\/[A-Za-z0-9_-]{43}$/);
   enlace = crea.body.enlace.slice(3);
@@ -281,10 +290,10 @@ test("portal del cliente: enlace, sesión y solo lo de sus perros", async () => 
   const guardado = readFileSync(path.join(dir, "clientes", "cli-ana.json"), "utf8");
   assert.equal(guardado.includes(enlace), false);
   assert.match(JSON.parse(guardado).acceso.hash, /^[0-9a-f]{64}$/);
-  const vistos = await call("registros", { url: "/?col=clientes", token: coordinador });
+  const vistos = await call("registros", { url: "/?col=clientes", token: coordMsj });
   assert.ok(vistos.body.registros.every((c) => !c.acceso || c.acceso.hash === undefined));
   // Nadie puede pisar el acceso por /api/registros.
-  await call("registros", { method: "POST", token: coordinador, body: { col: "clientes", id: "cli-ana", acceso: { hash: "0".repeat(64), activo: true } } });
+  await call("registros", { method: "POST", token: coordMsj, body: { col: "clientes", id: "cli-ana", acceso: { hash: "0".repeat(64), activo: true } } });
   assert.equal(JSON.parse(readFileSync(path.join(dir, "clientes", "cli-ana.json"), "utf8")).acceso.hash, JSON.parse(guardado).acceso.hash);
 
   // Tokens inválidos.
@@ -344,9 +353,9 @@ test("mensajes del cliente: su canal y nada más; el equipo de calle solo public
   assert.deepEqual(resumen.body.canales.map((c) => c.canal), [canal]);
 
   // Coordinador y admin leen y responden.
-  assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: coordinador })).body.mensajes.length, 1);
+  assert.equal((await call("mensajes", { url: `/?canal=${canal}`, token: coordMsj })).body.mensajes.length, 1);
   assert.equal((await call("mensajes", { method: "POST", token: admin, body: { canal, texto: "Perfecto, lo sacamos de la ruta" } })).status, 201);
-  const resCoord = (await call("mensajes", { url: "/?resumen=1", token: coordinador })).body.canales.find((c) => c.canal === canal);
+  const resCoord = (await call("mensajes", { url: "/?resumen=1", token: coordMsj })).body.canales.find((c) => c.canal === canal);
   assert.equal(resCoord.titulo, "Ana López");
   assert.equal(resCoord.sinLeer, 2);
 
@@ -366,7 +375,7 @@ test("mensajes del cliente: su canal y nada más; el equipo de calle solo public
   const resPaseador = (await call("mensajes", { url: "/?resumen=1", token: paseador })).body.canales.map((c) => c.canal);
   assert.equal(resPaseador.includes(canal), false);
   // Canal de un cliente que no existe.
-  assert.equal((await call("mensajes", { method: "POST", token: coordinador, body: { canal: "cliente_no-existe", texto: "hola" } })).status, 404);
+  assert.equal((await call("mensajes", { method: "POST", token: coordMsj, body: { canal: "cliente_no-existe", texto: "hola" } })).status, 404);
 });
 
 test("aviso automático al cliente cuando se marca el paseo (sin duplicar)", async () => {
@@ -415,7 +424,7 @@ test("aviso automático al cliente cuando se marca el paseo (sin duplicar)", asy
 });
 
 function nicolasOSupervisor() {
-  return supervisor;
+  return supMsj;
 }
 
 test("enlace del cliente: renovar y revocar cortan las sesiones", async () => {
@@ -425,7 +434,7 @@ test("enlace del cliente: renovar y revocar cortan las sesiones", async () => {
   assert.equal((await call("authCliente", { method: "POST", body: { token: enlace } })).status, 401);
   const otraSesion = (await call("authCliente", { method: "POST", body: { token: nuevo.body.enlace.slice(3) } })).body.token;
   assert.equal((await call("mensajes", { url: "/?canal=cliente_cli-ana", token: otraSesion })).status, 200);
-  const revoca = await call("acceso", { method: "POST", token: coordinador, body: { clienteId: "cli-ana", revocar: true } });
+  const revoca = await call("acceso", { method: "POST", token: coordMsj, body: { clienteId: "cli-ana", revocar: true } });
   assert.equal(revoca.status, 200);
   assert.equal(revoca.body.acceso.activo, false);
   assert.equal((await call("mensajes", { url: "/?canal=cliente_cli-ana", token: otraSesion })).status, 401);
@@ -435,10 +444,15 @@ test("enlace del cliente: renovar y revocar cortan las sesiones", async () => {
   assert.equal((await call("usuarios", { method: "POST", token: admin, body: { usuario: "a__b", nombre: "X", rol: "paseador", pin: "620483", crear: true } })).status, 400);
 });
 
-test("bloqueo después de 5 intentos fallidos", async () => {
+test("bloqueo después de 5 intentos fallidos (mismo 401 genérico, no revela la cuenta)", async () => {
   for (let i = 0; i < 5; i += 1) await call("login", { method: "POST", body: { usuario: "sebastian", pin: "999990" } });
   const locked = await call("login", { method: "POST", body: { usuario: "sebastian", pin: "730264" } });
-  assert.equal(locked.status, 429);
+  assert.equal(locked.status, 401);
+  const inexistente = await call("login", { method: "POST", body: { usuario: "noexiste", pin: "730264" } });
+  assert.equal(inexistente.status, 401);
+  assert.equal(locked.body.error, inexistente.body.error);
+  // Desbloqueo para las pruebas que siguen.
+  await store.patchUser("sebastian", { bloqueadoHasta: null, fallos: 0 });
 });
 
 test("alta con usuario existente devuelve 409 y el PIN inicial pide cambio", async () => {
@@ -456,6 +470,428 @@ test("desactivar usuario invalida su sesión", async () => {
   await call("usuarios", { method: "DELETE", url: "/?usuario=sebastian", token: admin });
   const me = await call("me", { token: paseador });
   assert.equal(me.status, 401);
-  rmSync(dir, { recursive: true, force: true });
 });
 
+// ---------- Seguridad ----------
+
+async function crearUsuario(usuario, pin, extra = {}) {
+  const r = await call("usuarios", { method: "POST", token: admin, body: { usuario, nombre: usuario, rol: "paseador", pin, crear: true, ...extra } });
+  assert.equal(r.status, 201);
+}
+
+// Hace que la próxima lectura del usuario dispare `accion` (un cambio del admin) antes de volver.
+function interceptarLectura(usuario, accion) {
+  const realGet = store.getUser;
+  let paso = false;
+  store.getUser = async (u) => {
+    const leido = await realGet(u);
+    if (u === usuario && !paso) {
+      paso = true;
+      await accion();
+    }
+    return leido;
+  };
+  return () => { store.getUser = realGet; };
+}
+
+test("un ingreso en curso no deshace la desactivación ni el cambio de PIN del admin", async () => {
+  await crearUsuario("despedido", "730281");
+  let restaurar = interceptarLectura("despedido", async () => {
+    const d = await call("usuarios", { method: "DELETE", url: "/?usuario=despedido", token: admin });
+    assert.equal(d.status, 200);
+  });
+  try {
+    const login = await call("login", { method: "POST", body: { usuario: "despedido", pin: "730281" } });
+    assert.equal(login.status, 401);
+  } finally {
+    restaurar();
+  }
+  assert.equal((await store.getUser("despedido")).activo, false);
+
+  // Lo mismo con un cambio de PIN del admin: el PIN viejo no vuelve a servir.
+  await crearUsuario("cambiado", "730282");
+  restaurar = interceptarLectura("cambiado", async () => {
+    await call("usuarios", { method: "POST", token: admin, body: { usuario: "cambiado", pin: "591736" } });
+  });
+  try {
+    const login = await call("login", { method: "POST", body: { usuario: "cambiado", pin: "730282" } });
+    assert.equal(login.status, 401);
+  } finally {
+    restaurar();
+  }
+  assert.equal((await call("login", { method: "POST", body: { usuario: "cambiado", pin: "730282" } })).status, 401);
+  assert.equal((await call("login", { method: "POST", body: { usuario: "cambiado", pin: "591736" } })).status, 200);
+});
+
+test("entrar con Google en curso no deshace la desactivación", async () => {
+  await crearUsuario("gdespedido", "730287", { google: "gdespedido@gmail.com" });
+  process.env.GOOGLE_CLIENT_ID = "cliente-prueba.apps.googleusercontent.com";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ iss: "accounts.google.com", aud: process.env.GOOGLE_CLIENT_ID, exp: String(Math.floor(Date.now() / 1000) + 600), email_verified: "true", email: "gdespedido@gmail.com" }) });
+  const realList = store.listUsers;
+  store.listUsers = async () => {
+    const lista = await realList();
+    await call("usuarios", { method: "DELETE", url: "/?usuario=gdespedido", token: admin });
+    return lista;
+  };
+  try {
+    const r = await call("google", { method: "POST", body: { credential: "tok" } });
+    assert.equal(r.status, 403);
+  } finally {
+    store.listUsers = realList;
+    globalThis.fetch = realFetch;
+    delete process.env.GOOGLE_CLIENT_ID;
+  }
+  assert.equal((await store.getUser("gdespedido")).activo, false);
+});
+
+test("pedidos de ingreso en paralelo no saltean el bloqueo", async () => {
+  await crearUsuario("paralelo", "730283");
+  const pins = Array.from({ length: 30 }, (_, i) => String(400000 + i * 7));
+  const r = await Promise.all(pins.map((pin) => call("login", { method: "POST", body: { usuario: "paralelo", pin } })));
+  assert.ok(r.every((x) => x.status === 401));
+  const u = await store.getUser("paralelo");
+  assert.ok(Date.parse(u.bloqueadoHasta) > Date.now(), "la cuenta quedó bloqueada");
+  // Bloqueada: ni el PIN correcto entra.
+  assert.equal((await call("login", { method: "POST", body: { usuario: "paralelo", pin: "730283" } })).status, 401);
+});
+
+test("límite por IP en el ingreso (los ingresos correctos no cuentan)", async () => {
+  await crearUsuario("porip", "730284");
+  const ip = "203.0.113.7";
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal((await call("login", { method: "POST", ip, body: { usuario: "porip", pin: "730284" } })).status, 200);
+  }
+  const codigos = [];
+  for (let i = 0; i < 11; i += 1) {
+    codigos.push((await call("login", { method: "POST", ip, body: { usuario: `nadie${i}`, pin: "123987" } })).status);
+  }
+  assert.deepEqual(codigos.slice(0, 10), Array(10).fill(401));
+  assert.equal(codigos[10], 429);
+  // IPv6: todo el /64 cuenta como una sola conexión.
+  for (let i = 0; i < 10; i += 1) await call("login", { method: "POST", ip: `2001:db8:1:2::${i + 1}`, body: { usuario: "nadie", pin: "123987" } });
+  assert.equal((await call("login", { method: "POST", ip: "2001:db8:1:2:ffff::9", body: { usuario: "porip", pin: "730284" } })).status, 429);
+  assert.equal((await call("login", { method: "POST", ip: "2001:db8:1:3::1", body: { usuario: "porip", pin: "730284" } })).status, 200);
+});
+
+test("cambio de PIN: el PIN actual tiene límite de intentos", async () => {
+  await crearUsuario("robado", "730285");
+  const token = (await call("login", { method: "POST", body: { usuario: "robado", pin: "730285" } })).body.token;
+  for (let i = 0; i < 5; i += 1) {
+    const r = await call("pin", { method: "POST", token, body: { actual: String(100000 + i * 13), nuevo: "804519" } });
+    assert.equal(r.status, 400);
+  }
+  const bloqueado = await call("pin", { method: "POST", token, body: { actual: "730285", nuevo: "804519" } });
+  assert.equal(bloqueado.status, 429);
+  // Desbloqueado, el PIN correcto funciona y vuelve el contador a 0.
+  await store.patchUser("robado", { bloqueadoHasta: null });
+  const ok = await call("pin", { method: "POST", token, body: { actual: "730285", nuevo: "804519" } });
+  assert.equal(ok.status, 200);
+  assert.equal((await store.getUser("robado")).fallos, 0);
+});
+
+test("cambiar o desvincular el Gmail cierra las sesiones abiertas", async () => {
+  await crearUsuario("congmail", "730286", { google: "uno@gmail.com" });
+  const token = (await call("login", { method: "POST", body: { usuario: "congmail", pin: "730286" } })).body.token;
+  assert.equal((await call("me", { token })).status, 200);
+  // Editar sin tocar el Gmail no cierra la sesión.
+  await call("usuarios", { method: "POST", token: admin, body: { usuario: "congmail", nombre: "Con Gmail" } });
+  assert.equal((await call("me", { token })).status, 200);
+  await call("usuarios", { method: "POST", token: admin, body: { usuario: "congmail", google: "" } });
+  assert.equal((await call("me", { token })).status, 401);
+});
+
+test("rutas y plantillas rechazan paradas con perroId no válido", async () => {
+  const malo = { col: "rutas", fecha: "2026-11-13", ruta: "PJ_1M", turno: "Mañana", paradas: [{ perroId: "x\" autofocus onfocus=\"alert(1)", perroNombre: "Zzz", hora: "09:00" }] };
+  assert.equal((await call("registros", { method: "POST", token: admin, body: malo })).status, 400);
+  assert.equal((await call("registros", { method: "POST", token: admin, body: { ...malo, col: "plantillas", paradas: "no" } })).status, 400);
+  const bueno = { ...malo, paradas: [{ perroId: "PJ-001", perroNombre: "Pistacho", hora: "09:00" }, { perroNombre: "Sin ficha" }] };
+  assert.equal((await call("registros", { method: "POST", token: admin, body: bueno })).status, 201);
+});
+
+test("formulario público: carnet con Google, límite por /64 y tope global por hora", async () => {
+  process.env.GOOGLE_CLIENT_ID = "cliente-prueba.apps.googleusercontent.com";
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ iss: "accounts.google.com", aud: process.env.GOOGLE_CLIENT_ID, exp: String(Math.floor(Date.now() / 1000) + 600), email_verified: "true", email: "tutora@gmail.com", name: "Tutora" }) });
+  try {
+    const conGoogle = await call("evaluacion", { method: "POST", body: { perro: "Moro", responsable: "Ana", telefono: "1100000002", googleCredential: "tok", carnet: { nombre: "c.png", mime: "image/png", base64: PNG } } });
+    assert.equal(conGoogle.status, 201);
+    assert.equal(conGoogle.body.carnet, true);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.GOOGLE_CLIENT_ID;
+  }
+  // Mismo /64 de IPv6: a partir del sexto pedido en la hora, 429.
+  for (let i = 0; i < 5; i += 1) await call("evaluacion", { method: "POST", ip: `2001:db8:9:9::${i + 1}`, body: { perro: "P", responsable: "R", telefono: "1" } });
+  assert.equal((await call("evaluacion", { method: "POST", ip: "2001:db8:9:9::aa", body: { perro: "P", responsable: "R", telefono: "1" } })).status, 429);
+  // Tope global (compartido entre instancias): se completa con pedidos web de la última hora.
+  const ahora = new Date().toISOString();
+  const dia = ahora.slice(0, 10);
+  const web = (await store.list("pedidos", dia)).filter((p) => p.origen === "web").length;
+  const relleno = [];
+  for (let i = web; i < 30; i += 1) {
+    const id = `${dia}_relleno_${i}`;
+    relleno.push(id);
+    await store.put("pedidos", { id, col: "pedidos", fecha: dia, origen: "web", creadoEn: ahora });
+  }
+  const tope = await call("evaluacion", { method: "POST", body: { perro: "Luna", responsable: "Ana", telefono: "1100000003" } });
+  assert.equal(tope.status, 429);
+  for (const id of relleno) await store.remove("pedidos", id);
+});
+
+
+
+test("rutas: no acepta paradas con código de perro o hora inválidos", async () => {
+  const mala = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: '"><img src=x onerror=alert(1)>', hora: "09:00" }] } });
+  assert.equal(mala.status, 400);
+  const hora = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: "PJ-001", hora: "nueve" }] } });
+  assert.equal(hora.status, 400);
+  const ok = await call("registros", { method: "POST", token: admin, body: { col: "plantillas", id: "PJ_1M_lunes", paradas: [{ perroId: "PJ-001", perroNombre: "Pistacho", hora: "09:00", minutos: 45 }] } });
+  assert.ok(ok.status === 201 || ok.status === 200);
+});
+
+// ---------- E-039: control por registro, archivos por rol y setup en Vercel ----------
+async function crearYEntrar(usuario, nombre, rol, pin) {
+  await call("usuarios", { method: "POST", token: admin, body: { usuario, nombre, rol, pin, crear: true } });
+  return (await call("login", { method: "POST", body: { usuario, pin } })).body.token;
+}
+let supervisor;
+let supervisor2;
+let ayudante;
+let coordinador;
+let pas;
+
+test("E-039: el supervisor no lee fichas (datos de tutores y salud)", async () => {
+  supervisor = await crearYEntrar("superuno", "Supervisor Uno", "supervisor", "604918");
+  supervisor2 = await crearYEntrar("superdos", "Supervisor Dos", "supervisor", "604927");
+  ayudante = await crearYEntrar("ayudauno", "Ayudante Uno", "ayudante", "604936");
+  pas = await crearYEntrar("paseauno", "Paseador Uno", "paseador", "604945");
+  coordinador = (await call("login", { method: "POST", body: { usuario: "coordina", pin: "736195" } })).body.token;
+  await call("registros", { method: "POST", token: coordinador, body: { col: "fichas", perroNombre: "Luna", datos: { tutor: "Ana", salud: "alergia" } } });
+  assert.equal((await call("registros", { url: "/?col=fichas", token: supervisor })).status, 403);
+  assert.equal((await call("registros", { url: "/?col=fichas", token: coordinador })).status, 200);
+});
+
+test("E-039: el supervisor pide cambios pero no los marca aplicados", async () => {
+  const pide = await call("registros", { method: "POST", token: supervisor, body: { col: "solicitudes", fecha: "2026-11-13", tipo: "no sale", estado: "aplicado", respuesta: "trampa" } });
+  assert.equal(pide.status, 201);
+  assert.equal(pide.body.registro.estado, "pendiente");
+  assert.equal(pide.body.registro.respuesta, "");
+  const id = pide.body.registro.id;
+  const aprueba = await call("registros", { method: "POST", token: supervisor, body: { col: "solicitudes", id, fecha: "2026-11-13", estado: "aplicado", respuesta: "listo", detalle: "corrijo" } });
+  assert.equal(aprueba.status, 200);
+  assert.equal(aprueba.body.registro.estado, "pendiente");
+  assert.equal(aprueba.body.registro.respuesta, "");
+  assert.equal(aprueba.body.registro.detalle, "corrijo");
+  const otro = await call("registros", { method: "POST", token: supervisor2, body: { col: "solicitudes", id, fecha: "2026-11-13", detalle: "ajeno" } });
+  assert.equal(otro.status, 403);
+  const coord = await call("registros", { method: "POST", token: coordinador, body: { col: "solicitudes", id, fecha: "2026-11-13", estado: "aplicado", respuesta: "Hecho" } });
+  assert.equal(coord.body.registro.estado, "aplicado");
+  const despues = await call("registros", { method: "POST", token: supervisor, body: { col: "solicitudes", id, fecha: "2026-11-13", detalle: "otra cosa" } });
+  assert.equal(despues.status, 403);
+  // Ya respondido: el supervisor no lo borra; el admin sí.
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=solicitudes&id=${id}`, token: supervisor })).status, 403);
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=solicitudes&id=${id}`, token: admin })).body.borrado, true);
+});
+
+test("E-039: cada uno escribe solo su checklist", async () => {
+  const ajeno = await call("registros", { method: "POST", token: pas, body: { col: "checklists", id: "2026-11-13_ayudauno_manana", fecha: "2026-11-13", completo: true } });
+  assert.equal(ajeno.status, 403);
+  const raro = await call("registros", { method: "POST", token: pas, body: { col: "checklists", id: "2026-11-13_paseauno_noche", fecha: "2026-11-13" } });
+  assert.equal(raro.status, 403);
+  const propio = await call("registros", { method: "POST", token: pas, body: { col: "checklists", id: "2026-11-13_paseauno_manana", fecha: "2026-11-13", completo: true } });
+  assert.equal(propio.status, 201);
+  const delAdmin = await call("registros", { method: "POST", token: admin, body: { col: "checklists", id: "2026-11-13_ayudauno_tarde", fecha: "2026-11-13" } });
+  assert.equal(delAdmin.status, 201);
+});
+
+test("E-039: incidentes, observaciones y avisos ajenos no se editan (el coordinador sí edita avisos)", async () => {
+  const inc = await call("registros", { method: "POST", token: pas, body: { col: "incidentes", fecha: "2026-11-13", titulo: "Tirón" } });
+  const pisa = await call("registros", { method: "POST", token: ayudante, body: { col: "incidentes", id: inc.body.registro.id, fecha: "2026-11-13", titulo: "Otra cosa" } });
+  assert.equal(pisa.status, 403);
+  const propio = await call("registros", { method: "POST", token: pas, body: { col: "incidentes", id: inc.body.registro.id, fecha: "2026-11-13", titulo: "Tirón leve" } });
+  assert.equal(propio.status, 200);
+  const aviso = await call("registros", { method: "POST", token: supervisor, body: { col: "avisos", fecha: "2026-11-13", barrio: "Pilar", mensaje: "Obra" } });
+  const coordEdita = await call("registros", { method: "POST", token: coordinador, body: { col: "avisos", id: aviso.body.registro.id, fecha: "2026-11-13", mensaje: "Obra en la esquina" } });
+  assert.equal(coordEdita.status, 200);
+  const avisoCoord = await call("registros", { method: "POST", token: coordinador, body: { col: "avisos", fecha: "2026-11-13", barrio: "Pilar", mensaje: "Corte" } });
+  const supEdita = await call("registros", { method: "POST", token: supervisor2, body: { col: "avisos", id: avisoCoord.body.registro.id, fecha: "2026-11-13", mensaje: "x" } });
+  assert.equal(supEdita.status, 403);
+  const obs = await call("registros", { method: "POST", token: supervisor, body: { col: "observaciones", fecha: "2026-11-13", titulo: "Ladra" } });
+  assert.equal((await call("registros", { method: "POST", token: pas, body: { col: "observaciones", id: obs.body.registro.id, fecha: "2026-11-13", titulo: "y" } })).status, 403);
+});
+
+test("E-039: quién marcó cada paso del paseo lo fija el servidor", async () => {
+  const id = "2026-11-13_PJ-009_manana";
+  const base = { col: "paseos", id, fecha: "2026-11-13", perroId: "PJ-009" };
+  const retiro = await call("registros", { method: "POST", token: pas, body: { ...base, horaRetiro: "09:00", horaRetiroPor: "ayudauno", horaRetiroPorNombre: "Ayudante Uno" } });
+  assert.equal(retiro.body.registro.horaRetiroPor, "paseauno");
+  assert.equal(retiro.body.registro.horaRetiroPorNombre, "Paseador Uno");
+  // El ayudante reenvía el paso anterior tal cual (como hace la app) y marca integración y entrega.
+  const ayu = await call("registros", { method: "POST", token: ayudante, body: { ...base, horaRetiroPor: "paseauno", horaRetiroPorNombre: "Otro nombre", horaIntegradoPor: "paseauno", devuelvePor: "x", horaEntregaPorNombre: "Suelto" } });
+  assert.equal(ayu.body.registro.horaRetiroPor, "paseauno");
+  assert.equal(ayu.body.registro.horaRetiroPorNombre, "Paseador Uno");
+  assert.equal(ayu.body.registro.horaIntegradoPor, "ayudauno");
+  assert.equal(ayu.body.registro.horaIntegradoPorNombre, "Ayudante Uno");
+  assert.equal(ayu.body.registro.devuelvePor, "ayudauno");
+  assert.equal(ayu.body.registro.horaEntregaPorNombre, undefined);
+  // Vacío = desmarcar.
+  const suelta = await call("registros", { method: "POST", token: supervisor, body: { ...base, devuelvePor: "", devuelvePorNombre: "Mateo" } });
+  assert.equal(suelta.body.registro.devuelvePor, "");
+  assert.equal(suelta.body.registro.devuelvePorNombre, "");
+  assert.equal(suelta.body.registro.horaIntegradoPor, "ayudauno");
+});
+
+test("E-039: cada rol sube solo sus tipos de archivo y solo el admin los borra", async () => {
+  const archivo = { nombre: "x.png", mime: "image/png", base64: PNG };
+  assert.equal((await call("archivos", { method: "POST", token: pas, body: { tipo: "comprobante de pago", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: ayudante, body: { tipo: "carnet de vacunas", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: supervisor, body: { tipo: "documento", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: coordinador, body: { tipo: "comprobante de pago", archivo } })).status, 403);
+  assert.equal((await call("archivos", { method: "POST", token: admin, body: { tipo: "otra cosa", archivo } })).status, 400);
+  assert.equal((await call("archivos", { method: "POST", token: coordinador, body: { tipo: "carnet de vacunas", archivo } })).status, 201);
+  assert.equal((await call("archivos", { method: "POST", token: coordinador, body: { tipo: "documento", archivo } })).status, 201);
+  const foto = await call("archivos", { method: "POST", token: pas, body: { tipo: "foto", archivo } });
+  assert.equal(foto.status, 201);
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=archivos&id=${foto.body.registro.id}`, token: pas })).status, 403);
+  assert.equal((await call("registros", { method: "DELETE", url: `/?col=archivos&id=${foto.body.registro.id}`, token: admin })).body.borrado, true);
+});
+
+// ---------- Contaduría: colección `movimientos` (ingresos y egresos) ----------
+const movimiento = (extra = {}) => ({
+  col: "movimientos", fecha: "2026-11-13", tipo: "egreso", categoria: "Insumos", concepto: "Bolsas", monto: 4500, medio: "Efectivo", ...extra,
+});
+
+test("contaduría: el admin crea, lee, marca en el Libro y borra un movimiento", async () => {
+  const { ROLES_CONTADURIA, COLECCIONES } = await import("../api/_lib/permisos.js");
+  assert.deepEqual(ROLES_CONTADURIA, ["admin"]);
+  assert.equal(COLECCIONES.movimientos.leer, ROLES_CONTADURIA);
+  assert.equal(COLECCIONES.movimientos.escribir, ROLES_CONTADURIA);
+
+  const creado = await call("registros", { method: "POST", token: admin, body: movimiento({ nota: "  para la ruta  ", inventado: "x" }) });
+  assert.equal(creado.status, 201);
+  const reg = creado.body.registro;
+  assert.equal(reg.tipo, "egreso");
+  assert.equal(reg.categoria, "Insumos");
+  assert.equal(reg.monto, 4500);
+  assert.equal(reg.nota, "para la ruta");
+  assert.equal(reg.pasadoAlLibro, false);
+  assert.equal(reg.creadoPor, "juan");
+  assert.equal(reg.inventado, undefined, "no guarda campos que no son del movimiento");
+
+  const ingreso = await call("registros", { method: "POST", token: admin, body: movimiento({ tipo: "ingreso", categoria: "Planes", concepto: "Plan 2", monto: 30000.555 }) });
+  assert.equal(ingreso.status, 201);
+  assert.equal(ingreso.body.registro.monto, 30000.56);
+
+  const lista = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.equal(lista.status, 200);
+  assert.equal(lista.body.registros.length, 2);
+
+  // Cambio parcial: marcar "En el Libro" conserva el resto.
+  const libro = await call("registros", { method: "POST", token: admin, body: { col: "movimientos", id: reg.id, fecha: reg.fecha, pasadoAlLibro: true } });
+  assert.equal(libro.status, 200);
+  assert.equal(libro.body.registro.pasadoAlLibro, true);
+  assert.equal(libro.body.registro.monto, 4500);
+  assert.equal(libro.body.registro.concepto, "Bolsas");
+
+  const borrado = await call("registros", { method: "DELETE", url: `/?col=movimientos&id=${reg.id}`, token: admin });
+  assert.equal(borrado.status, 200);
+  assert.equal(borrado.body.borrado, true);
+  const despues = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.deepEqual(despues.body.registros.map((r) => r.id), [ingreso.body.registro.id]);
+});
+
+test("contaduría: coordinador, supervisor, paseador y ayudante reciben 403", async () => {
+  const existente = (await call("registros", { url: "/?col=movimientos", token: admin })).body.registros[0];
+  for (const [rol, token] of [["coordinador", coordinador], ["supervisor", supervisor], ["paseador", pas], ["ayudante", ayudante]]) {
+    assert.equal((await call("registros", { url: "/?col=movimientos", token })).status, 403, `${rol} no lee`);
+    assert.equal((await call("registros", { method: "POST", token, body: movimiento() })).status, 403, `${rol} no carga`);
+    assert.equal((await call("registros", { method: "POST", token, body: { col: "movimientos", id: existente.id, fecha: existente.fecha, pasadoAlLibro: true } })).status, 403, `${rol} no cambia`);
+    assert.equal((await call("registros", { method: "DELETE", url: `/?col=movimientos&id=${existente.id}`, token })).status, 403, `${rol} no borra`);
+    assert.equal((await call("registros", { method: "DELETE", url: "/?col=movimientos&id=no-existe", token })).status, 403, `${rol} no averigua si existe`);
+  }
+  assert.equal((await call("registros", { url: "/?col=movimientos" })).status, 401);
+  const sigue = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.equal(sigue.body.registros.length, 1);
+  assert.equal(sigue.body.registros[0].pasadoAlLibro, false);
+});
+
+test("contaduría: el servidor valida tipo, monto, fecha, categoría y largo de los textos", async () => {
+  const malos = [
+    { monto: -100 },
+    { monto: 0 },
+    { monto: "4500" },
+    { monto: null },
+    { tipo: "regalo" },
+    { tipo: undefined },
+    { categoria: "Planes" }, // es de ingresos, no de egresos
+    { categoria: "Cualquiera" },
+    { fecha: "2026-02-31" },
+    { fecha: "13/11/2026" },
+    { fecha: undefined },
+    { concepto: "" },
+    { concepto: "x".repeat(121) },
+    { nota: "x".repeat(301) },
+    { medio: "x".repeat(41) },
+    { medio: 5 },
+    { pasadoAlLibro: "sí" },
+  ];
+  for (const extra of malos) {
+    const r = await call("registros", { method: "POST", token: admin, body: movimiento(extra) });
+    assert.equal(r.status, 400, `tenía que rechazar ${JSON.stringify(extra).slice(0, 60)}`);
+  }
+  // Un cambio parcial tampoco puede dejar el registro inválido.
+  const existente = (await call("registros", { url: "/?col=movimientos", token: admin })).body.registros[0];
+  const cambio = (extra) => call("registros", { method: "POST", token: admin, body: { col: "movimientos", id: existente.id, fecha: existente.fecha, ...extra } });
+  assert.equal((await cambio({ monto: -1 })).status, 400);
+  assert.equal((await cambio({ tipo: "egreso" })).status, 400, "la categoría Planes no vale para un egreso");
+  assert.equal((await cambio({ tipo: "egreso", categoria: "Transporte" })).status, 200);
+  const lista = await call("registros", { url: "/?col=movimientos", token: admin });
+  assert.equal(lista.body.registros.length, 1, "nada de lo rechazado quedó guardado");
+});
+
+test("contaduría: creadoPor lo fija el servidor y no se puede falsificar", async () => {
+  const falso = { creadoPor: "coordina", creadoPorNombre: "Otra persona", creadoEn: "2020-01-01T00:00:00.000Z", actualizadoPor: "coordina" };
+  const creado = await call("registros", { method: "POST", token: admin, body: movimiento(falso) });
+  assert.equal(creado.status, 201);
+  assert.equal(creado.body.registro.creadoPor, "juan");
+  assert.notEqual(creado.body.registro.creadoPorNombre, "Otra persona");
+  assert.notEqual(creado.body.registro.creadoEn, "2020-01-01T00:00:00.000Z");
+  assert.equal(creado.body.registro.actualizadoPor, "juan");
+  const cambio = await call("registros", { method: "POST", token: admin, body: { col: "movimientos", id: creado.body.registro.id, fecha: "2026-11-13", nota: "ok", ...falso } });
+  assert.equal(cambio.status, 200);
+  assert.equal(cambio.body.registro.creadoPor, "juan");
+  assert.equal(cambio.body.registro.creadoEn, creado.body.registro.creadoEn);
+  await call("registros", { method: "DELETE", url: `/?col=movimientos&id=${creado.body.registro.id}`, token: admin });
+});
+
+test("E-039: los PDF se descargan aislados (attachment + CSP sandbox)", async () => {
+  const pdf = Buffer.from("%PDF-1.4\n%prueba\n").toString("base64");
+  const sube = await call("archivos", { method: "POST", token: admin, body: { tipo: "documento", archivo: { nombre: "d.pdf", mime: "application/pdf", base64: pdf } } });
+  assert.equal(sube.status, 201);
+  const baja = await callRaw("archivos", { url: `/?id=${sube.body.registro.id}`, token: admin });
+  assert.equal(baja.status, 200);
+  assert.match(baja.headers["Content-Disposition"], /^attachment;/);
+  assert.equal(baja.headers["Content-Security-Policy"], "default-src 'none'; sandbox");
+  const img = (await call("registros", { url: "/?col=archivos", token: admin })).body.registros.find((r) => r.mime === "image/png");
+  const ve = await callRaw("archivos", { url: `/?id=${img.id}`, token: admin });
+  assert.match(ve.headers["Content-Disposition"], /^inline;/);
+  assert.equal(ve.headers["Content-Security-Policy"], undefined);
+});
+
+test("E-039: en Vercel con SETUP_CODE, el primer admin necesita el código", async () => {
+  const original = store.listUsers;
+  store.listUsers = async () => [];
+  process.env.VERCEL = "1";
+  process.env.SETUP_CODE = "codigo-secreto-de-prueba";
+  try {
+    const sin = await call("setup", { method: "POST", body: { nombre: "Intruso", usuario: "intruso", pin: "482951" } });
+    assert.equal(sin.status, 403);
+    const mal = await call("setup", { method: "POST", body: { nombre: "Intruso", usuario: "intruso", pin: "482951", codigo: "otro" } });
+    assert.equal(mal.status, 403);
+  } finally {
+    store.listUsers = original;
+    delete process.env.VERCEL;
+    delete process.env.SETUP_CODE;
+  }
+});

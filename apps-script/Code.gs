@@ -28,6 +28,8 @@ function doPost(e) {
     var acciones = {
       getUser: function () { return buscarUsuario(body.usuario); },
       putUser: function () { return guardarUsuario(body.user); },
+      patchUser: function () { return parcharUsuario(body.usuario, body.campos || {}); },
+      registrarFallo: function () { return registrarFallo(body.usuario, body.max, body.minutos); },
       listUsers: function () { return listarUsuarios(); },
       deleteUser: function () { return borrarFila(HOJA_USUARIOS, body.usuario); },
       get: function () { return obtener(body.col, body.id); },
@@ -85,6 +87,13 @@ function conBloqueo(fn) {
   }
 }
 
+// Texto que empieza con = + - @ (o tab/enter) Sheets lo toma como fórmula. Con un apóstrofo
+// adelante queda como texto común (el apóstrofo no se ve en la celda).
+function celda(v) {
+  v = String(v == null ? "" : v);
+  return /^[=+\-@\t\r]/.test(v) ? "'" + v : v;
+}
+
 function resumen(r) {
   var partes = [r.titulo, r.perroNombre || r.perro, r.estado, r.tipo, r.detalle, r.descripcion].filter(function (x) { return x; });
   return String(partes.join(" · ")).slice(0, 200);
@@ -105,7 +114,7 @@ function guardar(col, registro) {
         registro = combinado;
       } catch (e) {}
     }
-    var valores = [[registro.id, registro.fecha || "", resumen(registro), registro.creadoPorNombre || registro.creadoPor || "", registro.actualizadoEn || "", JSON.stringify(registro)]];
+    var valores = [[celda(registro.id), celda(registro.fecha || ""), celda(resumen(registro)), celda(registro.creadoPorNombre || registro.creadoPor || ""), celda(registro.actualizadoEn || ""), JSON.stringify(registro)]];
     if (fila) h.getRange(fila, 1, 1, COLUMNAS.length).setValues(valores);
     else h.appendRow(valores[0]);
     return true;
@@ -146,14 +155,55 @@ function buscarUsuario(usuario) {
   return fila ? JSON.parse(h.getRange(fila, COLUMNAS_USUARIOS.length).getValue()) : null;
 }
 
+function filaUsuario(u) {
+  return [celda(u.usuario), celda(u.nombre), celda(u.rol), u.activo ? "Sí" : "No", celda(u.ultimoIngreso || ""), JSON.stringify(u)];
+}
+
 function guardarUsuario(u) {
   return conBloqueo(function () {
     var h = hoja(HOJA_USUARIOS, COLUMNAS_USUARIOS);
-    var valores = [[u.usuario, u.nombre, u.rol, u.activo ? "Sí" : "No", u.ultimoIngreso || "", JSON.stringify(u)]];
+    var valores = [filaUsuario(u)];
     var fila = filaDe(h, u.usuario);
     if (fila) h.getRange(fila, 1, 1, COLUMNAS_USUARIOS.length).setValues(valores);
     else h.appendRow(valores[0]);
     return true;
+  });
+}
+
+// Cambia solo algunos campos del usuario, leyendo y escribiendo adentro del bloqueo.
+// Así un ingreso en curso no deshace una desactivación o un cambio de PIN del admin.
+function parcharUsuario(usuario, campos) {
+  return conBloqueo(function () {
+    var h = hoja(HOJA_USUARIOS, COLUMNAS_USUARIOS);
+    var fila = filaDe(h, usuario);
+    if (!fila) return null;
+    var u = JSON.parse(h.getRange(fila, COLUMNAS_USUARIOS.length).getValue());
+    Object.keys(campos).forEach(function (k) { if (k !== "usuario") u[k] = campos[k]; });
+    h.getRange(fila, 1, 1, COLUMNAS_USUARIOS.length).setValues([filaUsuario(u)]);
+    return u;
+  });
+}
+
+// Suma un intento de PIN de forma atómica (se llama antes de comparar; el ingreso correcto lo
+// vuelve a 0). Al llegar a `max` bloquea `minutos`. Devuelve { bloqueado: true } si ya estaba
+// bloqueado (y entonces no cuenta nada).
+function registrarFallo(usuario, max, minutos) {
+  max = Math.max(1, Math.min(20, Number(max) || 5));
+  minutos = Math.max(1, Math.min(1440, Number(minutos) || 15));
+  return conBloqueo(function () {
+    var h = hoja(HOJA_USUARIOS, COLUMNAS_USUARIOS);
+    var fila = filaDe(h, usuario);
+    if (!fila) return { bloqueado: false };
+    var u = JSON.parse(h.getRange(fila, COLUMNAS_USUARIOS.length).getValue());
+    var ahora = Date.now();
+    if (u.bloqueadoHasta && Date.parse(u.bloqueadoHasta) > ahora) return { bloqueado: true };
+    u.fallos = (Number(u.fallos) || 0) + 1;
+    if (u.fallos >= max) {
+      u.fallos = 0;
+      u.bloqueadoHasta = new Date(ahora + minutos * 60000).toISOString();
+    }
+    h.getRange(fila, 1, 1, COLUMNAS_USUARIOS.length).setValues([filaUsuario(u)]);
+    return { bloqueado: false };
   });
 }
 

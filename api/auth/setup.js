@@ -1,8 +1,8 @@
 // POST /api/auth/setup { nombre, usuario, pin, codigo }
 // Crea el primer usuario admin. Solo funciona si todavía no hay ningún usuario y:
 // - en desarrollo local, o
-// - en una versión de prueba de Vercel (protegida con la cuenta de Vercel), o
-// - con el código SETUP_CODE configurado en Vercel.
+// - en una versión de prueba de Vercel sin SETUP_CODE (protegida con la cuenta de Vercel), o
+// - con el código SETUP_CODE (obligatorio en producción y en todo Vercel si está configurado).
 import { handler, send, readJson, HttpError } from "../_lib/http.js";
 import { hashPin, validatePin, normalizeUser, issueToken, publicUser } from "../_lib/auth.js";
 import { store } from "../_lib/store.js";
@@ -14,7 +14,9 @@ export default handler({ POST: 1 }, async (req, res) => {
 
   const env = process.env.VERCEL_ENV;
   const codeOk = process.env.SETUP_CODE && body.codigo === process.env.SETUP_CODE;
-  if (env === "production" && !codeOk) {
+  // En producción siempre; en cualquier despliegue de Vercel (preview incluido) si hay código configurado.
+  const pideCodigo = env === "production" || Boolean(process.env.VERCEL && process.env.SETUP_CODE);
+  if (pideCodigo && !codeOk) {
     throw new HttpError(403, "El primer usuario se crea desde la versión de prueba o con el código de configuración.");
   }
 

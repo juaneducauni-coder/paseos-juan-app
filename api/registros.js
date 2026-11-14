@@ -11,9 +11,118 @@ import { avisosDePaseo } from "./_lib/mensajes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const PERRO_ID = /^[A-Za-z0-9_.-]{0,40}$/;
 // avisosCliente: avisos automáticos ya enviados al cliente por ese paseo (lo maneja el servidor).
 const RESERVADOS = ["col", "creadoPor", "creadoEn", "actualizadoPor", "actualizadoEn", "creadoPorNombre", "actualizadoPorNombre", "avisosCliente"];
 const MAX_RECORD = 20 * 1024;
+// Campos de autoría de `paseos` (quién marcó cada paso): los fija el servidor.
+const AUTORIA_PASEO = ["horaRetiroPor", "horaPaseoPor", "horaEntregaPor", "horaIntegradoPor", "devuelvePor"];
+// Colecciones donde un no-admin solo edita lo que cargó él (el coordinador administra los avisos).
+const SOLO_PROPIOS = ["incidentes", "observaciones", "avisos"];
+const escRegex = (texto) => String(texto).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Contaduría (`movimientos`): categorías fijas por tipo y largo máximo de cada texto.
+// La misma lista está en src/views/admin.js (CONTA_CATEGORIAS): si cambia una, cambiá la otra.
+export const CATEGORIAS_MOVIMIENTO = {
+  ingreso: ["Planes", "Tienda", "Otros"],
+  egreso: ["Pagos al equipo", "Insumos", "Transporte", "Alimento/tienda", "Impuestos y servicios", "Otros"],
+};
+const MOVIMIENTO_TEXTOS = { concepto: 120, medio: 40, nota: 300 };
+const MONTO_MAX = 1e12;
+
+function fechaReal(fecha) {
+  if (typeof fecha !== "string" || !FECHA.test(fecha)) return false;
+  const d = new Date(`${fecha}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === fecha;
+}
+
+// Deja solo los campos del movimiento y revisa el registro completo (lo que llega sobre lo que había).
+// Así un cambio parcial (por ejemplo, marcar "En el Libro") tampoco puede dejar datos inválidos.
+function validarMovimiento(datos, previo) {
+  const out = {};
+  for (const campo of ["fecha", "tipo", "categoria", "concepto", "monto", "medio", "nota", "pasadoAlLibro"]) {
+    if (Object.prototype.hasOwnProperty.call(datos, campo)) out[campo] = datos[campo];
+  }
+  for (const [campo, max] of Object.entries(MOVIMIENTO_TEXTOS)) {
+    if (out[campo] === undefined) continue;
+    if (out[campo] === null) out[campo] = "";
+    if (typeof out[campo] !== "string") throw new HttpError(400, `El campo ${campo} tiene que ser texto.`);
+    out[campo] = out[campo].trim();
+    if (out[campo].length > max) throw new HttpError(400, `El campo ${campo} es demasiado largo (máximo ${max} letras).`);
+  }
+  if (out.pasadoAlLibro !== undefined && typeof out.pasadoAlLibro !== "boolean") {
+    throw new HttpError(400, "La marca del Libro tiene que ser sí o no.");
+  }
+  const final = { ...(previo || {}), ...out };
+  if (!fechaReal(final.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
+  if (!Object.prototype.hasOwnProperty.call(CATEGORIAS_MOVIMIENTO, final.tipo)) {
+    throw new HttpError(400, "El tipo tiene que ser ingreso o egreso.");
+  }
+  if (!CATEGORIAS_MOVIMIENTO[final.tipo].includes(final.categoria)) {
+    throw new HttpError(400, "Elegí una categoría de la lista.");
+  }
+  if (typeof final.monto !== "number" || !Number.isFinite(final.monto) || final.monto <= 0 || final.monto > MONTO_MAX) {
+    throw new HttpError(400, "El monto tiene que ser un número mayor que cero.");
+  }
+  if (out.monto !== undefined) out.monto = Math.round(out.monto * 100) / 100;
+  if (typeof final.concepto !== "string" || final.concepto.trim().length < 2) {
+    throw new HttpError(400, "Falta el concepto.");
+  }
+  if (!previo) {
+    out.medio = out.medio || "";
+    out.nota = out.nota || "";
+    out.pasadoAlLibro = out.pasadoAlLibro === true;
+  }
+  return out;
+}
+
+// Reglas por registro (además del permiso por colección). Devuelve los datos ya ajustados.
+function reglasPorRegistro(col, id, datos, previo, user) {
+  const admin = user.rol === "admin";
+  if (col === "movimientos") return validarMovimiento(datos, previo);
+  if (col === "solicitudes" && !admin && user.rol !== "coordinador") {
+    // El supervisor pide; el coordinador (o el admin) aplica o rechaza y responde.
+    if (previo && (previo.creadoPor !== user.usuario || (previo.estado || "pendiente") !== "pendiente")) {
+      throw new HttpError(403, "Solo podés cambiar tus pedidos mientras estén pendientes.");
+    }
+    datos.estado = "pendiente";
+    if (previo) delete datos.respuesta;
+    else datos.respuesta = "";
+  }
+  if (col === "checklists" && !admin) {
+    const propio = new RegExp(`^\\d{4}-\\d{2}-\\d{2}_${escRegex(user.usuario)}_(manana|tarde)$`);
+    if (!propio.test(id)) throw new HttpError(403, "Solo podés cargar tu propio checklist.");
+  }
+  if (SOLO_PROPIOS.includes(col) && !admin && previo && previo.creadoPor !== user.usuario) {
+    if (!(col === "avisos" && user.rol === "coordinador")) {
+      throw new HttpError(403, "Solo podés cambiar lo que cargaste vos.");
+    }
+  }
+  if (col === "paseos") {
+    for (const campo of AUTORIA_PASEO) {
+      const nombre = `${campo}Nombre`;
+      if (!Object.prototype.hasOwnProperty.call(datos, campo)) {
+        // Sin el usuario no se acepta un nombre suelto.
+        delete datos[nombre];
+        continue;
+      }
+      const valor = String(datos[campo] ?? "").trim();
+      if (!valor) {
+        // Vacío = desmarcar.
+        datos[campo] = "";
+        datos[nombre] = "";
+      } else if (previo && previo[campo] === valor) {
+        // Reenvía lo que ya estaba (pasos anteriores, cola sin señal): queda el autor original.
+        datos[campo] = previo[campo];
+        datos[nombre] = previo[nombre] || "";
+      } else {
+        datos[campo] = user.usuario;
+        datos[nombre] = user.nombre || "";
+      }
+    }
+  }
+  return datos;
+}
 
 export function nuevoId(fecha) {
   const now = new Date();
@@ -86,9 +195,24 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
     if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
     // Los archivos solo se crean subiéndolos por /api/archivos (así nadie inventa a qué archivo apunta).
     if (col === "archivos") throw new HttpError(400, "Los archivos se suben desde /api/archivos.");
+    // Rutas y plantillas: cada parada con id de perro de formato seguro (o vacío) y textos acotados.
+    if ((col === "rutas" || col === "plantillas") && body.paradas !== undefined) {
+      if (!Array.isArray(body.paradas) || body.paradas.length > 60) throw new HttpError(400, "Las paradas de la ruta no son válidas.");
+      for (const parada of body.paradas) {
+        if (!parada || typeof parada !== "object") throw new HttpError(400, "Las paradas de la ruta no son válidas.");
+        if (parada.perroId && !/^[A-Za-z0-9_.-]{1,40}$/.test(String(parada.perroId))) throw new HttpError(400, "Hay un perro con un código no válido en la ruta.");
+        if (parada.hora && !/^\d{1,2}:\d{2}$/.test(String(parada.hora))) throw new HttpError(400, "Hay una hora no válida en la ruta.");
+      }
+    }
     // Miniatura de la foto del perro: solo una imagen embebida, nada más.
     if (col === "fotos" && body.miniatura && !/^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/.test(String(body.miniatura))) {
       throw new HttpError(400, "La miniatura no es una imagen válida.");
+    }
+    // Paradas de rutas y plantillas: el perroId se usa como identificador en las páginas.
+    if ((col === "rutas" || col === "plantillas") && body.paradas !== undefined) {
+      const paradas = body.paradas;
+      const valida = (p) => p && typeof p === "object" && (p.perroId == null || PERRO_ID.test(String(p.perroId)));
+      if (!Array.isArray(paradas) || !paradas.every(valida)) throw new HttpError(400, "Las paradas tienen un perro no válido.");
     }
     if (!puedeEscribir(user.rol, col)) throw new HttpError(403, "Tu usuario no puede cargar estos datos.");
     if (body.fecha && !FECHA.test(body.fecha)) throw new HttpError(400, "Fecha no válida (AAAA-MM-DD).");
@@ -98,7 +222,8 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
 
     const ahora = new Date().toISOString();
     const previo = body.id ? await store.get(col, id) : null;
-    const datos = limpiar(body, coleccion(col).maxBytes);
+    const datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
+    // El acceso del cliente (enlace) solo se cambia por /api/clientes/acceso.
     if (col === "clientes") delete datos.acceso;
     const registro = {
       ...(previo || {}),
@@ -130,8 +255,18 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
   const id = params.get("id");
   if (!coleccion(col)) throw new HttpError(400, "Colección desconocida.");
   if (!id || !ID.test(id)) throw new HttpError(400, "Identificador no válido.");
+  // Contaduría: quien no la puede cargar ni siquiera se entera de si un movimiento existe.
+  if (col === "movimientos" && !puedeEscribir(user.rol, col)) {
+    throw new HttpError(403, "Tu usuario no puede borrar estos datos.");
+  }
   const previo = await store.get(col, id);
   if (!previo) return send(res, 200, { ok: true, borrado: false });
+  // Los archivos los borra solo el admin (lo guardado en Drive o Vercel no se borra desde acá).
+  if (col === "archivos" && user.rol !== "admin") throw new HttpError(403, "Los archivos los borra solo el admin.");
+  // Un pedido de cambio ya aplicado o rechazado queda como registro: solo el admin lo borra.
+  if (col === "solicitudes" && user.rol !== "admin" && (previo.estado || "pendiente") !== "pendiente") {
+    throw new HttpError(403, "Ese pedido ya se respondió: no se puede borrar.");
+  }
   const esDueno = previo.creadoPor === user.usuario && Date.now() - Date.parse(previo.creadoEn) < 24 * 3600 * 1000;
   if (user.rol !== "admin" && !(esDueno && puedeEscribir(user.rol, col))) {
     throw new HttpError(403, "Solo el admin, o quien lo cargó en las últimas 24 horas, puede borrarlo.");

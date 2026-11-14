@@ -33,7 +33,9 @@ export async function guardarArchivo({ archivo, tipo, perroId, perroNombre, clie
   if (buffer.length > MAX_BYTES) throw new HttpError(413, "El archivo es muy pesado (máximo 3,5 MB). Probá con una foto más chica.");
   if (!FIRMAS[mime](buffer)) throw new HttpError(400, "El archivo no coincide con su tipo. Mandá una foto o un PDF.");
 
-  const tipoOk = Object.prototype.hasOwnProperty.call(TIPOS, tipo) ? tipo : "documento";
+  // Tipo desconocido: se rechaza (no se convierte a "documento").
+  if (!Object.prototype.hasOwnProperty.call(TIPOS, tipo)) throw new HttpError(400, "Tipo de archivo no válido.");
+  const tipoOk = tipo;
   const fecha = new Date().toISOString().slice(0, 10);
   const id = `${fecha}_${Date.now().toString(36)}_${randomBytes(3).toString("hex")}`;
   const etiqueta = limpiarTexto(perroNombre || clienteId || pedidoId || "sin-nombre", 40).replace(/\s+/g, "-");

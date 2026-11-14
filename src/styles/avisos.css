@@ -1,0 +1,107 @@
+/* Avisos con "Visto" y dictado por voz (paseador y ayudante).
+   Rojo: ya pasó algo. Azul: alerta preventiva. */
+.pw-notice {
+  position: relative;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 16px 16px 18px;
+  border-radius: 24px;
+  border-left: 6px solid #2563eb;
+}
+
+.pw-notice--danger {
+  border-left-color: #dc2626;
+}
+
+.pw-notice-num {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.pw-notice--danger .pw-notice-num {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.pw-notice > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.pw-notice-btn {
+  flex: none;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 16px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.85rem;
+  background: rgba(100, 116, 139, 0.16);
+  color: inherit;
+  cursor: pointer;
+}
+
+.pw-notice-seen {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.pw-notice.is-seen {
+  opacity: 0.6;
+}
+
+.pw-voice-btn.is-on {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+html[data-theme="dark"] .pw-notice-num {
+  background: rgba(96, 165, 250, 0.22);
+  color: #bfdbfe;
+}
+
+html[data-theme="dark"] .pw-notice--danger .pw-notice-num {
+  background: rgba(248, 113, 113, 0.22);
+  color: #fecaca;
+}
+
+.pw-notice--info {
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+html[data-theme="dark"] .pw-notice--info {
+  background: rgba(37, 99, 235, 0.16);
+  color: #dbeafe;
+}
+
+/* Iconos limpios dentro de etiquetas (reemplazan emojis) */
+.pill-icon {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 0.4em;
+  vertical-align: -0.2em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
