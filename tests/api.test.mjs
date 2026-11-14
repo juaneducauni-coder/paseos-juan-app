@@ -1030,3 +1030,29 @@ test("mensaje escrito sin señal: el reintento no se duplica y guarda la hora en
   assert.equal(viejo.body.mensaje.escritoEn, undefined);
 });
 
+test("coordinación inmediata: incidente avisa en Calle y pedido de cambio en Coordinación", async () => {
+  const hoy = hoyAR();
+  const avisosCalle = async () => (await call("mensajes", { url: "/?canal=calle", token: admin })).body.mensajes.filter((m) => m.automatico && /Incidente/.test(m.texto));
+  const avisosCoord = async () => (await call("mensajes", { url: "/?canal=coordinacion", token: admin })).body.mensajes.filter((m) => m.automatico);
+  const antesCalle = (await avisosCalle()).length;
+  const antesCoord = (await avisosCoord()).length;
+  const inc = await call("registros", { method: "POST", token: supMsj, body: { col: "incidentes", fecha: hoy, perroNombre: "Pistacho<script>", tipos: ["Perro suelto"], riesgo: "Alto" } });
+  assert.equal(inc.status, 201);
+  const calle = await avisosCalle();
+  assert.equal(calle.length, antesCalle + 1);
+  assert.match(calle[calle.length - 1].texto, /^URGENTE · Incidente con Pistacho: Perro suelto · riesgo alto\./);
+  assert.equal(calle[calle.length - 1].texto.includes("<"), false);
+  // Suma "sin leer" para el resto del equipo.
+  const res = (await call("mensajes", { url: "/?resumen=1", token: admin })).body.canales.find((c) => c.canal === "calle");
+  assert.ok(res.sinLeer >= 1);
+  // Editar el incidente no repite el aviso.
+  await call("registros", { method: "POST", token: supMsj, body: { col: "incidentes", id: inc.body.registro.id, fecha: hoy, riesgo: "Alto", detalle: "más datos" } });
+  assert.equal((await avisosCalle()).length, antesCalle + 1);
+
+  const ped = await call("registros", { method: "POST", token: supMsj, body: { col: "solicitudes", fecha: hoy, titulo: "No sale · Sam · Ruta 1", tipo: "no sale", urgente: true } });
+  assert.equal(ped.status, 201);
+  const coord = await avisosCoord();
+  assert.equal(coord.length, antesCoord + 1);
+  assert.match(coord[coord.length - 1].texto, /^URGENTE · Pedido de cambio de .+: No sale · Sam · Ruta 1\./);
+});
+

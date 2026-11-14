@@ -60,3 +60,9 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - Mensajes: con más de 2000 en un canal (almacenamiento provisorio) se leen los días más recientes.
 - Probado en el navegador sin señal y con señal: llegó una vez, con la hora correcta.
 - Para que Juan confirme: un mensaje que pasa más de 3 horas sin salir ya no se manda solo (para que un "Perro suelto" viejo no confunda).
+
+## 14/11/2026 — 01:36 (revisión de cada hora)
+
+- Todo integrado; 43 pruebas del servidor OK, armado OK, recorrido sin fallas.
+- **Coordinación inmediata (pedido de Juan):** un incidente nuevo avisa solo en el chat "Calle" (paseadores, ayudantes, supervisores, coordinador y admin), con "URGENTE" si el riesgo es alto; un pedido de cambio nuevo del supervisor avisa solo en "Coordinación". Cuentan como "sin leer". Editar el registro no repite el aviso.
+- Sigue: revisión con capturas de los chats con estos avisos y repaso de textos del manual.

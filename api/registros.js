@@ -7,7 +7,7 @@ import { handler, send, readJson, query, HttpError } from "./_lib/http.js";
 import { requireUser, perrosDeCliente } from "./_lib/auth.js";
 import { store } from "./_lib/store.js";
 import { coleccion, puedeLeer, puedeEscribir, puedeVerArchivo, CLIENTE_LEE, CAMPOS_CLIENTE, AJUSTES_CLIENTE } from "./_lib/permisos.js";
-import { avisosDePaseo } from "./_lib/mensajes.js";
+import { avisosDePaseo, publicar, limpiarTextoMensaje } from "./_lib/mensajes.js";
 import { sinHash, validarPerros } from "./_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,100}$/i;
@@ -281,6 +281,16 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
       }
     }
     await store.put(col, registro);
+    // Coordinación inmediata: un incidente nuevo avisa en el chat "Calle" (paseadores, ayudantes,
+    // supervisores, coordinador y admin) y un pedido de cambio nuevo avisa en "Coordinación".
+    // Si el aviso falla, el registro ya quedó guardado.
+    if (!previo && (col === "incidentes" || col === "solicitudes")) {
+      try {
+        await avisoAlEquipo(col, registro, user);
+      } catch (error) {
+        console.error("[registros] no se pudo avisar al equipo", error);
+      }
+    }
     return send(res, previo ? 200 : 201, { ok: true, registro: col === "clientes" ? sinHashDeAcceso(registro) : registro });
   }
 
@@ -308,3 +318,21 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
   await store.remove(col, id);
   return send(res, 200, { ok: true, borrado: true });
 });
+
+// Texto corto y armado en el servidor (los campos se limpian: sin HTML y con largo máximo).
+async function avisoAlEquipo(col, registro, user) {
+  const corto = (valor, max) => limpiarTextoMensaje(Array.isArray(valor) ? valor.join(", ") : valor).slice(0, max);
+  if (col === "incidentes") {
+    const perro = corto(registro.perroNombre, 80);
+    const tipos = corto(registro.tipos || registro.tipo, 120);
+    const riesgo = corto(registro.riesgo, 20).toLowerCase();
+    const urgente = /alto/.test(riesgo) ? "URGENTE · " : "";
+    const texto = `${urgente}Incidente${perro ? ` con ${perro}` : ""}${tipos ? `: ${tipos}` : ""}${riesgo ? ` · riesgo ${riesgo}` : ""}. Lo reportó ${user.nombre}. El detalle está en Incidentes.`;
+    await publicar({ canal: "calle", texto, tipo: "aviso", autor: user, automatico: true, clave: `incidente:${registro.id}` });
+    return;
+  }
+  const titulo = corto(registro.titulo || registro.tipo, 160);
+  const texto = `${registro.urgente ? "URGENTE · " : ""}Pedido de cambio de ${user.nombre}: ${titulo || "ver detalle"}. Respondelo en Pedidos.`;
+  await publicar({ canal: "coordinacion", texto, tipo: "aviso", autor: user, automatico: true, clave: `solicitud:${registro.id}` });
+}
+

@@ -40,8 +40,9 @@ async function lecturasDe(user) {
 }
 
 function contarSinLeer(lista, user, leidoHasta) {
-  // Los avisos automáticos son para el cliente: al equipo no le suman "sin leer".
-  return lista.filter((m) => !m.borrado && m.autor !== user.usuario && !(m.automatico && user.rol !== "cliente")
+  // Los avisos automáticos del chat de un cliente son para el cliente: al equipo no le suman "sin leer".
+  // Los de los grupos del equipo (incidente, pedido de cambio) sí suman.
+  return lista.filter((m) => !m.borrado && m.autor !== user.usuario && !(m.automatico && user.rol !== "cliente" && String(m.canal).startsWith("cliente_"))
     && (!leidoHasta || String(m.creadoEn) > leidoHasta)).length;
 }
 
