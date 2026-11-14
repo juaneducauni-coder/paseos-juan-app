@@ -42,9 +42,16 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 | Tarea | IA | Estado |
 |---|---|---|
 | E-040 Arreglos chicos de paseador, ayudante y admin | Claude | A MEDIAS: se cortó la sesión; revisar qué quedó |
-| E-029 Investigación: chats de las IAs, Drive, tienda importada, diseño profesional | Claude | EN CURSO |
+| E-029 Investigación: chats de las IAs, Drive, tienda importada, diseño profesional | Claude | HECHO (`asistente/investigacion/2026-11-14-investigacion.md`) |
 | E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | SERVIDOR Y `client.js` LISTOS (falta integrar): faltan las pantallas de chat, la de aprobar altas en el admin y el alias en el panel. Contrato en `docs/datos-compartidos.md` |
-| (Gemini: anotá acá lo que estás haciendo) | Gemini | — |
+| E-046 Manual con historias ilustradas | Claude | EN CURSO |
+| E-047 Pantalla de chats del equipo | Claude | EN CURSO |
+| E-048 Admin: altas de clientes, alias y moderación | Claude | EN CURSO |
+| E-049 Página del cliente con datos reales | Claude | EN CURSO |
+| E-050 Auditoría visual con capturas | Gemini | PARA TOMAR (encargo en `asistente/encargos/2026-11-14-gemini-chatgpt.md`) |
+| E-051 Ilustraciones vectoriales (manual y estaciones) | Gemini | PARA TOMAR |
+| E-052 Borrador de términos y privacidad (P-05) | ChatGPT | PARA TOMAR |
+| E-053 Textos cortos para avisos y WhatsApp | ChatGPT | PARA TOMAR |
 
 ## Por hacer (del Plan maestro)
 
