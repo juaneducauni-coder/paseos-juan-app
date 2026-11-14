@@ -2329,3 +2329,107 @@ html[data-motion="calm"] .coord-shell *::after {
 .cd-chips:empty {
   display: none;
 }
+
+/* ---------- E-055: arreglos de la auditoría en celular ---------- */
+
+/* Rutas de la planilla sin cargar: de solo lectura, con «Editar» grande. */
+.cd-base {
+  display: grid;
+  gap: 10px;
+}
+
+.cd-base-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.05rem;
+}
+
+.cd-route.is-base,
+.cd-wroute.is-base {
+  border-style: dashed;
+  cursor: default;
+}
+
+.cd-wroute.is-base .coord-btn {
+  margin-top: 2px;
+}
+
+/* Días con el nombre completo: los chips bajan de renglón en vez de cortarse. */
+.cd-daypick .cd-pill,
+.cd-chiprow .cd-pill {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+.cd-route-top,
+.cd-wroute-top,
+.cd-wday-title {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Buscador de clientes: texto visible arriba y «Buscar» adentro (no se corta). */
+.coord-shell .cd-search-label {
+  margin-bottom: -10px;
+}
+
+/* Barra de guardado del editor, en un solo renglón: [Solo hoy | Toda la semana] [Guardar]. */
+.cd-savebar.is-compact {
+  gap: 8px;
+  padding: 8px var(--gutter-mobile, 20px) calc(8px + var(--safe-b));
+}
+
+.cd-savebar-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.cd-savebar.is-compact .cd-switch {
+  gap: 4px;
+  padding: 3px;
+}
+
+.cd-savebar.is-compact .cd-switch-btn {
+  min-height: 48px;
+  font-size: 0.92rem;
+  line-height: 1.15;
+  padding: 4px 6px;
+}
+
+.cd-savebar-line > .coord-btn {
+  min-height: 54px;
+  padding: 10px 16px;
+  font-size: 1.05rem;
+}
+
+.coord-main.has-savebar:has(.cd-savebar.is-compact) {
+  padding-bottom: calc(100px + var(--safe-b));
+}
+
+.coord-main.has-savebar:has(.cd-savebar-select) {
+  padding-bottom: calc(150px + var(--safe-b));
+}
+
+.coord-main.has-savebar:has(.cd-savebar.is-compact) ~ .cd-toast {
+  bottom: calc(84px + var(--safe-b));
+}
+
+.coord-main.has-savebar:has(.cd-savebar-select) ~ .cd-toast {
+  bottom: calc(140px + var(--safe-b));
+}
+
+/* Minutos de la parada con la palabra completa: dos por renglón. */
+.cd-min-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cd-min-row .cd-pill {
+  justify-content: center;
+  padding: 8px 10px;
+  text-align: center;
+}

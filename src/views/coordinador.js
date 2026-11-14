@@ -27,7 +27,7 @@ import {
   plantillasDesdePlanilla,
   sumarMinutos,
 } from "../data/realData.js";
-import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros, usuarios } from "../api/client.js";
+import { session, registros, onDataChange, hoyAR, archivos as archivosApi, fotosPerros, usuarios, mensajes } from "../api/client.js";
 import { icon, changeHandlers, clickHandlers } from "../ui/shared.js";
 import { render } from "../app.js";
 import { pestanaMensajes } from "./mensajes.js";
@@ -207,13 +207,12 @@ function listJoin(items) {
   return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
 }
 
-const DAY_SHORT = { Lunes: "lun", Martes: "mar", Miércoles: "mié", Jueves: "jue", Viernes: "vie", Sábado: "sáb", Domingo: "dom" };
-
+// Días siempre con el nombre completo (sin abreviar).
 function daysLabel(days) {
   if (!days?.length) return "Sin días";
   const work = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"];
-  if (work.every((d) => days.includes(d))) return days.includes("Sábado") ? "Lun a sáb" : "Lun a vie";
-  return days.map((d) => DAY_SHORT[d] || d).join(", ");
+  if (work.every((d) => days.includes(d))) return days.includes("Sábado") ? "Lunes a sábado" : "Lunes a viernes";
+  return listJoin(days);
 }
 
 function scheduleLabel(dog) {
@@ -296,12 +295,56 @@ function hasMuzzle(dog) {
   return Boolean(dog?.safety?.some((note) => /bozal/i.test(note)));
 }
 
+// Equipo para elegir en el editor: la lista fija TEAM (respaldo) + los usuarios activos del equipo
+// que da el servidor (mensajes.contactos(): { usuario, nombre, rol }). Nunca clientes ni marketing.
+const ROLES_FUERA = new Set(["cliente", "marketing"]);
+let contactos = null;
+let contactosPedidos = false;
+
+function ensureContactos() {
+  if (contactosPedidos) return;
+  contactosPedidos = true;
+  mensajes
+    .contactos()
+    .then((lista) => {
+      contactos = (Array.isArray(lista) ? lista : []).filter((c) => c?.usuario && c.nombre && !ROLES_FUERA.has(normalize(c.rol)) && !String(c.usuario).startsWith("cliente:"));
+      scheduleRerender();
+    })
+    .catch(() => {
+      // Sin lista del servidor: queda TEAM. Se vuelve a pedir al abrir otra ruta.
+      contactosPedidos = false;
+    });
+}
+
+// [{ id, name }] sin repetir (por usuario).
+function equipoElegible() {
+  const out = [];
+  const seen = new Set();
+  const push = (id, name) => {
+    const key = normalize(id);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push({ id: key, name: String(name || id) });
+  };
+  TEAM.filter((t) => !ROLES_FUERA.has(t.role)).forEach((t) => push(t.id, t.name));
+  const yo = session.user();
+  const extra = [...(contactos || [])];
+  if (yo?.usuario && yo.nombre && !ROLES_FUERA.has(normalize(yo.rol))) extra.push(yo);
+  extra
+    .slice()
+    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), "es"))
+    .forEach((c) => push(c.usuario, c.nombre));
+  return out;
+}
+
 // Nombre para mostrar de un usuario o nombre del equipo autorizado.
 function personName(value) {
   if (!value) return "";
   const n = normalize(value);
   const member = TEAM.find((t) => t.id === n || normalize(t.name) === n || normalize(t.name.split(" ")[0]) === n);
-  return member ? member.name : value;
+  if (member) return member.name;
+  const contacto = (contactos || []).find((c) => normalize(c.usuario) === n);
+  return contacto ? String(contacto.nombre) : value;
 }
 
 // Nombre de la persona para guardar en la ruta (paseadorNombre / ayudanteNombre): así paseador y
@@ -324,6 +367,8 @@ function knownName(usuario, previos = {}) {
   const member = TEAM.find((t) => t.id === n || normalize(t.name) === n);
   if (member) return member.name;
   if (userNames?.get(n)) return userNames.get(n);
+  const contacto = (contactos || []).find((c) => normalize(c.usuario) === n);
+  if (contacto) return String(contacto.nombre);
   if (previos[n]) return previos[n];
   for (const col of COL_NAMES) {
     for (const r of cached(col)) {
@@ -693,6 +738,32 @@ function plantillasDe(dia) {
   return getPlantillas().filter((p) => p.dia === dia).sort(byRouteOrder);
 }
 
+// Rutas de la planilla base (RUTAS_BASE) que todavía no están guardadas en el servidor.
+// Se muestran de solo lectura con «Editar»: al tocarlo se guarda esa ruta sola y se abre el editor.
+let planillaBase = null;
+
+function rutasPlanilla() {
+  if (!planillaBase) planillaBase = plantillasDesdePlanilla();
+  return planillaBase;
+}
+
+function baseFaltantes() {
+  const guardadas = new Set(getPlantillas().map((p) => plantillaId(p.ruta, p.dia)));
+  return rutasPlanilla().filter((p) => !guardadas.has(plantillaId(p.ruta, p.dia)));
+}
+
+function baseDe(dia) {
+  return baseFaltantes().filter((p) => p.dia === dia).sort(byRouteOrder);
+}
+
+// De un día puntual: sin las que ese día ya tienen ruta (de la semana o un cambio del día).
+function baseDelDia(fecha, routes = effectiveRoutes(fecha)) {
+  const usadas = new Set(routes.map((r) => r.ruta));
+  return baseDe(dayNameISO(fecha)).filter((p) => !usadas.has(p.ruta));
+}
+
+let baseGuardando = "";
+
 // Ruta efectiva de un día: el cambio del día si existe; si no, la plantilla de ese día de la semana.
 function effectiveRoutes(fecha) {
   const dia = dayNameISO(fecha);
@@ -811,7 +882,7 @@ function routeText(route, { fecha } = {}) {
     const extra = [];
     if (stop.nota) extra.push(stop.nota);
     if (hasMuzzle(dog) && !/bozal/i.test(stop.nota || "")) extra.push("Usa bozal");
-    lines.push(`${i + 1}) ${padHora(stop.hora) || "sin hora"} ${stop.perroNombre || dog?.name || PENDIENTE} · ${Number(stop.minutos) || 45} min${extra.length ? ` · ${extra.join(" · ")}` : ""}`);
+    lines.push(`${i + 1}) ${padHora(stop.hora) || "sin hora"} ${stop.perroNombre || dog?.name || PENDIENTE} · ${Number(stop.minutos) || 45} minutos${extra.length ? ` · ${extra.join(" · ")}` : ""}`);
   });
   if (!stops.length) lines.push("Sin perros cargados.");
   if (route.notas) lines.push(`Notas: ${route.notas}`);
@@ -855,6 +926,7 @@ function cleanStops(paradas) {
 
 function openEditor(route, { modo, fecha = "", nuevo = false, solicitud = null } = {}) {
   ensureUserNames();
+  ensureContactos();
   // Nombres que ya tenía guardados la ruta (se mantienen si sigue la misma persona).
   const previos = {};
   if (route.paseador && route.paseadorNombre) previos[normalize(route.paseador)] = String(route.paseadorNombre);
@@ -1547,7 +1619,7 @@ function daysField(form, days) {
       <span class="coord-label" id="coord-${form}-dias-label">Días</span>
       <div class="cd-chiprow" role="group" aria-labelledby="coord-${form}-dias-label">
         ${SERVICE_DAYS.map((day) => `
-          <label class="cd-pill is-check"><input type="checkbox" id="coord-${form}-dia-${slugDia(day)}" name="dias" value="${day}" ${days.includes(day) ? "checked" : ""} /><span>${DAY_SHORT[day]}</span><span class="coord-sr-only"> ${day}</span></label>
+          <label class="cd-pill is-check"><input type="checkbox" id="coord-${form}-dia-${slugDia(day)}" name="dias" value="${day}" ${days.includes(day) ? "checked" : ""} /><span>${day}</span></label>
         `).join("")}
       </div>
     </div>
@@ -1689,9 +1761,9 @@ function DocumentosCliente(c) {
   `;
 }
 
-const TEAM_DATALIST = `
-  <datalist id="coord-team-users">${TEAM.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")}</datalist>
-`;
+function teamDatalist() {
+  return `<datalist id="coord-team-users">${equipoElegible().map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")}</datalist>`;
+}
 
 /* ------------------------------------------------------------------ */
 /* Página                                                              */
@@ -1754,7 +1826,7 @@ export function coordinatorDashboard() {
     <main class="coord-main ${full ? "has-savebar" : "has-tabbar"}" id="coord-main" tabindex="-1">
       ${SyncStrip()}
       ${main}
-      ${TEAM_DATALIST}
+      ${teamDatalist()}
     </main>
     ${full ? "" : TabBar()}
     ${Toast()}
@@ -1852,7 +1924,7 @@ function InicioView() {
     <section class="cd-sec" aria-labelledby="coord-inicio-rutas">
       <div class="cd-h2-row">
         <h2 class="cd-h2" id="coord-inicio-rutas">Rutas de hoy</h2>
-        ${sinRutas || cargaProgreso ? "" : button("Semana", `data-coord-go-rutas="semana"`, "ghost", "calendarCheck")}
+        ${cargaProgreso ? "" : button("Semana", `data-coord-go-rutas="semana"`, "ghost", "calendarCheck")}
       </div>
       ${RoutesList(hoy)}
     </section>
@@ -1943,21 +2015,60 @@ function RouteCard(r, fecha, { detalle = false, filtro = false } = {}) {
   `;
 }
 
+// Rutas del día: las guardadas y, debajo, las de la planilla que faltan cargar (de solo lectura).
 function RoutesList(fecha, { detalle = false, filtro = false } = {}) {
   const plantillas = getPlantillas();
   if (!loaded.has("plantillas") && !plantillas.length) return emptyState("Cargando rutas…", "clock");
-  // Sin rutas: se cargan ahí mismo (Cargar rutas → Sí, cargar), también desde Inicio.
-  if ((!plantillas.length && !getRutasDia().length) || cargaProgreso) return CargaPlanilla();
   const routes = effectiveRoutes(fecha);
-  if (!routes.length) return emptyState("No hay rutas este día.", "route");
-  return `<ul class="cd-list">${routes.map((r) => RouteCard(r, fecha, { detalle, filtro })).join("")}</ul>`;
+  const base = cargaProgreso ? [] : baseDelDia(fecha, routes);
+  if (!routes.length && !base.length && !cargaProgreso) return emptyState("No hay rutas este día.", "route");
+  return `
+    ${routes.length ? `<ul class="cd-list">${routes.map((r) => RouteCard(r, fecha, { detalle, filtro })).join("")}</ul>` : ""}
+    ${base.length ? BaseSection(base, fecha, { detalle }) : ""}
+    ${base.length || cargaProgreso ? CargaTodas() : ""}
+  `;
+}
+
+// Ruta de la planilla sin cargar: se ve igual que una ruta, pero solo tiene «Editar».
+function BaseCard(p, fecha, { detalle = false } = {}) {
+  const stops = sortedStops(p);
+  const n = stops.length;
+  return `
+    <li class="cd-card cd-route is-base">
+      <div class="cd-route-top">
+        <strong class="cd-route-code">${esc(p.ruta)}</strong>
+        ${chip(esc(p.turno), "info")}
+        ${chip("Sin cargar", "neutral")}
+      </div>
+      <p class="cd-route-time">${esc(routeSpan(p))}</p>
+      <p class="cd-route-meta">${ic("users")}<span>Sin paseador · ${n} ${n === 1 ? "perro" : "perros"}</span></p>
+      ${Thumbs(stops)}
+      ${detalle ? cardMore(`base-${fecha}-${p.id}`, "Paradas", `<ol class="cd-minis">${stops.map((s) => MiniStop(s, false)).join("")}</ol>`) : ""}
+      ${BaseEditButton(p, fecha)}
+    </li>
+  `;
+}
+
+function BaseEditButton(p, fecha) {
+  const guardando = baseGuardando === p.id;
+  const donde = fecha ? `el ${shortDay(fecha).toLowerCase()}` : `los ${p.dia.toLowerCase()}`;
+  return `<button type="button" class="coord-btn is-primary is-block is-big" id="coord-base-${esc(p.id)}${fecha ? `-${fecha}` : ""}" data-coord-edit-base="${esc(p.id)}" data-fecha="${fecha}" ${guardando ? 'aria-disabled="true"' : ""} aria-label="Editar ${esc(p.ruta)} ${esc(p.turno.toLowerCase())}, ${donde}">${ic(guardando ? "clock" : "sliders")}<span>${guardando ? "Cargando…" : "Editar"}</span></button>`;
+}
+
+function BaseSection(base, fecha, { detalle = false } = {}) {
+  return `
+    <div class="cd-base">
+      <p class="cd-base-head">${ic("fileText")}<span><b>De la planilla</b> · ${base.length} sin cargar</span></p>
+      <p class="cd-muted">Tocá «Editar»: la ruta se carga y la podés cambiar.</p>
+      <ul class="cd-list">${base.map((p) => BaseCard(p, fecha, { detalle })).join("")}</ul>
+    </div>
+  `;
 }
 
 function RutasView() {
   const plantillas = getPlantillas();
   const head = `<div class="cd-viewhead"><h1 id="coord-view-title" tabindex="-1">Rutas</h1></div>`;
   if (!loaded.has("plantillas") && !plantillas.length) return `${head}${emptyState("Cargando rutas…", "clock")}`;
-  if (!plantillas.length || cargaProgreso) return `${head}${CargaPlanilla()}`;
   const vista = rutasVista();
   return `
     ${head}
@@ -1969,37 +2080,39 @@ function RutasView() {
   `;
 }
 
-function CargaPlanilla() {
-  const base = plantillasDesdePlanilla();
-  const paseos = base.reduce((sum, p) => sum + p.paradas.length, 0);
+// Acción secundaria: cargar de una vez las rutas de la planilla que faltan (no pisa las guardadas).
+function CargaTodas() {
+  const faltan = baseFaltantes();
+  if (!faltan.length && !cargaProgreso) return "";
+  const paseos = faltan.reduce((sum, p) => sum + p.paradas.length, 0);
   return `
     <div class="cd-card cd-carga">
-      <p class="cd-big">${ic("uploadCloud")}<span><b>${base.length} rutas</b> · ${paseos} paseos</span></p>
-      <p class="cd-muted">Desde la planilla de rutas (${esc(DATA_UPDATED)})</p>
+      <p class="cd-muted">Planilla de rutas (${esc(DATA_UPDATED)}): faltan ${faltan.length} de ${rutasPlanilla().length} rutas · ${paseos} paseos.</p>
       ${fold("carga-falta", `${ic("help")}<span>1 perro sin cargar</span>`, `<p class="cd-foot">«Llak» (jueves tarde): el nombre no coincide con ningún perro. Pendiente de confirmar.</p>`)}
-      ${cargaProgreso ? `<p class="cd-note" role="status">${ic("clock")}<span>${esc(cargaProgreso)}</span></p>` : ""}
-      ${cargaConfirm ? `
+      ${cargaProgreso ? `<p class="cd-note" role="status">${ic("clock")}<span>${esc(cargaProgreso)}</span></p>` : cargaConfirm ? `
         <div class="cd-confirm" role="group" aria-labelledby="coord-carga-q">
-          <p id="coord-carga-q"><b>¿Cargar las ${base.length} rutas de la planilla?</b> Las ve todo el equipo.</p>
+          <p id="coord-carga-q"><b>¿Cargar las ${faltan.length} rutas que faltan?</b> Las ve todo el equipo. Las que ya cargaste no cambian.</p>
           <div class="cd-actions">
             ${button("Sí, cargar", `id="coord-carga-ok" data-coord-carga-ok`, "primary", "checkCircle")}
             ${button("Cancelar", `id="coord-carga-cancel" data-coord-carga-cancel`, "ghost")}
           </div>
         </div>`
-        : button("Cargar rutas", `id="coord-carga" data-coord-carga`, "primary", "uploadCloud")}
+        : button(`Cargar todas (${faltan.length})`, `id="coord-carga" data-coord-carga`, "secondary", "uploadCloud")}
     </div>
   `;
 }
 
+// "Domingo 15/11" (nombre completo del día, sin el año).
 function shortDay(iso) {
-  return `${DAY_SHORT[dayNameISO(iso)] || ""} ${fmtDate(iso).slice(0, 5)}`;
+  return `${dayNameISO(iso)} ${fmtDate(iso).slice(0, 5)}`;
 }
 
 function DayView() {
   const hoy = hoyAR();
   const fecha = currentRutasFecha();
   const routes = effectiveRoutes(fecha);
-  const total = routes.reduce((sum, r) => sum + (r.paradas || []).length, 0);
+  const shown = [...routes, ...(cargaProgreso ? [] : baseDelDia(fecha, routes))];
+  const total = shown.reduce((sum, r) => sum + (r.paradas || []).length, 0);
   const sinCarnet = new Set();
   routes.forEach((r) => (r.paradas || []).forEach((s) => {
     const dog = dogOf(s);
@@ -2012,7 +2125,7 @@ function DayView() {
       ${quick.map((iso, n) => `<button type="button" class="cd-pill" id="coord-dia-${n}" data-coord-ver-dia="${iso}" aria-pressed="${iso === fecha}">${n === 0 ? "Hoy" : esc(shortDay(iso))}</button>`).join("")}
       <label class="cd-pill is-date"><span class="coord-sr-only">Otro día</span>${ic("calendarCheck")}<input id="coord-rutas-fecha" type="date" value="${fecha}" min="${hoy}" max="${addDaysISO(hoy, 90)}" data-coord-rutas-fecha /></label>
     </div>
-    <p class="cd-dayline"><b>${esc(dayLabel(fecha))}</b> · ${routes.length} ${routes.length === 1 ? "ruta" : "rutas"} · ${total} perros</p>
+    <p class="cd-dayline"><b>${esc(dayLabel(fecha))}</b> · ${shown.length} ${shown.length === 1 ? "ruta" : "rutas"} · ${total} perros</p>
     ${routes.length ? `
       <div class="cd-chiprow">
         <button type="button" class="cd-pill" id="coord-filtro-carnet" data-coord-filtro-carnet aria-pressed="${filtro}">${ic("fileText", "coord-icon is-xs")}Sin carnet (${sinCarnet.size})</button>
@@ -2039,17 +2152,33 @@ function WeekRouteButton(p, dia, turno) {
   `;
 }
 
+// Ruta de la planilla sin cargar en la semana: de solo lectura, con «Editar».
+function WeekBaseItem(p) {
+  const n = (p.paradas || []).length;
+  return `
+    <li class="cd-wroute is-base">
+      <span class="cd-wroute-top"><strong>${esc(p.ruta)}</strong>${chip("Sin cargar", "neutral")}<span class="cd-wroute-n">${n} ${n === 1 ? "perro" : "perros"}</span></span>
+      <span class="cd-wroute-meta">${esc(routeSpan(p))} · Sin paseador</span>
+      ${Thumbs(sortedStops(p), 6)}
+      ${BaseEditButton(p, "")}
+    </li>
+  `;
+}
+
 function WeekView() {
   const plantillas = getPlantillas();
   const today = dayNameISO(hoyAR());
-  const days = plantillas.some((p) => p.dia === "Domingo") ? WEEK_DAYS : SERVICE_DAYS;
+  const faltan = cargaProgreso ? [] : baseFaltantes();
+  const days = [...plantillas, ...faltan].some((p) => p.dia === "Domingo") ? WEEK_DAYS : SERVICE_DAYS;
   return `
     <p class="cd-muted">Se repite cada semana.</p>
     <div class="cd-week">
       ${days.map((dia) => {
-        const del = plantillasDe(dia);
+        const guardadas = plantillasDe(dia);
+        const base = faltan.filter((p) => p.dia === dia).sort(byRouteOrder);
+        const del = [...guardadas, ...base];
         const perros = del.reduce((sum, p) => sum + p.paradas.length, 0);
-        const warns = del.reduce((sum, p) => sum + warningsForPlantilla(p).list.length, 0);
+        const warns = guardadas.reduce((sum, p) => sum + warningsForPlantilla(p).list.length, 0);
         return `
           <details class="cd-fold cd-wday ${dia === today ? "is-today" : ""}" ${isOpen(`wd-${slugDia(dia)}`, dia === today) ? "open" : ""}>
             <summary data-coord-toggle="wd-${slugDia(dia)}">
@@ -2059,11 +2188,12 @@ function WeekView() {
             </summary>
             <div class="cd-fold-body">
               ${SHIFT_LABELS.map((turno) => {
-                const routes = del.filter((p) => p.turno === turno);
+                const routes = guardadas.filter((p) => p.turno === turno);
+                const sinCargar = base.filter((p) => p.turno === turno);
                 return `
                   <div class="cd-wturno">
                     <p class="cd-wturno-label">${turno}</p>
-                    ${routes.length ? `<ul class="cd-wroutes">${routes.map((p) => WeekRouteButton(p, dia, turno)).join("")}</ul>` : ""}
+                    ${routes.length || sinCargar.length ? `<ul class="cd-wroutes">${routes.map((p) => WeekRouteButton(p, dia, turno)).join("")}${sinCargar.map((p) => WeekBaseItem(p)).join("")}</ul>` : ""}
                     <button type="button" class="cd-add-mini" id="coord-wadd-${slugDia(dia)}-${slugDia(turno)}" data-coord-new-route data-dia="${dia}" data-turno="${turno}">${ic("plus")}<span>Ruta</span><span class="coord-sr-only"> nueva el ${dia.toLowerCase()} a la ${turno.toLowerCase()}</span></button>
                   </div>
                 `;
@@ -2073,6 +2203,7 @@ function WeekView() {
         `;
       }).join("")}
     </div>
+    ${faltan.length || cargaProgreso ? CargaTodas() : ""}
   `;
 }
 
@@ -2119,15 +2250,15 @@ function StopCard(stop, index, warnings) {
         <button type="button" class="cd-icon-btn" id="coord-ed-up-${index}" data-coord-stop-up="${index}" ${index === 0 ? "disabled" : ""} aria-label="Subir a ${esc(name)}">${ic("arrowUp")}</button>
         <button type="button" class="cd-icon-btn" id="coord-ed-down-${index}" data-coord-stop-down="${index}" ${index === last ? "disabled" : ""} aria-label="Bajar a ${esc(name)}">${ic("arrowDown")}</button>
         <button type="button" class="cd-icon-btn is-danger" id="coord-ed-del-${index}" data-coord-stop-del="${index}" aria-label="Quitar a ${esc(name)}">${ic("x")}</button>
-        ${cardMore(memKey, `${Number(stop.minutos) || 45} min${stop.nota ? " · nota" : ""}`, `
+        ${cardMore(memKey, `${Number(stop.minutos) || 45} minutos${stop.nota ? " · nota" : ""}`, `
           ${warnList(msgs)}
-          <div class="cd-chiprow" role="group" aria-label="Minutos de ${esc(name)}">
-            ${[20, 30, 45, 60].map((m) => `<button type="button" class="cd-pill" id="coord-ed-min-${index}-${m}" data-coord-stop-min="${index}" data-value="${m}" aria-pressed="${(Number(stop.minutos) || 45) === m}">${m} min</button>`).join("")}
+          <div class="cd-chiprow cd-min-row" role="group" aria-label="Minutos de ${esc(name)}">
+            ${[20, 30, 45, 60].map((m) => `<button type="button" class="cd-pill" id="coord-ed-min-${index}-${m}" data-coord-stop-min="${index}" data-value="${m}" aria-pressed="${(Number(stop.minutos) || 45) === m}">${m} minutos</button>`).join("")}
           </div>
-          ${end ? `<p class="cd-muted">Vuelve ~${end}</p>` : ""}
+          ${end ? `<p class="cd-muted">Vuelve cerca de las ${end}</p>` : ""}
           <div class="coord-field">
             <label for="coord-ed-nota-${index}">Nota</label>
-            <input id="coord-ed-nota-${index}" type="text" value="${esc(stop.nota)}" data-coord-stop="${index}" data-k="nota" placeholder="Ej.: bozal" autocomplete="off" />
+            <input id="coord-ed-nota-${index}" type="text" value="${esc(stop.nota)}" data-coord-stop="${index}" data-k="nota" placeholder="Por ejemplo: bozal" autocomplete="off" />
           </div>
         `)}
       </div>
@@ -2136,7 +2267,16 @@ function StopCard(stop, index, warnings) {
 }
 
 function TeamChips(fieldName, label, current, { conNinguno = false, porNombre = false } = {}) {
-  const opts = TEAM.map((t) => [porNombre ? t.name.split(" ")[0] : t.id, t.name.split(" ")[0]]);
+  // Un chip por persona; si dos comparten el primer nombre, se muestra el nombre completo.
+  const lista = equipoElegible();
+  const primero = (t) => t.name.split(" ")[0];
+  const repetido = (t) => lista.filter((o) => normalize(primero(o)) === normalize(primero(t))).length > 1;
+  const opts = [];
+  lista.forEach((t) => {
+    const value = porNombre ? primero(t) : t.id;
+    if (opts.some(([v]) => normalize(v) === normalize(value))) return;
+    opts.push([value, !porNombre && repetido(t) ? t.name : primero(t)]);
+  });
   if (conNinguno) opts.unshift(["", "Ninguno"]);
   const known = opts.some(([value]) => normalize(value) === normalize(current));
   return `
@@ -2151,7 +2291,7 @@ function TeamChips(fieldName, label, current, { conNinguno = false, porNombre = 
 }
 
 function destinoLabel(e) {
-  if (e.modo === "dia") return e.fecha === hoyAR() ? "Solo hoy" : `Solo ${shortDay(e.fecha)}`;
+  if (e.modo === "dia") return e.fecha === hoyAR() ? "Solo hoy" : "Solo ese día";
   return "Solo un día";
 }
 
@@ -2162,7 +2302,7 @@ function RouteEditor() {
   const isPlantilla = e.modo === "plantilla";
   const fechas = isPlantilla ? nextDatesFor(e.dia) : [];
   const semana = e.destino === "semana";
-  const equipo = [firstName(e.paseador) || "Sin paseador", e.ayudante ? `+ ${firstName(e.ayudante)}` : "", e.supervisor ? `· sup. ${firstName(e.supervisor)}` : ""].filter(Boolean).join(" ");
+  const equipo = [firstName(e.paseador) || "Sin paseador", e.ayudante ? `+ ${firstName(e.ayudante)}` : "", e.supervisor ? `· Supervisa: ${firstName(e.supervisor)}` : ""].filter(Boolean).join(" ");
   return `
     <section class="cd-editor" id="coord-editor" aria-labelledby="coord-view-title">
       <div class="cd-subhead">
@@ -2217,7 +2357,7 @@ function RouteEditor() {
       ${fold("ed-mas", `${ic("menu")}<b>Más</b>`, `
         <div class="coord-field">
           <label for="coord-ed-notas">Notas de la ruta</label>
-          <textarea id="coord-ed-notas" rows="2" data-coord-ed-field="notas" placeholder="Ej.: arrancar por Mapuche">${esc(e.notas)}</textarea>
+          <textarea id="coord-ed-notas" rows="2" data-coord-ed-field="notas" placeholder="Por ejemplo: arrancar por Mapuche">${esc(e.notas)}</textarea>
         </div>
         <div class="cd-actions">
           ${button("Copiar", `id="coord-ed-copy" data-coord-ed-copy`, "ghost", "copy")}
@@ -2225,17 +2365,20 @@ function RouteEditor() {
         </div>
       `)}
 
-      <div class="cd-savebar">
-        <div class="cd-switch" role="radiogroup" aria-label="Guardar para">
-          <button type="button" role="radio" class="cd-switch-btn" id="coord-ed-destino-dia" data-coord-ed-destino="dia" aria-checked="${!semana}">${esc(destinoLabel(e))}</button>
-          <button type="button" role="radio" class="cd-switch-btn" id="coord-ed-destino-semana" data-coord-ed-destino="semana" aria-checked="${semana}">Toda la semana</button>
-        </div>
+      <div class="cd-savebar is-compact">
         ${isPlantilla && !semana ? `
           <label class="coord-sr-only" for="coord-ed-solodia">Qué día</label>
           <select id="coord-ed-solodia" class="cd-savebar-select" data-coord-ed-field="soloDia">
             ${fechas.map((f) => `<option value="${f}" ${f === e.soloDia ? "selected" : ""}>${esc(dayLabel(f))}${f === hoyAR() ? " (hoy)" : ""}${getRutasDia().some((r) => r.id === rutaDiaId(f, e.ruta)) ? " · se reemplaza" : ""}</option>`).join("")}
-          </select>` : `<p class="cd-savebar-hint">${semana ? `Cambia todos los ${esc(e.dia.toLowerCase())}.` : "La semana no cambia."}</p>`}
-        <button type="button" class="coord-btn is-primary is-block is-big" id="coord-ed-save" data-coord-ed-save>${ic("checkCircle")}<span>Guardar</span></button>
+          </select>` : ""}
+        <div class="cd-savebar-line">
+          <div class="cd-switch" role="radiogroup" aria-label="Guardar para">
+            <button type="button" role="radio" class="cd-switch-btn" id="coord-ed-destino-dia" data-coord-ed-destino="dia" aria-checked="${!semana}">${esc(destinoLabel(e))}</button>
+            <button type="button" role="radio" class="cd-switch-btn" id="coord-ed-destino-semana" data-coord-ed-destino="semana" aria-checked="${semana}">Toda la semana</button>
+          </div>
+          <p class="coord-sr-only" id="coord-ed-save-hint">${semana ? `Cambia todos los ${esc(e.dia.toLowerCase())}.` : "La semana no cambia."}</p>
+          <button type="button" class="coord-btn is-primary" id="coord-ed-save" data-coord-ed-save aria-describedby="coord-ed-save-hint">${ic("checkCircle")}<span>Guardar</span></button>
+        </div>
       </div>
     </section>
   `;
@@ -2318,7 +2461,7 @@ function DogPicker() {
 const RECHAZOS_RAPIDOS = [
   ["Sin lugar", "No hay lugar en la ruta ese día."],
   ["Ya estaba", "Ya estaba así en la ruta."],
-  ["Falta info", "Falta info: decime qué perro, qué día y a qué hora."],
+  ["Falta información", "Falta información: decime qué perro, qué día y a qué hora."],
   ["Lo hablo", "Lo hablo con Juan y te aviso."],
 ];
 
@@ -2355,7 +2498,7 @@ function SolicitudCard(s) {
           </div>
           <div class="coord-field">
             <label for="coord-rechazo-${id}">O escribí</label>
-            <textarea id="coord-rechazo-${id}" rows="2" data-coord-rechazo="${id}" placeholder="Ej.: lo pasamos al lunes">${esc(rechazos[s.id] || "")}</textarea>
+            <textarea id="coord-rechazo-${id}" rows="2" data-coord-rechazo="${id}" placeholder="Por ejemplo: lo pasamos al lunes">${esc(rechazos[s.id] || "")}</textarea>
           </div>
           <div class="cd-actions">
             ${button("Enviar", `id="coord-rechazar-ok-${id}" data-coord-sol-rechazar-ok="${id}"`, "primary", "send")}
@@ -2420,7 +2563,7 @@ function ClienteCard(c) {
         ${c.telefono ? whatsappLinkTo(c.telefono, `Hola ${c.nombre || ""}, te escribo de Paseos Juan.`.replace(" ,", ","), "whatsapp", "WhatsApp") : ""}
         ${button("Editar", `id="coord-cli-edit-${id}" data-coord-cliente-edit="${id}"`, "ghost", "sliders")}
       </div>
-      ${cardMore(`cli-${c.id}`, `Más datos · Docs (${docs})`, `
+      ${cardMore(`cli-${c.id}`, `Más datos · Documentos (${docs})`, `
         ${dataList([
           ["Teléfono", c.telefono],
           ["Plan", c.plan && c.plan !== PENDIENTE ? c.plan : ""],
@@ -2457,11 +2600,12 @@ function ClientesView() {
       <h1 id="coord-view-title" tabindex="-1">Clientes</h1>
       ${clientes.length ? chip(`${activos} ${activos === 1 ? "activo" : "activos"}`, "ok") : ""}
     </div>
+    <label class="coord-label cd-search-label" for="coord-clientes-buscar">Buscá por tutor, perro o barrio</label>
     <div class="cd-toolbar">
-      <label class="cd-search" for="coord-clientes-buscar">
-        ${ic("search")}<span class="coord-sr-only">Buscar cliente</span>
-        <input id="coord-clientes-buscar" type="search" value="${esc(clienteQuery)}" data-coord-clientes-buscar placeholder="Tutor, perro o barrio" autocomplete="off" aria-controls="coord-clientes-lista" />
-      </label>
+      <div class="cd-search">
+        ${ic("search")}
+        <input id="coord-clientes-buscar" type="search" value="${esc(clienteQuery)}" data-coord-clientes-buscar placeholder="Buscar" autocomplete="off" aria-controls="coord-clientes-lista" />
+      </div>
       ${button("Nuevo", `id="coord-cliente-new" data-coord-cliente-new`, "primary", "plus")}
     </div>
     <div id="coord-clientes-lista" aria-live="polite">${clientesListHTML()}</div>
@@ -2620,7 +2764,7 @@ function AvisoForm() {
         <input id="coord-aviso-barrio" name="barrio" type="text" value="${esc(draft.barrio || "")}" list="coord-barrios-aviso" autocomplete="off" />
         ${quickFill("coord-aviso-barrio", barriosConocidos().slice(0, 6).map((b) => [b, b]), draft.barrio)}
       </div>
-      ${textArea("aviso", "mensaje", "Qué pasa", { value: draft.mensaje, required: true, placeholder: "Ej.: corte en la entrada, usar la puerta 2" })}
+      ${textArea("aviso", "mensaje", "Qué pasa", { value: draft.mensaje, required: true, placeholder: "Por ejemplo: corte en la entrada, usar la puerta 2" })}
       <div class="coord-field">
         <label for="coord-aviso-vigenteHasta">Hasta</label>
         <input id="coord-aviso-vigenteHasta" name="vigenteHasta" type="date" value="${esc(hasta)}" min="${hoy}" />
@@ -2959,7 +3103,7 @@ function AltaForm() {
           ${draft.relatoTutor ? textArea("alta", "relatoTutor", "Lo que contó el tutor (no observado)", { value: draft.relatoTutor, attrs: "readonly" }) : ""}
           ${textArea("alta", "conPerros", "Con otros perros", { value: draft.conPerros })}
           ${textArea("alta", "conPersonas", "Con personas", { value: draft.conPersonas })}
-          ${textArea("alta", "estimulos", "Lo altera", { value: draft.estimulos, placeholder: "Ej.: motos, ruidos" })}
+          ${textArea("alta", "estimulos", "Lo altera", { value: draft.estimulos, placeholder: "Por ejemplo: motos, ruidos" })}
           ${field("alta", "noJuntar", "No juntar con", { value: draft.noJuntar, attrs: 'list="coord-dog-names" autocomplete="off"' })}
         </fieldset>
         <fieldset>
@@ -3185,7 +3329,7 @@ async function saveEditor() {
       focusById("coord-ed-solodia");
       return;
     }
-    saved = await guardar("rutas", { id: rutaDiaId(fecha, record.ruta), fecha, ...record, dia: dayNameISO(fecha), basadaEn: e.plantillaId || "" }, { ok: `${record.ruta}: guardada solo para el ${shortDay(fecha)}. La semana no cambió.` });
+    saved = await guardar("rutas", { id: rutaDiaId(fecha, record.ruta), fecha, ...record, dia: dayNameISO(fecha), basadaEn: e.plantillaId || "" }, { ok: `${record.ruta}: guardada solo para el ${shortDay(fecha).toLowerCase()}. La semana no cambió.` });
   }
   if (saved && e.solicitudId) {
     const sol = getSolicitudes().find((s) => s.id === e.solicitudId);
@@ -3461,7 +3605,8 @@ function handleCoordinadorClick(event) {
 
   if (t.closest("[data-coord-carga-ok]")) {
     run("carga", async () => {
-      const base = plantillasDesdePlanilla();
+      // Solo las que faltan: las rutas ya cargadas (y quizás cambiadas) no se pisan.
+      const base = baseFaltantes();
       let ok = 0;
       let pend = 0;
       let lastError = "";
@@ -3489,6 +3634,40 @@ function handleCoordinadorClick(event) {
       } else {
         scheduleRerender();
       }
+    });
+    return true;
+  }
+
+  // Ruta de la planilla sin cargar: se guarda esa sola y se abre el editor
+  // (desde un día: el editor de ese día; desde la semana: el de todas las semanas).
+  const editBase = t.closest("[data-coord-edit-base]");
+  if (editBase) {
+    const p = rutasPlanilla().find((x) => x.id === editBase.dataset.coordEditBase);
+    const fecha = isISODate(editBase.dataset.fecha) ? editBase.dataset.fecha : "";
+    if (!p || baseGuardando) return true;
+    const abrir = () => {
+      const plantilla = getPlantillas().find((x) => plantillaId(x.ruta, x.dia) === plantillaId(p.ruta, p.dia)) || p;
+      if (fecha) {
+        const r = effectiveRoutes(fecha).find((x) => x.ruta === p.ruta) || { ...plantilla, origen: "plantilla", plantillaId: plantilla.id };
+        openEditor(r, { modo: "dia", fecha });
+      } else {
+        openEditor(plantilla, { modo: "plantilla" });
+      }
+      showEditor();
+    };
+    if (getPlantillas().some((x) => plantillaId(x.ruta, x.dia) === plantillaId(p.ruta, p.dia))) {
+      abrir();
+      return true;
+    }
+    const focusId = editBase.id;
+    run(`base-${p.id}`, async () => {
+      baseGuardando = p.id;
+      render();
+      focusById(focusId);
+      const saved = await guardar("plantillas", p, { ok: `${p.ruta} cargada. Ya la ve el equipo.` });
+      baseGuardando = "";
+      if (saved && !editor) abrir();
+      else render();
     });
     return true;
   }
@@ -3542,7 +3721,7 @@ function handleCoordinadorClick(event) {
   if (copyDia) {
     const fecha = copyDia.dataset.coordCopyDia;
     const text = effectiveRoutes(fecha).map((r) => routeText(r, { fecha })).join("\n\n");
-    copyAndTell(text, "rutas", `Rutas del ${shortDay(fecha)} copiadas.`);
+    copyAndTell(text, "rutas", `Rutas del ${shortDay(fecha).toLowerCase()} copiadas.`);
     return true;
   }
 
@@ -3680,7 +3859,7 @@ function handleCoordinadorClick(event) {
     if (t.closest("[data-coord-ed-revert]")) {
       const record = editor.existeDia;
       run("editor-revert", async () => {
-        const ok = await borrar("rutas", record, { ok: `${record.ruta} del ${shortDay(record.fecha)}: igual que la semana.` });
+        const ok = await borrar("rutas", record, { ok: `${record.ruta} del ${shortDay(record.fecha).toLowerCase()}: igual que la semana.` });
         if (ok) {
           closeEditor();
           scheduleRerender();
