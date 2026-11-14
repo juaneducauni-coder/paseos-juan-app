@@ -10,10 +10,14 @@
 // El servidor decide qué canales ve cada rol: acá solo se muestra lo que trae el resumen (el
 // paseador y el ayudante no ven las conversaciones de los clientes).
 // Contrato: docs/datos-compartidos.md, "Chats y portal del cliente (E-045)".
-// Nada se guarda en el celular salvo lo que ya guarda src/api/client.js (caché de mensajes).
+// Sin señal (E-058): lo que no sale queda en el celular (src/api/client.js, pj_mensajes_pendientes),
+// se ve al final del chat como "Sin enviar" y se manda solo cuando vuelve la señal. Si es un aviso
+// urgente ("Necesito ayuda", "Perro suelto"), arriba aparece un aviso rojo con "Mandar por WhatsApp".
+// Nada más se guarda en el celular salvo lo que ya guarda src/api/client.js (caché de mensajes).
 import { icon, clickHandlers } from "../ui/shared.js";
 import { navigate, render } from "../app.js";
 import { session, mensajes, canalDirecto, onDataChange, archivos, homeFor, ROLE_LABELS } from "../api/client.js";
+import { BUSINESS_INFO } from "../data/realData.js";
 
 const TZ = "America/Argentina/Buenos_Aires";
 export const ROLES_MENSAJES = ["admin", "coordinador", "supervisor", "paseador", "ayudante"];
@@ -36,6 +40,11 @@ const RAPIDAS = [
   { texto: "Necesito ayuda", urgente: true },
   { texto: "Perro suelto", urgente: true },
 ];
+
+// Los urgentes se ven en rojo y, si no salen, muestran el aviso rojo de arriba.
+function esUrgente(texto) {
+  return RAPIDAS.some((r) => r.urgente && r.texto === String(texto || "").trim());
+}
 
 const EXTRA = {
   back: `<path d="M15 5 8 12l7 7" />`,
@@ -223,6 +232,8 @@ function prepararCanal(canal) {
   ui.errorChat = "";
   ui.errorEnvio = "";
   if (!canal) return;
+  // Al abrir un chat se manda lo que quedó sin señal.
+  mensajes.enviarPendientes();
   mensajes.list(canal)
     .then(() => {
       if (ui.canal !== canal) return;
@@ -283,6 +294,15 @@ function ListScreen() {
   const grupos = ORDEN_GRUPOS.map((c) => lista.find((i) => i.canal === c)).filter(Boolean);
   const directos = lista.filter((i) => i.tipo === "directo");
   const clientes = lista.filter((i) => i.tipo === "cliente");
+  // Un directo nuevo que todavía no salió (sin señal) no está en el resumen: se muestra igual.
+  if (lista.length) {
+    [...new Set(mensajes.pendientes().map((p) => p.canal))]
+      .filter((c) => c.startsWith("dm_") && !lista.some((i) => i.canal === c))
+      .forEach((c) => {
+        const info = infoCanal(c);
+        directos.push({ canal: c, tipo: "directo", titulo: info.titulo, con: info.con });
+      });
+  }
   const seccion = (titulo, items, vacio = "") => (items.length || vacio ? `
     <section class="msj-seccion" aria-labelledby="msj-s-${esc(titulo)}">
       <h2 id="msj-s-${esc(titulo)}">${esc(titulo)}</h2>
@@ -296,6 +316,7 @@ function ListScreen() {
     cuerpo = `<p class="msj-vacio" role="status">Cargando chats…</p>`;
   } else {
     cuerpo = `
+      ${BannerUrgente()}
       ${seccion("Grupos", grupos)}
       ${seccion("Directos", directos, "Todavía no tenés mensajes directos.")}
       ${seccion("Clientes", clientes)}
@@ -330,6 +351,19 @@ function vistaPrevia(item) {
   return `${primerNombre(u.autorNombre) || "Alguien"}: ${texto}`;
 }
 
+// "1 sin enviar" / "1 no se pudo enviar" en la fila del canal (no cuentan como sin leer).
+function SinEnviar(canal) {
+  const pend = mensajes.pendientes(canal);
+  if (!pend.length) return "";
+  const fallidos = pend.filter((p) => p.estado === "error").length;
+  const esperando = pend.length - fallidos;
+  const urgente = pend.some((p) => p.urgente || esUrgente(p.texto));
+  const partes = [];
+  if (esperando) partes.push(`${esperando} sin enviar`);
+  if (fallidos) partes.push(`${fallidos} ${fallidos === 1 ? "no se pudo enviar" : "no se pudieron enviar"}`);
+  return `<span class="msj-fila-pend ${fallidos || urgente ? "is-alerta" : ""}">${ic(fallidos || urgente ? "alertTriangle" : "clock", "msj-icon msj-icon--sm")}${esc(partes.join(" · "))}</span>`;
+}
+
 function Fila(item) {
   const n = item.sinLeer || 0;
   const cuando = item.ultimo?.creadoEn;
@@ -343,6 +377,7 @@ function Fila(item) {
             ${cuando ? `<time datetime="${esc(cuando)}">${esc(cuandoCorto(cuando))}</time>` : ""}
           </span>
           <span class="msj-fila-prev">${esc(vistaPrevia(item))}</span>
+          ${SinEnviar(item.canal)}
         </span>
         ${n ? `<b class="msj-insignia" aria-hidden="true">${n > 99 ? "99+" : n}</b><span class="msj-sr">, ${n} sin leer</span>` : ""}
       </a>
@@ -407,6 +442,7 @@ function ChatScreen(canal) {
   return `
     <div class="msj-shell msj-shell--chat" data-msj-screen="chat" data-msj-canal="${esc(canal)}">
       ${cabecera({ titulo: info.tipo === "comunidad" ? "Comunidad" : info.titulo, sub: info.sub, volver: "/mensajes", volverTexto: "Volver a mensajes" })}
+      <div class="msj-urgente-lugar" id="msj-urgente">${BannerUrgente()}</div>
       <main class="msj-chat" id="msj-chat">
         ${comunidad?.reglas?.length ? `
           <section class="msj-reglas" aria-label="Reglas de la comunidad">
@@ -434,9 +470,51 @@ function ChatScreen(canal) {
   `;
 }
 
+// Aviso rojo arriba del chat (y de la lista) si un aviso urgente mío no salió.
+// No hay teléfono del supervisor en el código: se ofrece el WhatsApp del negocio (BUSINESS_INFO).
+function BannerUrgente() {
+  const urgentes = mensajes.pendientes().filter((p) => p.urgente || esUrgente(p.texto));
+  if (!urgentes.length) return "";
+  const textos = [...new Set(urgentes.map((p) => p.texto))];
+  const quien = yo().nombre || yo().usuario || "";
+  const texto = `URGENTE: ${textos.join(". ")}.${quien ? ` Soy ${quien}.` : ""} Por el chat de la app no salió.`;
+  const href = `https://wa.me/${BUSINESS_INFO.whatsapp}?text=${encodeURIComponent(texto)}`;
+  const esperando = urgentes.some((p) => p.estado !== "error");
+  return `
+    <section class="msj-urgente" role="alert" aria-labelledby="msj-urgente-t">
+      <p class="msj-urgente-t" id="msj-urgente-t">${ic("alertTriangle")}<span>Tu aviso urgente no salió. Llamá al supervisor.</span></p>
+      <p class="msj-urgente-sub">“${esc(textos.join("”, “"))}” · ${esperando ? "se manda solo cuando vuelva la señal" : "no se va a mandar solo"}</p>
+      <a class="msj-urgente-btn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${ic("message")}<span>Mandar por WhatsApp</span></a>
+    </section>
+  `;
+}
+
+// Mis mensajes que todavía no salieron: al final del chat, con su estado.
+function Pendiente(p) {
+  const urgente = p.urgente || esUrgente(p.texto);
+  const fallido = p.estado === "error";
+  const enviando = p.estado === "enviando" && Date.now() - (p.enviandoDesde || 0) < 60 * 1000;
+  const estado = fallido
+    ? `<p class="msj-estado is-error">${ic("alertTriangle", "msj-icon msj-icon--sm")}<span>No se pudo enviar</span></p>
+       ${p.error ? `<p class="msj-estado-detalle">${esc(p.error)}</p>` : ""}
+       <button class="msj-btn msj-btn--chico msj-borrar" type="button" data-msj-borrar-pend="${esc(p.cid)}">${ic("x")}<span>Borrar</span></button>`
+    : `<p class="msj-estado">${ic("clock", "msj-icon msj-icon--sm")}<span>${enviando ? "Enviando…" : "Sin enviar · se manda cuando vuelva la señal"}</span></p>`;
+  return `
+    <li class="msj-item msj-item--mio msj-item--pendiente" data-msj-cid="${esc(p.cid)}">
+      <div class="msj-burbuja is-pendiente ${urgente ? "is-urgente" : ""} ${fallido ? "is-fallido" : ""}">
+        <span class="msj-sr">Vos, sin enviar: </span>
+        <p class="msj-texto-burbuja">${urgente ? ic("alertTriangle", "msj-icon msj-icon--sm") : ""}${esc(p.texto)}</p>
+        ${estado}
+      </div>
+    </li>
+  `;
+}
+
 function ListaItems(canal) {
   const lista = mensajes.cached(canal);
+  const pendientes = mensajes.pendientes(canal).map(Pendiente).join("");
   if (!lista.length) {
+    if (pendientes) return pendientes;
     return `<li class="msj-vacio-chat">${ui.cargados.has(canal) ? "Todavía no hay mensajes. Escribí el primero." : "Cargando mensajes…"}</li>`;
   }
   const me = yo().usuario;
@@ -454,7 +532,7 @@ function ListaItems(canal) {
     out += Mensaje(m, { me, info, mostrarAutor: m.autor !== autorPrevio });
     autorPrevio = m.automatico || m.tipo === "aviso" ? "" : m.autor;
     return out;
-  }).join("");
+  }).join("") + pendientes;
 }
 
 function FotoAdjunta(m) {
@@ -492,7 +570,7 @@ function Mensaje(m, { me, info, mostrarAutor }) {
     : info.tipo === "directo" || !mostrarAutor
       ? `<span class="msj-sr">${esc(m.autorNombre || "")}: </span>`
       : `<p class="msj-autor">${esc(m.autorNombre || "Alguien")}${rolDe(m.autorRol) ? ` <span class="msj-rol">${esc(rolDe(m.autorRol))}</span>` : ""}</p>`;
-  const urgente = RAPIDAS.some((r) => r.urgente && r.texto === m.texto);
+  const urgente = esUrgente(m.texto);
   return `
     <li class="msj-item ${mio ? "msj-item--mio" : "msj-item--otro"} ${mostrarAutor ? "" : "is-seguido"}" data-msj-id="${esc(m.id)}">
       <div class="msj-burbuja ${urgente ? "is-urgente" : ""}">
@@ -581,6 +659,7 @@ function actualizarChat(primeraVez = false) {
   const lista = mensajes.cached(canal);
   const html = ListaItems(canal);
   if (cont.innerHTML !== html) cont.innerHTML = html;
+  actualizarBanner();
   const vistos = ui.vistos.get(canal) || new Set();
   const nuevos = lista.filter((m) => !vistos.has(m.id));
   const me = yo().usuario;
@@ -594,6 +673,14 @@ function actualizarChat(primeraVez = false) {
   if (estabaAbajo || nuevos.some((m) => m.autor === me)) abajo();
   cargarFotos();
   if (deOtros.length) leer(canal);
+}
+
+// El aviso rojo de arriba del chat (solo se toca si cambió, para no repetirlo en el lector de pantalla).
+function actualizarBanner() {
+  const cont = document.getElementById("msj-urgente");
+  if (!cont) return;
+  const html = BannerUrgente();
+  if (cont.innerHTML !== html) cont.innerHTML = html;
 }
 
 function anunciar(texto) {
@@ -689,7 +776,9 @@ async function enviar(texto, { rapida = false } = {}) {
   estadoEnviando();
   pararDictado();
   try {
-    await mensajes.enviar(canal, limpio);
+    const urgente = esUrgente(limpio);
+    // Sin señal no falla: queda guardado en el celular y se manda solo (E-058).
+    const r = await mensajes.enviar(canal, limpio, { encolar: true, urgente });
     if (!rapida) {
       ui.borradores.delete(canal);
       const t = textoEl();
@@ -698,8 +787,13 @@ async function enviar(texto, { rapida = false } = {}) {
         ajustarAlto(t);
       }
     }
+    actualizarChat();
     abajo();
-    mensajes.resumen().catch(() => {});
+    if (r?.pendiente) {
+      anunciar(urgente ? "Tu aviso urgente no salió. Llamá al supervisor o mandalo por WhatsApp." : "Sin señal: se manda solo cuando vuelva.");
+    } else {
+      mensajes.resumen().catch(() => {});
+    }
   } catch (error) {
     const t = textoEl();
     // La respuesta rápida que no salió queda en el campo para reintentar con "Enviar".
@@ -840,6 +934,13 @@ export function registerMensajesEvents() {
       dictar();
       return true;
     }
+    const borrar = event.target.closest("[data-msj-borrar-pend]");
+    if (borrar) {
+      event.preventDefault();
+      mensajes.borrarPendiente(borrar.dataset.msjBorrarPend);
+      textoEl()?.focus({ preventScroll: true });
+      return true;
+    }
     const foto = event.target.closest("[data-msj-abrir-foto]");
     if (foto) {
       event.preventDefault();
@@ -901,6 +1002,7 @@ export function registerMensajesEvents() {
     if (col === "mensajes") {
       actualizarInsignias();
       actualizarLista();
+      actualizarBanner();
       return;
     }
     if (col === "sesion" && !session.token()) {

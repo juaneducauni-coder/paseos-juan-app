@@ -10,6 +10,7 @@
 //   onDataChange((col) => ...)             → avisa cuando llegan datos nuevos de una colección
 //   registros.watch("paseos", { desde })   → refresca cada minuto mientras la pestaña está visible
 //   mensajes.resumen() / mensajes.list(canal) / mensajes.enviar(canal, texto) → chats (ver docs/datos-compartidos.md)
+//   mensajes.enviar(canal, texto, { encolar: true }) → sin señal queda en pj_mensajes_pendientes y se manda solo
 
 const SESSION_KEY = "pj_sesion";
 const OUTBOX_KEY = "pj_pendientes";
@@ -682,7 +683,9 @@ export const mensajes = {
   //   automatico, creadoEn, borrado? }. Si borrado es true, mostrar "Mensaje borrado por el admin".
   async list(canal) {
     const previos = mensajes.cached(canal);
-    const desde = previos.reduce((max, m) => [max, m.creadoEn || "", m.actualizadoEn || ""].sort().pop(), "");
+    // Los que sumó este celular al enviar (local: true) no cuentan: si no, se saltearían los
+    // mensajes de otros que llegaron mientras tanto (por ejemplo, después de un rato sin señal).
+    const desde = previos.filter((m) => !m.local).reduce((max, m) => [max, m.creadoEn || "", m.actualizadoEn || ""].sort().pop(), "");
     const params = new URLSearchParams({ canal });
     if (desde) params.set("desde", desde);
     try {
@@ -702,15 +705,51 @@ export const mensajes = {
   },
   // opts: { tipo: "texto"|"aviso"|"foto", adjuntoId, perroId, perroNombre }
   // Para avisarle al cliente de un perro sin conocer el cliente: enviar("cliente", texto, { tipo: "aviso", perroId }).
-  // Necesita señal: si no hay, lanza ApiError(0) para que la pantalla muestre "No se envió".
+  // Sin encolar: necesita señal; si no hay, lanza ApiError(0) para que la pantalla muestre "No se envió".
+  // Con encolar: true (chat del equipo, E-058): sin señal o con el servidor caído, el mensaje queda en
+  // "pj_mensajes_pendientes" y se manda solo; devuelve { cid, canal, texto, ..., pendiente: true }.
+  // urgente: true lo marca para el aviso rojo de la pantalla. Si hay mensajes míos esperando en ese
+  // canal, el nuevo se pone atrás (se mantiene el orden).
   async enviar(canal, texto, opts = {}) {
-    const { mensaje } = await request("/api/mensajes", { method: "POST", body: { canal, texto, tipo: opts.tipo || "texto", adjuntoId: opts.adjuntoId, perroId: opts.perroId, perroNombre: opts.perroNombre } });
-    const lista = mensajes.cached(mensaje.canal);
-    if (lista.length || mensaje.canal === canal) {
-      writeJson(MSJ_KEY(mensaje.canal), [...lista.filter((m) => m.id !== mensaje.id), mensaje].slice(-200));
-      emit(`mensajes:${mensaje.canal}`);
+    const datos = { canal, texto, tipo: opts.tipo || "texto", adjuntoId: opts.adjuntoId, perroId: opts.perroId, perroNombre: opts.perroNombre };
+    if (opts.encolar) {
+      const esperando = msjMios().some((p) => p.canal === canal && p.estado !== "error");
+      if (esperando || navigator.onLine === false) {
+        const item = encolarMensaje(datos, opts);
+        mensajes.enviarPendientes();
+        return item;
+      }
     }
+    let mensaje;
+    try {
+      ({ mensaje } = await request("/api/mensajes", { method: "POST", body: datos }));
+    } catch (error) {
+      if (!opts.encolar || !transitorio(error.status)) throw error;
+      // Pudo haber llegado al servidor (la señal se cortó en la respuesta): antes de reintentar se revisa.
+      return encolarMensaje(datos, opts, error.status === 429 ? null : marcaRevision(canal));
+    }
+    sumarAlCanal(mensaje, canal);
     return mensaje;
+  },
+  // Mensajes míos que esperan señal (o que el servidor rechazó), en orden. canal es opcional.
+  // Cada uno: { cid, canal, texto, tipo, perroId, perroNombre, adjuntoId, createdAt, urgente,
+  //   estado: "pendiente"|"enviando"|"error", error, enviandoDesde }
+  pendientes(canal) {
+    return msjMios().filter((p) => !canal || p.canal === canal);
+  },
+  // Borra uno que no salió (botón "Borrar"). Los que esperan señal no se borran.
+  borrarPendiente(cid) {
+    const item = msjMios().find((p) => p.cid === cid);
+    if (!item || item.estado !== "error") return false;
+    guardarOutbox((lista) => lista.filter((p) => p.cid !== cid));
+    emit(`mensajes:${item.canal}`);
+    emit("mensajes");
+    return true;
+  },
+  // Manda en orden lo que quedó sin señal. Se llama sola (al volver la señal, al volver a la
+  // pestaña y cada 30 s) y al abrir un chat. Devuelve cuántos salieron.
+  enviarPendientes() {
+    return flushMensajes();
   },
   async marcarLeido(canal) {
     const data = await request("/api/mensajes", { method: "POST", body: { canal, leido: true } });
@@ -780,3 +819,189 @@ export const mensajes = {
     return mensajes.watch();
   },
 };
+
+// ---------- Mensajes sin señal (E-058) ----------
+// Igual que la cola de registros (pj_pendientes): por usuario, se saca solo lo que el servidor
+// confirmó (201) y lo rechazado (4xx) no se reintenta: queda marcado con el error y "Borrar".
+// Para no mandar dos veces: el que se está mandando queda marcado ("enviando", con la hora) y, si
+// el intento anterior pudo haber llegado (la señal se cortó en la respuesta, error del servidor o
+// la pestaña se cerró a mitad), antes de reintentar se busca en el servidor si ya está.
+const MSJ_OUTBOX_KEY = "pj_mensajes_pendientes";
+// Pasado este tiempo sin señal ya no se manda solo (un "Llegué" o un "Perro suelto" viejo confunde).
+const MSJ_VENCE_MS = 3 * 60 * 60 * 1000;
+// Un "enviando" más viejo que esto es de una pestaña que se cerró o se colgó.
+const MSJ_EN_VUELO_MS = 60 * 1000;
+
+function msjOutbox() {
+  const lista = readJson(MSJ_OUTBOX_KEY, []);
+  return Array.isArray(lista) ? lista : [];
+}
+
+function msjMios() {
+  const me = session.user()?.usuario;
+  return me ? msjOutbox().filter((p) => p.usuario === me) : [];
+}
+
+// Siempre se lee lo último guardado (otra pestaña pudo cambiarlo) y se escribe enseguida.
+function guardarOutbox(cambio) {
+  writeJson(MSJ_OUTBOX_KEY, cambio(msjOutbox()));
+}
+
+function cambiarPendiente(cid, datos) {
+  guardarOutbox((lista) => lista.map((p) => (p.cid === cid ? { ...p, ...datos } : p)));
+}
+
+// Sin señal, servidor caído o "esperá un minuto": se reintenta. El resto de los 4xx, nunca.
+function transitorio(status) {
+  return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+function cambioDe(m) {
+  return [m.creadoEn || "", m.actualizadoEn || ""].sort().pop();
+}
+
+// Desde cuándo buscar en el servidor un mensaje que pudo haber llegado: lo último que este
+// celular conoce del canal (hora del servidor). Si no conoce nada, 2 minutos antes de escribirlo.
+function marcaRevision(canal, at = Date.now()) {
+  const conocido = mensajes.cached(canal).reduce((max, m) => [max, cambioDe(m)].sort().pop(), "");
+  return conocido || new Date(at - 2 * 60 * 1000).toISOString();
+}
+
+function encolarMensaje(datos, opts, revisar = null) {
+  const usuario = session.user()?.usuario;
+  if (!usuario) throw new ApiError(0, "Sin conexión. Revisá la señal.");
+  const ahora = Date.now();
+  const item = {
+    cid: `c${ahora.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    usuario,
+    canal: datos.canal,
+    texto: datos.texto,
+    tipo: datos.tipo || "texto",
+    perroId: datos.perroId || "",
+    perroNombre: datos.perroNombre || "",
+    adjuntoId: datos.adjuntoId || "",
+    urgente: Boolean(opts.urgente),
+    createdAt: new Date(ahora).toISOString(),
+    at: ahora,
+    estado: "pendiente",
+    error: "",
+    enviandoDesde: 0,
+    revisar,
+  };
+  guardarOutbox((lista) => [...lista, item]);
+  // Si el celular no deja guardar (memoria llena, modo privado), no se finge que quedó guardado.
+  if (!msjOutbox().some((p) => p.cid === item.cid)) throw new ApiError(0, "Sin conexión. Revisá la señal.");
+  emit(`mensajes:${item.canal}`);
+  emit("mensajes");
+  return { ...item, pendiente: true };
+}
+
+// Suma al chat guardado el mensaje que confirmó el servidor (local: true hasta que lo traiga list()).
+function sumarAlCanal(mensaje, canalPedido = mensaje.canal) {
+  const lista = mensajes.cached(mensaje.canal);
+  if (!lista.length && mensaje.canal !== canalPedido) return;
+  if (!lista.some((m) => m.id === mensaje.id)) {
+    writeJson(MSJ_KEY(mensaje.canal), [...lista, { ...mensaje, local: true }].slice(-200));
+  }
+  emit(`mensajes:${mensaje.canal}`);
+}
+
+function textoComparable(texto) {
+  return String(texto ?? "").replace(/<[^>]*>/g, "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+}
+
+// ¿Ya está en el servidor? (mismo autor, tipo y texto, después de la marca). Sin señal lanza ApiError(0).
+async function yaLlego(item) {
+  const params = new URLSearchParams({ canal: item.canal, desde: item.revisar });
+  const data = await request(`/api/mensajes?${params}`);
+  const texto = textoComparable(item.texto);
+  return (data.mensajes || []).find((m) => m.autor === item.usuario && !m.borrado && (m.tipo || "texto") === item.tipo && textoComparable(m.texto) === texto) || null;
+}
+
+function vencerViejos(me) {
+  const vencidos = msjOutbox().filter((p) => p.usuario === me && p.estado === "pendiente" && Date.now() - (p.at || 0) > MSJ_VENCE_MS);
+  if (!vencidos.length) return [];
+  const ids = new Set(vencidos.map((p) => p.cid));
+  guardarOutbox((lista) => lista.map((p) => (ids.has(p.cid)
+    ? { ...p, estado: "error", error: "Pasaron más de 3 horas sin señal y no se mandó. Si todavía hace falta, escribilo de nuevo." }
+    : p)));
+  return vencidos.map((p) => p.canal);
+}
+
+let msjFlushing = false;
+let msjOtraVez = false; // se pidió mandar mientras se mandaba: al terminar se repasa la cola
+
+async function flushMensajes() {
+  const me = session.user()?.usuario;
+  if (msjFlushing) {
+    msjOtraVez = true;
+    return 0;
+  }
+  if (!me || !session.token()) return 0;
+  const tocados = new Set(vencerViejos(me));
+  const ids = msjOutbox().filter((p) => p.usuario === me && p.estado !== "error").map((p) => p.cid);
+  if (!ids.length || navigator.onLine === false) {
+    tocados.forEach((c) => emit(`mensajes:${c}`));
+    if (tocados.size) emit("mensajes");
+    return 0;
+  }
+  msjFlushing = true;
+  msjOtraVez = false;
+  let enviados = 0;
+  let cortado = false;
+  try {
+    for (const cid of ids) {
+      let item = msjOutbox().find((p) => p.cid === cid);
+      if (!item || item.estado === "error") continue;
+      if (item.estado === "enviando") {
+        // Otra pestaña lo está mandando: se espera (y se corta acá para no cambiar el orden).
+        if (Date.now() - (item.enviandoDesde || 0) < MSJ_EN_VUELO_MS) {
+          cortado = true;
+          break;
+        }
+        // Quedó a mitad (pestaña cerrada): pudo haber llegado.
+        if (!item.revisar) item = { ...item, revisar: marcaRevision(item.canal, item.at) };
+      }
+      tocados.add(item.canal);
+      cambiarPendiente(cid, { estado: "enviando", enviandoDesde: Date.now(), revisar: item.revisar || null });
+      emit(`mensajes:${item.canal}`);
+      try {
+        let mensaje = item.revisar ? await yaLlego(item) : null;
+        if (!mensaje) {
+          ({ mensaje } = await request("/api/mensajes", {
+            method: "POST",
+            body: { canal: item.canal, texto: item.texto, tipo: item.tipo, adjuntoId: item.adjuntoId || undefined, perroId: item.perroId || undefined, perroNombre: item.perroNombre || undefined },
+          }));
+        }
+        // Confirmado: se saca de la cola y se suma al chat en el mismo momento (no se ve dos veces).
+        guardarOutbox((lista) => lista.filter((p) => p.cid !== cid));
+        sumarAlCanal(mensaje, item.canal);
+        enviados += 1;
+      } catch (error) {
+        if (transitorio(error.status) || error.status === 401) {
+          // Queda esperando. Si el intento pudo llegar al servidor, la próxima vez se revisa antes.
+          const pudoLlegar = error.status !== 401 && error.status !== 429 && navigator.onLine !== false;
+          cambiarPendiente(cid, { estado: "pendiente", enviandoDesde: 0, revisar: item.revisar || (pudoLlegar ? marcaRevision(item.canal, item.at) : null) });
+          cortado = true;
+          break;
+        }
+        cambiarPendiente(cid, { estado: "error", enviandoDesde: 0, error: error.message || "El servidor no lo aceptó." });
+      }
+    }
+  } finally {
+    msjFlushing = false;
+    tocados.forEach((c) => emit(`mensajes:${c}`));
+    if (tocados.size) emit("mensajes");
+  }
+  if (msjOtraVez && !cortado) setTimeout(() => flushMensajes(), 0);
+  msjOtraVez = false;
+  if (enviados) mensajes.resumen().catch(() => {});
+  return enviados;
+}
+
+window.addEventListener("online", () => flushMensajes());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") flushMensajes();
+});
+setInterval(() => flushMensajes(), 30 * 1000);
+setTimeout(() => flushMensajes(), 2000);
