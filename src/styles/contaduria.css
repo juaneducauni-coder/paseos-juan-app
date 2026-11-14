@@ -1,0 +1,335 @@
+/* Contaduría (pestaña Plata del admin): ingresos, egresos y resultado del mes.
+   Celular primero (390 px, una mano). Prefijo propio "conta-".
+   Usa los colores de la vista admin (--adm-*), que ya cambian solos con html[data-theme="dark"].
+   Sin animaciones ni transiciones: no hay nada que apagar en modo calmo. */
+
+.adm-shell .conta-apoyo {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.adm-shell .conta-meses {
+  margin: 4px 0;
+}
+
+/* ---------- Resumen del mes ---------- */
+
+.adm-shell .conta-resumen {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--adm-line);
+  border-radius: 24px;
+  background: var(--adm-surface);
+  box-shadow: var(--adm-shadow);
+}
+
+.adm-shell .conta-mes {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.adm-shell .conta-totales {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.adm-shell .conta-total {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 16px 14px;
+  border: 1px solid var(--adm-line);
+  border-radius: 20px;
+  background: var(--adm-surface-2);
+}
+
+.adm-shell .conta-total--ingreso {
+  border-color: var(--adm-green);
+  background: var(--adm-green-soft);
+}
+
+.adm-shell .conta-total--egreso {
+  border-color: var(--adm-danger-line);
+  background: var(--adm-danger-bg);
+}
+
+.adm-shell .conta-total-label {
+  color: var(--adm-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.adm-shell .conta-total-num {
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-shell .conta-total--ingreso .conta-total-num {
+  color: var(--adm-green);
+}
+
+.adm-shell .conta-total--egreso .conta-total-num {
+  color: var(--adm-danger);
+}
+
+.adm-shell .conta-resultado {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 18px 16px;
+  border: 2px solid var(--adm-line-strong);
+  border-radius: 22px;
+  background: var(--adm-surface);
+}
+
+.adm-shell .conta-resultado-num {
+  overflow-wrap: anywhere;
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-shell .conta-resultado.is-pos {
+  border-color: var(--adm-green);
+}
+
+.adm-shell .conta-resultado.is-pos .conta-resultado-num {
+  color: var(--adm-green);
+}
+
+.adm-shell .conta-resultado.is-neg {
+  border-color: var(--adm-danger);
+}
+
+.adm-shell .conta-resultado.is-neg .conta-resultado-num {
+  color: var(--adm-danger);
+}
+
+.adm-shell .conta-aclara {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* ---------- Botones grandes ---------- */
+
+.adm-shell .conta-botones {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.adm-shell .conta-btn-mas {
+  min-height: 64px;
+  border-radius: 20px;
+}
+
+.adm-shell .conta-btn-egreso {
+  border: 2px solid var(--adm-danger);
+  background: var(--adm-danger-bg);
+  color: var(--adm-danger);
+}
+
+.adm-shell .conta-btn-borrar {
+  border: 2px solid var(--adm-danger);
+  background: var(--adm-danger);
+  color: var(--adm-surface);
+}
+
+.adm-shell .conta-btn-csv {
+  min-height: 56px;
+  margin-top: 8px;
+  border-radius: 18px;
+}
+
+/* ---------- Desglose ---------- */
+
+.adm-shell .conta-card {
+  display: grid;
+  gap: 22px;
+  padding: 20px;
+  border: 1px solid var(--adm-line);
+  border-radius: 24px;
+  background: var(--adm-surface);
+}
+
+.adm-shell .conta-desglose {
+  display: grid;
+  gap: 10px;
+}
+
+.adm-shell .conta-h2 {
+  margin: 20px 0 4px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.adm-shell .conta-h3 {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.adm-shell .conta-lineas {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-shell .conta-linea {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--adm-line);
+  font-size: 16px;
+}
+
+.adm-shell .conta-linea:first-child {
+  border-top: 0;
+}
+
+.adm-shell .conta-linea strong {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-shell .conta-linea-nums {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+/* ---------- Lista de movimientos ---------- */
+
+.adm-shell .conta-movs {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adm-shell .conta-mov {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--adm-line);
+  border-left: 6px solid var(--adm-green);
+  border-radius: 20px;
+  background: var(--adm-surface);
+}
+
+.adm-shell .conta-mov--egreso {
+  border-left-color: var(--adm-danger);
+}
+
+.adm-shell .conta-mov-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.adm-shell .conta-mov-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.adm-shell .conta-mov-concepto {
+  overflow-wrap: anywhere;
+  font-size: 17px;
+}
+
+.adm-shell .conta-mov-meta,
+.adm-shell .conta-mov-nota {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--adm-muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.adm-shell .conta-mov-monto {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--adm-green);
+  font-size: 19px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.adm-shell .conta-mov--egreso .conta-mov-monto {
+  color: var(--adm-danger);
+}
+
+.adm-shell .conta-acciones {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.adm-shell .conta-acciones > .adm-btn {
+  min-height: 48px;
+  border-radius: 16px;
+}
+
+.adm-shell .conta-confirm {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--adm-danger-line);
+  border-radius: 18px;
+  background: var(--adm-danger-bg);
+}
+
+.adm-shell .conta-confirm-text {
+  margin: 0;
+  color: var(--adm-danger);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* ---------- Modo oscuro: el botón de borrar usa texto oscuro sobre el rojo claro ---------- */
+
+html[data-theme="dark"] .adm-shell .conta-btn-borrar {
+  color: #1a0d0a;
+}
+
+html[data-theme="dark"] .adm-shell .conta-resumen,
+html[data-theme="dark"] .adm-shell .conta-card,
+html[data-theme="dark"] .adm-shell .conta-mov {
+  box-shadow: none;
+}
+
+/* Celulares muy angostos: los totales bajan a una columna para que el número no se corte. */
+@media (max-width: 340px) {
+  .adm-shell .conta-totales,
+  .adm-shell .conta-botones {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 720px) {
+  .adm-shell .conta-total-num {
+    font-size: 28px;
+  }
+}

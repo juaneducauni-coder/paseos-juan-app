@@ -35,7 +35,7 @@
   --pw-toast-bg: #17201b;
   --pw-toast-ink: #ffffff;
   --pw-toast-action: #9fe3c0;
-  --pw-shadow: 0 1px 2px rgba(15, 31, 19, 0.08), 0 8px 24px rgba(15, 31, 19, 0.06);
+  --pw-shadow: 0 2px 6px rgba(15, 31, 19, 0.05), 0 12px 30px rgba(15, 31, 19, 0.08);
   --pw-bar-h: 68px;
   --pw-safe: env(safe-area-inset-bottom, 0px);
 
@@ -43,7 +43,7 @@
   background: var(--pw-bg);
   color: var(--pw-ink);
   font-size: 1.0625rem;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 /* ---------- tokens: oscuro ---------- */
@@ -77,7 +77,7 @@ html[data-theme="dark"] .pw-shell {
   --pw-toast-bg: #e9f1ec;
   --pw-toast-ink: #0d1511;
   --pw-toast-action: #025f40;
-  --pw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --pw-shadow: 0 4px 10px rgba(0, 0, 0, 0.28), 0 14px 32px rgba(0, 0, 0, 0.4);
 }
 
 /* En esta página: sin el relleno de abajo general (la barra fija ya reserva su lugar) y el
@@ -174,7 +174,8 @@ body:has(.pw-shell) #a11y-root {
   min-height: 60px;
   border-bottom: 1px solid var(--pw-line-soft);
   background: var(--pw-card);
-  padding: 8px max(16px, calc((100vw - 760px) / 2));
+  box-shadow: 0 2px 12px rgba(15, 31, 19, 0.05);
+  padding: 8px max(var(--gutter-mobile, 20px), calc((100vw - 760px) / 2));
 }
 
 .pw-brand {
@@ -209,17 +210,44 @@ html[data-theme="dark"] .pw-logo-dark {
   display: block;
 }
 
+/* Nombre (o "Con <paseador>") en una línea; la ruta en un chip debajo. */
 .pw-head-title {
+  display: flex;
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.pw-head-title strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-head-route {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid var(--pw-line);
+  border-radius: 999px;
+  padding: 0 8px;
+  color: var(--pw-muted);
+  font-size: 0.8rem;
+  font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .pw-head-chip,
-.pw-head-sync {
+.pw-head-sync,
+.pw-head-out {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -227,13 +255,33 @@ html[data-theme="dark"] .pw-logo-dark {
   min-height: 32px;
   border-radius: 999px;
   padding: 2px 12px;
+  font: inherit;
   font-size: 0.9rem;
   font-weight: 800;
 }
 
+/* Pastilla del turno: tocable (abre el cambio de día y turno). */
 .pw-head-chip {
+  min-height: var(--touch-min, 48px);
+  border: 0;
   background: var(--pw-accent-soft);
   color: var(--pw-ink);
+  cursor: pointer;
+}
+
+.pw-head-out {
+  min-height: var(--touch-min, 48px);
+  border: 1.5px solid var(--pw-line);
+  background: transparent;
+  color: var(--pw-ink);
+  padding: 2px 12px;
+  cursor: pointer;
+}
+
+.pw-head-chip:focus-visible,
+.pw-head-out:focus-visible {
+  outline: 3px solid var(--pw-focus);
+  outline-offset: 2px;
 }
 
 .pw-head-sync {
@@ -247,12 +295,12 @@ html[data-theme="dark"] .pw-logo-dark {
   width: 100%;
   max-width: 760px;
   margin: 0 auto;
-  padding: 12px 16px calc(var(--pw-bar-h) + var(--pw-safe) + 28px);
+  padding: 14px var(--gutter-mobile, 20px) calc(var(--pw-bar-h) + var(--pw-safe) + 32px);
 }
 
 .pw-screen {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .pw-title-row {
@@ -341,9 +389,9 @@ html[data-theme="dark"] .pw-logo-dark {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 2px solid transparent;
-  border-radius: 14px;
-  padding: 0 18px;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  padding: 0 20px;
   background: transparent;
   color: var(--pw-ink);
   cursor: pointer;
@@ -370,12 +418,14 @@ html[data-theme="dark"] .pw-logo-dark {
 .pw-btn--go {
   background: var(--pw-accent);
   color: var(--pw-on-accent);
+  box-shadow: 0 6px 16px rgba(15, 31, 19, 0.12);
 }
 
 .pw-btn--ghost {
   border-color: var(--pw-line-soft);
   background: var(--pw-card);
   color: var(--pw-ink);
+  box-shadow: 0 2px 8px rgba(15, 31, 19, 0.05);
 }
 
 .pw-btn--danger {
@@ -386,12 +436,13 @@ html[data-theme="dark"] .pw-logo-dark {
 .pw-btn--whatsapp {
   background: var(--pw-whatsapp);
   color: var(--pw-on-accent);
+  box-shadow: 0 6px 16px rgba(15, 31, 19, 0.12);
 }
 
 .pw-btn--xl {
   width: 100%;
   min-height: 64px;
-  border-radius: 18px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   font-size: 1.3rem;
 }
 
@@ -451,7 +502,7 @@ html[data-theme="dark"] .pw-logo-dark {
 .pw-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .pw-chips:empty {
@@ -544,9 +595,10 @@ html[data-theme="dark"] .pw-logo-dark {
   display: flex;
   align-items: center;
   gap: 10px;
-  border-radius: 14px;
-  padding: 8px 12px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 10px 16px;
   font-weight: 700;
+  line-height: 1.5;
 }
 
 .pw-sync-msg > span {
@@ -565,7 +617,7 @@ html[data-theme="dark"] .pw-logo-dark {
 
 .pw-strips {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-strip {
@@ -573,14 +625,15 @@ html[data-theme="dark"] .pw-logo-dark {
   width: 100%;
   min-height: 52px;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: 0;
-  border-left: 5px solid transparent;
-  border-radius: 14px;
-  padding: 10px 14px;
+  border-left: 6px solid transparent;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 12px 16px;
   font-size: 0.98rem;
-  line-height: 1.3;
+  line-height: 1.5;
   text-align: left;
+  box-shadow: var(--pw-shadow);
 }
 
 .pw-strip > span {
@@ -620,9 +673,10 @@ button.pw-strip {
 .pw-planning {
   display: flex;
   align-items: center;
-  gap: 10px;
-  border-radius: 14px;
-  padding: 8px 8px 8px 14px;
+  gap: 12px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 10px 12px 10px 16px;
+  line-height: 1.5;
 }
 
 .pw-change > p,
@@ -632,7 +686,7 @@ button.pw-strip {
 }
 
 .pw-change {
-  border: 2px solid var(--pw-run-line);
+  border: 1.5px solid var(--pw-run-line);
   background: var(--pw-run-bg);
   color: var(--pw-run-ink);
 }
@@ -645,7 +699,7 @@ button.pw-strip {
 
 .pw-notices {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -653,13 +707,15 @@ button.pw-strip {
 
 .pw-notice {
   display: flex;
-  gap: 10px;
-  border-left: 5px solid var(--pw-warn-line);
-  border-radius: 14px;
-  padding: 10px 14px;
+  gap: 12px;
+  border-left: 6px solid var(--pw-warn-line);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 14px 16px;
   background: var(--pw-warn-bg);
   color: var(--pw-warn-ink);
   font-size: 0.98rem;
+  line-height: 1.52;
+  box-shadow: var(--pw-shadow);
 }
 
 .pw-notice--danger {
@@ -691,14 +747,14 @@ button.pw-strip {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border: 2px solid var(--pw-line-soft);
-  border-radius: 14px;
-  padding: 4px 14px;
+  border: 1.5px solid var(--pw-line-soft);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  padding: 6px 16px;
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
   font-weight: 800;
-  line-height: 1.1;
+  line-height: 1.15;
 }
 
 .pw-chip small {
@@ -735,7 +791,7 @@ button.pw-strip {
 }
 
 .pw-ava.has-photo {
-  border-radius: 16px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--pw-line-soft);
 }
 
@@ -758,7 +814,7 @@ button.pw-strip {
 }
 
 .pw-ava--xl.has-photo {
-  border-radius: 22px;
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
 }
 
 .pw-ava--ext {
@@ -773,7 +829,7 @@ button.pw-strip {
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 18px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   padding: 0;
   background: transparent;
   color: inherit;
@@ -786,33 +842,30 @@ button.pw-strip {
   outline-offset: 3px;
 }
 
+/* Foto de perfil sin cargar: solo un ícono de cámara chico en la esquina (sin texto, para no
+   confundirlo con "Foto paseo", que es el botón que marca el paseo). */
 .pw-ava-cam {
   position: absolute;
-  left: 50%;
-  bottom: -6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  transform: translateX(-50%);
+  right: -4px;
+  bottom: -4px;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
   border: 2px solid var(--pw-card);
   border-radius: 999px;
-  padding: 2px 8px;
   background: var(--pw-ink);
   color: var(--pw-card);
-  font-size: 0.78rem;
-  font-weight: 800;
-  white-space: nowrap;
 }
 
 .pw-ava-btn--xl .pw-ava-cam {
-  bottom: -8px;
-  padding: 4px 12px;
-  font-size: 0.95rem;
+  width: 30px;
+  height: 30px;
 }
 
 .pw-ava-btn--xl .pw-ava-cam .pw-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .pw-ava-btn.is-busy .pw-ava {
@@ -845,10 +898,10 @@ button.pw-strip {
 /* ---------- tarjeta grande: el perro en curso ---------- */
 .pw-hero {
   display: grid;
-  gap: 12px;
-  border: 3px solid var(--pw-accent);
-  border-radius: 22px;
-  padding: 16px;
+  gap: 14px;
+  border: 2px solid var(--pw-accent);
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
+  padding: 18px;
   background: var(--pw-card);
   box-shadow: var(--pw-shadow);
 }
@@ -916,12 +969,11 @@ button.pw-strip {
 
 .pw-link {
   max-width: 100%;
-  /* Zona de toque de 48 px sin agrandar la tarjeta. */
-  min-height: 48px;
-  margin-block: -9px;
+  /* Zona de toque de 48 px sin pisar elementos vecinos. */
+  min-height: var(--touch-min, 48px);
   overflow: hidden;
   border: 0;
-  padding: 0;
+  padding: 6px 0;
   background: none;
   color: inherit;
   cursor: pointer;
@@ -944,16 +996,17 @@ button.pw-strip {
   gap: 8px;
   color: var(--pw-muted);
   font-size: 0.95rem;
+  line-height: 1.5;
 }
 
 .pw-hero-actions {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-hero-more {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-hero-more > .pw-btn {
@@ -963,7 +1016,7 @@ button.pw-strip {
 /* ---------- listas: siguientes y listos ---------- */
 .pw-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .pw-list-title {
@@ -976,7 +1029,7 @@ button.pw-strip {
 
 .pw-rows {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -986,11 +1039,11 @@ button.pw-strip {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   border: 1px solid var(--pw-line-soft);
   border-left: 6px solid var(--pw-line);
-  border-radius: 16px;
-  padding: 10px 10px 12px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 14px 14px 14px 16px;
   background: var(--pw-card);
   box-shadow: var(--pw-shadow);
 }
@@ -1078,15 +1131,16 @@ div.pw-row-body {
   width: 100%;
   min-height: 52px;
   align-items: center;
-  gap: 10px;
-  border: 2px solid var(--pw-line-soft);
-  border-radius: 14px;
-  padding: 0 14px;
+  gap: 12px;
+  border: 1.5px solid var(--pw-line-soft);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  padding: 0 18px;
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
   font-weight: 800;
   text-align: left;
+  box-shadow: 0 2px 10px rgba(15, 31, 19, 0.04);
 }
 
 .pw-fold > span {
@@ -1112,12 +1166,13 @@ div.pw-row-body {
 .pw-empty {
   display: grid;
   justify-items: center;
-  gap: 8px;
+  gap: 12px;
   border: 2px dashed var(--pw-line-soft);
-  border-radius: 18px;
-  padding: 22px 16px;
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
+  padding: 26px var(--gutter-mobile, 20px);
   background: var(--pw-card);
   text-align: center;
+  box-shadow: var(--pw-shadow);
 }
 
 .pw-empty .pw-row {
@@ -1144,17 +1199,17 @@ body:has(.pw-shell.has-sheet) {
   left: 0;
   z-index: 60;
   display: grid;
-  gap: 12px;
+  gap: 16px;
   max-width: 600px;
   max-height: 90svh;
   margin: 0 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-radius: 24px 24px 0 0;
-  padding: 18px 16px calc(20px + var(--pw-safe));
+  border-radius: var(--radius-sheet, 30px 26px 0 0);
+  padding: 22px var(--gutter-mobile, 20px) calc(24px + var(--pw-safe));
   background: var(--pw-card);
   color: var(--pw-ink);
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 -14px 44px rgba(15, 31, 19, 0.24);
   animation: pw-sheet-in 0.2s ease-out;
 }
 
@@ -1201,8 +1256,8 @@ body:has(.pw-shell.has-sheet) {
   width: 52px;
   height: 52px;
   place-items: center;
-  border: 2px solid var(--pw-line-soft);
-  border-radius: 14px;
+  border: 1.5px solid var(--pw-line-soft);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
@@ -1211,7 +1266,7 @@ body:has(.pw-shell.has-sheet) {
 .pw-sheet-photo-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-sheet-photo-actions > * {
@@ -1220,8 +1275,9 @@ body:has(.pw-shell.has-sheet) {
 
 .pw-sheet-line {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   font-size: 0.98rem;
+  line-height: 1.52;
 }
 
 .pw-sheet-line .pw-icon {
@@ -1234,7 +1290,7 @@ body:has(.pw-shell.has-sheet) {
 
 .pw-sheet-actions {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-sheet-foot {
@@ -1244,7 +1300,7 @@ body:has(.pw-shell.has-sheet) {
 
 .pw-alerts {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1252,10 +1308,11 @@ body:has(.pw-shell.has-sheet) {
 
 .pw-alert {
   display: flex;
-  gap: 8px;
-  border-radius: 12px;
-  padding: 8px 12px;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 12px 14px;
   font-weight: 700;
+  line-height: 1.5;
 }
 
 .pw-alert--danger {
@@ -1271,7 +1328,7 @@ body:has(.pw-shell.has-sheet) {
 .pw-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1280,10 +1337,10 @@ body:has(.pw-shell.has-sheet) {
 .pw-steps li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   border: 1px solid var(--pw-line-soft);
-  border-radius: 12px;
-  padding: 6px 8px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 8px 10px;
   font-weight: 800;
   font-size: 0.95rem;
 }
@@ -1339,9 +1396,9 @@ body:has(.pw-shell.has-sheet) {
 .pw-nosale {
   display: flex;
   align-items: center;
-  gap: 8px;
-  border-radius: 12px;
-  padding: 10px 12px;
+  gap: 10px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 12px 14px;
   background: var(--pw-idle-bg);
   color: var(--pw-idle-ink);
   font-weight: 800;
@@ -1361,12 +1418,12 @@ body:has(.pw-shell.has-sheet) {
 .pw-toast-slot {
   position: fixed;
   right: 0;
-  bottom: calc(var(--pw-bar-h) + var(--pw-safe) + 10px);
+  bottom: calc(var(--pw-bar-h) + var(--pw-safe) + 12px);
   left: 0;
   z-index: 50;
   display: flex;
   justify-content: center;
-  padding: 0 16px;
+  padding: 0 var(--gutter-mobile, 20px);
   pointer-events: none;
 }
 
@@ -1376,12 +1433,12 @@ body:has(.pw-shell.has-sheet) {
   max-width: 520px;
   min-height: 56px;
   align-items: center;
-  gap: 10px;
-  border-radius: 16px;
-  padding: 6px 6px 6px 14px;
+  gap: 12px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 8px 8px 8px 18px;
   background: var(--pw-toast-bg);
   color: var(--pw-toast-ink);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   font-weight: 700;
   pointer-events: auto;
   animation: pw-toast-in 0.18s ease-out;
@@ -1404,8 +1461,8 @@ body:has(.pw-shell.has-sheet) {
   align-items: center;
   gap: 6px;
   border: 2px solid currentColor;
-  border-radius: 12px;
-  padding: 0 14px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  padding: 0 16px;
   background: transparent;
   color: var(--pw-toast-action);
   cursor: pointer;
@@ -1421,12 +1478,14 @@ body:has(.pw-shell.has-sheet) {
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+  gap: 8px;
   min-height: calc(var(--pw-bar-h) + var(--pw-safe));
   border-top: 1px solid var(--pw-line-soft);
-  padding: 6px max(8px, calc((100vw - 760px) / 2)) calc(6px + var(--pw-safe));
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  padding: 6px max(10px, calc((100vw - 760px) / 2)) calc(6px + var(--pw-safe));
   background: var(--pw-card);
-  box-shadow: 0 -4px 18px rgba(15, 31, 19, 0.08);
+  box-shadow: 0 -6px 22px rgba(15, 31, 19, 0.08);
 }
 
 .pw-tab {
@@ -1437,7 +1496,7 @@ body:has(.pw-shell.has-sheet) {
   justify-content: center;
   gap: 2px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
   padding: 4px 2px;
   background: transparent;
   color: var(--pw-muted);
@@ -1493,31 +1552,32 @@ body:has(.pw-shell.has-sheet) {
 .pw-switch-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .pw-switch-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-switch {
   position: relative;
   display: flex;
-  min-height: 110px;
+  min-height: 112px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 3px solid var(--pw-line-soft);
-  border-radius: 18px;
-  padding: 12px 8px;
+  border: 2px solid var(--pw-line-soft);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 14px 10px;
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
   font-size: 1.1rem;
   font-weight: 800;
   text-align: center;
+  box-shadow: var(--pw-shadow);
   touch-action: manipulation;
 }
 
@@ -1609,7 +1669,7 @@ body:has(.pw-shell.has-sheet) {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border-radius: 18px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   background: var(--pw-ok-bg);
   color: var(--pw-ok-ink);
   font-size: 1.25rem;
@@ -1620,7 +1680,7 @@ body:has(.pw-shell.has-sheet) {
 .pw-stepper {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1685,7 +1745,7 @@ body:has(.pw-shell.has-sheet) {
 .pw-chip-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-pick {
@@ -1693,9 +1753,9 @@ body:has(.pw-shell.has-sheet) {
   min-height: 52px;
   align-items: center;
   justify-content: center;
-  border: 2px solid var(--pw-line);
-  border-radius: 14px;
-  padding: 0 16px;
+  border: 1.5px solid var(--pw-line);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  padding: 0 18px;
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
@@ -1743,24 +1803,25 @@ body:has(.pw-shell.has-sheet) {
 .pw-dog-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .pw-dog-pick {
   position: relative;
   display: grid;
-  min-height: 110px;
+  min-height: 112px;
   justify-items: center;
   align-content: center;
   gap: 6px;
-  border: 3px solid var(--pw-line-soft);
-  border-radius: 18px;
-  padding: 10px 6px;
+  border: 2px solid var(--pw-line-soft);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 12px 8px;
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
   font-weight: 800;
   text-align: center;
+  box-shadow: var(--pw-shadow);
   touch-action: manipulation;
 }
 
@@ -1810,13 +1871,14 @@ body:has(.pw-shell.has-sheet) {
 .pw-message {
   width: 100%;
   min-height: 52px;
-  border: 2px solid var(--pw-line);
-  border-radius: 14px;
-  padding: 10px 12px;
+  border: 1.5px solid var(--pw-line);
+  border-radius: var(--radius-btn, 22px 16px 24px 18px);
+  padding: 12px 16px;
   background: var(--pw-card);
   color: var(--pw-ink);
   font-size: 1.05rem;
   font-weight: 500;
+  line-height: 1.5;
 }
 
 .pw-field textarea {
@@ -1857,10 +1919,11 @@ body:has(.pw-shell.has-sheet) {
 }
 
 .pw-status.is-warn {
-  border-radius: 12px;
-  padding: 8px 12px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 16px);
+  padding: 10px 14px;
   background: var(--pw-danger-bg);
   color: var(--pw-danger-ink);
+  line-height: 1.5;
 }
 
 .pw-wizard-nav {
@@ -1868,8 +1931,8 @@ body:has(.pw-shell.has-sheet) {
   bottom: calc(var(--pw-bar-h) + var(--pw-safe) + 6px);
   z-index: 5;
   display: flex;
-  gap: 10px;
-  border-radius: 18px;
+  gap: 12px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
   padding: 8px 0;
   background: var(--pw-bg);
 }
@@ -1887,9 +1950,9 @@ body:has(.pw-shell.has-sheet) {
 /* ---------- Más ---------- */
 .pw-box {
   display: grid;
-  gap: 12px;
-  border-radius: 18px;
-  padding: 14px;
+  gap: 14px;
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
+  padding: 18px;
   background: var(--pw-card);
   box-shadow: var(--pw-shadow);
 }
@@ -1905,14 +1968,14 @@ body:has(.pw-shell.has-sheet) {
 .pw-days {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
+  gap: 8px;
 }
 
-/* En el celular, 7 botones en una fila quedan de 44 px: van en dos filas (4 + 3). */
+/* En el celular, 7 botones en una fila quedan chicos: van en dos filas (4 + 3) con 8 px de separación. */
 @media (max-width: 479px) {
   .pw-days {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    gap: 8px;
   }
 }
 
@@ -1958,22 +2021,23 @@ body:has(.pw-shell.has-sheet) {
 
 .pw-help {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 0 0 0 4px;
   list-style: none;
   font-size: 0.95rem;
+  line-height: 1.55;
 }
 
 .pw-help li:first-child {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .pw-more-actions {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* ---------- foto del paseo (Retiré → Foto del paseo → Entregué) ---------- */
@@ -1999,7 +2063,7 @@ body:has(.pw-shell.has-sheet) {
   height: 40px;
   overflow: hidden;
   border: 2px solid var(--pw-run-line);
-  border-radius: 10px;
+  border-radius: 14px 10px 16px 12px;
   background: var(--pw-line-soft);
 }
 
@@ -2059,10 +2123,10 @@ body:has(.pw-shell.has-sheet) {
 /* 1. Integrar: tarjeta grande con la foto del perro. */
 .pw-hcard {
   display: grid;
-  gap: 12px;
-  border: 3px solid var(--pw-accent);
-  border-radius: 22px;
-  padding: 14px;
+  gap: 14px;
+  border: 2px solid var(--pw-accent);
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
+  padding: 18px;
   background: var(--pw-card);
   box-shadow: var(--pw-shadow);
 }
@@ -2100,23 +2164,23 @@ div.pw-row-body--static {
   align-content: center;
 }
 
-/* 3 a 5. Agua, curación y otra manada: tres botones grandes en fila. */
+/* 3 a 5. Agua, curación y cruce o perro suelto: tres botones grandes en fila. */
 .pw-hact {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .pw-hact-btn {
   display: flex;
-  min-height: 92px;
+  min-height: 94px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 3px solid var(--pw-line-soft);
-  border-radius: 18px;
-  padding: 10px 4px;
+  border: 2px solid var(--pw-line-soft);
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 12px 6px;
   background: var(--pw-card);
   color: var(--pw-ink);
   cursor: pointer;
@@ -2124,6 +2188,7 @@ div.pw-row-body--static {
   font-weight: 800;
   line-height: 1.15;
   text-align: center;
+  box-shadow: var(--pw-shadow);
   touch-action: manipulation;
 }
 
@@ -2225,16 +2290,17 @@ div.pw-row-body--static {
 .pw-herd-lines li {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 14px;
   border-left: 6px solid var(--pw-danger);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: var(--radius-blob-soft, 24px 18px 26px 20px);
+  padding: 18px;
   background: var(--pw-danger-bg);
   color: var(--pw-danger-ink);
   counter-increment: herd;
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.3;
+  box-shadow: var(--pw-shadow);
 }
 
 .pw-herd-lines li::before {
@@ -2285,12 +2351,12 @@ div.pw-row-body--static {
   }
 
   .pw-hero {
-    padding: 22px;
+    padding: 24px;
   }
 
   .pw-sheet {
     bottom: 24px;
-    border-radius: 24px;
+    border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
     max-height: calc(100svh - 48px);
   }
 }
@@ -2323,8 +2389,85 @@ html[data-motion="calm"] .pw-shell *::after {
   transition: none !important;
 }
 
-html[data-motion="calm"] .pw-btn:active {
+html[data-motion="calm"] .pw-btn:active,
+html[data-motion="calm"] .pw-route-card:active,
+html[data-motion="calm"] .pw-hact-btn:active {
   transform: none;
+}
+
+/* ---------- ayudante: "¿Con qué ruta vas?", "Por retirar" y checklist arriba ---------- */
+.pw-route-cards {
+  display: grid;
+  gap: 12px;
+}
+
+.pw-route-card {
+  display: grid;
+  gap: 6px;
+  min-height: 88px;
+  border: 2px solid var(--pw-accent);
+  border-radius: var(--radius-blob-a, 28px 22px 32px 24px);
+  padding: 18px 20px;
+  background: var(--pw-card);
+  color: var(--pw-ink);
+  box-shadow: var(--pw-shadow);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pw-route-card:focus-visible {
+  outline: 3px solid var(--pw-focus);
+  outline-offset: 3px;
+}
+
+.pw-route-card:active {
+  transform: scale(0.99);
+}
+
+.pw-route-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.4rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.pw-route-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pw-muted);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pw-route-card-meta b {
+  color: var(--pw-ink);
+}
+
+.pw-title-end {
+  margin-left: auto;
+}
+
+.pw-hcard--next {
+  border-color: var(--pw-line);
+}
+
+.pw-hcard--next .pw-hcard-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.pw-hcard-time {
+  color: var(--pw-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-hcheck {
+  display: grid;
+  gap: 10px;
 }
 
 @media (prefers-reduced-motion: reduce) {

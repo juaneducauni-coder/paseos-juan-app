@@ -31,24 +31,49 @@ export function loginPage() {
         <p class="acc-eyebrow">${setup ? "Primera vez" : "Equipo de Paseos Juan"}</p>
         <h1 id="acc-titulo">${setup ? "Creá el usuario administrador" : "Ingresar"}</h1>
         <p class="acc-lead">${setup
-          ? "Todavía no hay usuarios. El primero que se crea es el administrador (Juan). Después, desde el panel del admin, se crean los usuarios del equipo."
+          ? "Configuración inicial: creá el primer usuario administrador."
           : "Entrá con tu usuario y tu PIN. Si no tenés usuario, pedíselo a Juan."}</p>
         ${estado.necesitaConfiguracion === null ? `<p class="acc-status" role="status">Conectando…</p>` : `
         <form class="acc-form" data-acc-form="${setup ? "setup" : "login"}" novalidate>
-          ${setup ? `<label>Tu nombre <input name="nombre" autocomplete="name" required value="Juan Buitrago" /></label>` : ""}
-          <label>Usuario <input name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required placeholder="Ej. juan" ${setup ? 'value="juan"' : ""} /></label>
-          <label>PIN <input name="pin" type="password" inputmode="numeric" autocomplete="${setup ? "new-password" : "current-password"}" pattern="[0-9]*" minlength="6" maxlength="8" required placeholder="6 a 8 números" /></label>
-          ${setup ? `<label>Código de configuración <input name="codigo" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Te lo pasó JUAN 3.0" /></label>` : ""}
-          ${setup ? `<label>Repetí el PIN <input name="pin2" type="password" inputmode="numeric" autocomplete="new-password" minlength="6" maxlength="8" required /></label>
-          <p class="acc-help">Elegí 6 a 8 números que no sean fáciles de adivinar (nada de 123456 ni tu fecha de nacimiento).</p>` : ""}
+          ${setup ? `<label>Tu nombre <input name="nombre" autocomplete="name" required placeholder="Ej. Tu nombre y apellido" /></label>` : ""}
+          <label>Usuario <input name="usuario" autocomplete="username" autocapitalize="none" spellcheck="false" required placeholder="Ej. tu usuario" /></label>
+          ${campoPin("PIN", "pin", setup ? "new-password" : "current-password", "6 a 8 números")}
+          ${setup ? `${campoPin("Repetí el PIN", "pin2", "new-password", "El mismo PIN otra vez")}
+          <p class="acc-help">Elegí 6 a 8 números que no sean fáciles de adivinar (nada de 123456 ni tu fecha de nacimiento).</p>
+          <label>Código de configuración <input name="codigo" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Ingresá el código de activación" /></label>` : ""}
           <button class="acc-button" type="submit">${setup ? "Crear y entrar" : "Entrar"}</button>
         </form>
         ${setup ? "" : `<div class="acc-google" data-acc-google hidden><span class="acc-o">o</span><div data-acc-google-boton></div></div>`}`}
         <p class="acc-status ${estado.error ? "is-error" : ""}" data-acc-status role="status" aria-live="polite">${esc(estado.mensaje)}</p>
-        <p class="acc-foot"><a href="/" data-link>Volver a la página de Paseos Juan</a></p>
+        <p class="acc-foot"><a class="acc-button is-secondary acc-back" href="/" data-link>← Volver al inicio</a></p>
       </section>
     </main>
   `);
+}
+
+// Campo de PIN con botón "Ver" para mostrar u ocultar los números.
+function campoPin(texto, nombre, autocomplete, placeholder = "") {
+  const id = `acc-${nombre}`;
+  return `<div class="acc-field">
+            <label for="${id}">${texto}</label>
+            <span class="acc-pin-wrap">
+              <input id="${id}" name="${nombre}" type="password" inputmode="numeric" autocomplete="${autocomplete}" pattern="[0-9]*" minlength="6" maxlength="8" required ${placeholder ? `placeholder="${placeholder}"` : ""} />
+              <button class="acc-ver" type="button" data-acc-ver="${id}" aria-controls="${id}" aria-pressed="false" aria-label="Ver ${texto}">Ver</button>
+            </span>
+          </div>`;
+}
+
+function onVerPin(event) {
+  const boton = event.target.closest("[data-acc-ver]");
+  if (!boton) return;
+  const input = document.getElementById(boton.dataset.accVer);
+  if (!input) return;
+  const mostrar = input.type === "password";
+  input.type = mostrar ? "text" : "password";
+  boton.textContent = mostrar ? "Ocultar" : "Ver";
+  boton.setAttribute("aria-pressed", String(mostrar));
+  const etiqueta = boton.getAttribute("aria-label").replace(/^(Ver|Ocultar) /, "");
+  boton.setAttribute("aria-label", `${mostrar ? "Ocultar" : "Ver"} ${etiqueta}`);
 }
 
 function yaIngresado(user) {
@@ -128,6 +153,7 @@ async function onSubmit(event) {
   const data = Object.fromEntries(new FormData(form));
   const button = form.querySelector("button[type=submit]");
 
+  if (tipo === "setup" && !String(data.nombre || "").trim()) return setStatus(form, "Completá tu nombre.", true);
   if (tipo === "setup" && data.pin !== data.pin2) return setStatus(form, "Los dos PIN no coinciden.", true);
   if (tipo === "pin" && data.nuevo !== data.nuevo2) return setStatus(form, "Los dos PIN nuevos no coinciden.", true);
   if (tipo !== "pin" && (!data.usuario || !data.pin)) return setStatus(form, "Completá usuario y PIN.", true);
@@ -161,6 +187,7 @@ async function onSubmit(event) {
 
 export function registerAccesoEvents() {
   document.addEventListener("submit", onSubmit);
+  document.addEventListener("click", onVerPin);
 }
 
 // Botón "Entrar con Google" en el ingreso (solo si Google está activado en el servidor).

@@ -15,6 +15,60 @@ function check(part, what) {
   return String(part);
 }
 
+// ---------- Cambios parciales del usuario (ingreso, fallos de PIN, desactivación) ----------
+// El ingreso no reescribe el usuario completo que leyó antes: así no deshace una desactivación
+// o un cambio de PIN que el admin hizo mientras tanto. Cada store lee y combina "adentro" de un
+// bloqueo (en Sheets, el LockService del script; en local y Blob, una cola por usuario).
+
+// Suma un intento al contador del usuario. Se llama ANTES de comparar el PIN (y el ingreso
+// correcto lo vuelve a 0), así pedidos en paralelo no pueden probar más de `max` PIN por ventana.
+// Devuelve { bloqueado: true } si la cuenta ya estaba bloqueada (y entonces no cuenta nada).
+export function sumarFallo(user, max, minutos, ahora = Date.now()) {
+  if (user.bloqueadoHasta && Date.parse(user.bloqueadoHasta) > ahora) return { bloqueado: true, user };
+  const fallos = (Number(user.fallos) || 0) + 1;
+  const cambios = fallos >= max
+    ? { fallos: 0, bloqueadoHasta: new Date(ahora + minutos * 60000).toISOString() }
+    : { fallos };
+  return { bloqueado: false, user: { ...user, ...cambios } };
+}
+
+const colas = new Map();
+// Ejecuta fn después de la anterior con la misma clave (sirve dentro de una misma instancia).
+function enCola(clave, fn) {
+  const anterior = colas.get(clave) || Promise.resolve();
+  const actual = anterior.then(fn, fn);
+  const fin = actual.catch(() => {});
+  colas.set(clave, fin);
+  fin.then(() => {
+    if (colas.get(clave) === fin) colas.delete(clave);
+  });
+  return actual;
+}
+
+// Agrega putUser/patchUser/registrarFallo con cola por usuario a un store de archivos o Blob.
+function conCola(base) {
+  const getUser = base.getUser;
+  const putUser = base.putUser;
+  return {
+    ...base,
+    putUser: (user) => enCola(`u:${user.usuario}`, () => putUser(user)),
+    patchUser: (usuario, campos) => enCola(`u:${usuario}`, async () => {
+      const user = await getUser(usuario);
+      if (!user) return null;
+      const combinado = { ...user, ...campos, usuario: user.usuario };
+      await putUser(combinado);
+      return combinado;
+    }),
+    registrarFallo: (usuario, max, minutos) => enCola(`u:${usuario}`, async () => {
+      const user = await getUser(usuario);
+      if (!user) return { bloqueado: false };
+      const resultado = sumarFallo(user, max, minutos);
+      if (!resultado.bloqueado) await putUser(resultado.user);
+      return { bloqueado: resultado.bloqueado };
+    }),
+  };
+}
+
 // ---------- Archivos locales ----------
 function fileStore() {
   const root = path.resolve(process.env.DATA_DIR || ".data");
@@ -43,7 +97,7 @@ function fileStore() {
     }
   }
 
-  return {
+  return conCola({
     mode: "archivos locales",
     getUser: (u) => readJson(file("_usuarios", `${check(u, "Usuario")}.json`)),
     putUser: (user) => writeJson(file("_usuarios", `${check(user.usuario, "Usuario")}.json`), user),
@@ -75,7 +129,7 @@ function fileStore() {
         throw error;
       }
     },
-  };
+  });
 }
 
 // ---------- Vercel Blob (privado) ----------
@@ -116,7 +170,7 @@ function blobStore() {
     await del(pathname);
   }
 
-  return {
+  return conCola({
     mode: "Vercel Blob (provisorio)",
     getUser: (u) => readJson(key("_usuarios", check(u, "Usuario"))),
     putUser: (user) => writeJson(key("_usuarios", check(user.usuario, "Usuario")), user),
@@ -143,7 +197,7 @@ function blobStore() {
       if (!result) return null;
       return Buffer.from(await new Response(result.stream).arrayBuffer());
     },
-  };
+  });
 }
 
 // ---------- Google Sheets vía Apps Script ----------
@@ -170,10 +224,36 @@ function sheetsStore() {
     return data.result;
   }
 
+  // Si la planilla todavía tiene el script viejo (sin parcharUsuario/registrarFallo), se sigue
+  // funcionando como antes (sin la protección atómica) hasta que Juan pegue el Code.gs nuevo.
+  async function conRespaldo(action, payload, respaldo) {
+    try {
+      return await call(action, payload);
+    } catch (error) {
+      if (!/Acción desconocida/.test(error.message || "")) throw error;
+      console.warn(`[store] El Apps Script no tiene "${action}". Actualizá apps-script/Code.gs en la planilla.`);
+      return respaldo();
+    }
+  }
+
   return {
     mode: "Google Sheets",
     getUser: (u) => call("getUser", { usuario: check(u, "Usuario") }),
     putUser: (user) => call("putUser", { user }),
+    patchUser: (u, campos) => conRespaldo("patchUser", { usuario: check(u, "Usuario"), campos }, async () => {
+      const user = await call("getUser", { usuario: u });
+      if (!user) return null;
+      const combinado = { ...user, ...campos, usuario: user.usuario };
+      await call("putUser", { user: combinado });
+      return combinado;
+    }),
+    registrarFallo: (u, max, minutos) => conRespaldo("registrarFallo", { usuario: check(u, "Usuario"), max, minutos }, async () => {
+      const user = await call("getUser", { usuario: u });
+      if (!user) return { bloqueado: false };
+      const resultado = sumarFallo(user, max, minutos);
+      if (!resultado.bloqueado) await call("putUser", { user: resultado.user });
+      return { bloqueado: resultado.bloqueado };
+    }),
     listUsers: () => call("listUsers"),
     deleteUser: (u) => call("deleteUser", { usuario: check(u, "Usuario") }),
     get: (col, id) => call("get", { col: check(col, "Colección"), id: check(id, "Identificador") }),

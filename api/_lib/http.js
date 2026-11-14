@@ -66,3 +66,53 @@ export function clientIp(req) {
   if (forwarded) return String(forwarded).split(",")[0].trim();
   return req.socket?.remoteAddress || "desconocida";
 }
+
+// Clave para limitar por conexión: IPv4 tal cual; IPv6 recortada al bloque /64 (un mismo
+// cliente suele tener millones de direcciones dentro de su /64).
+export function ipClave(ip) {
+  let valor = String(ip || "desconocida").trim().toLowerCase();
+  if (valor.startsWith("::ffff:") && valor.includes(".")) return valor.slice(7);
+  if (!valor.includes(":")) return valor;
+  valor = valor.split("%")[0];
+  const doble = valor.includes("::");
+  const [izq, der = ""] = valor.split("::");
+  const a = izq ? izq.split(":") : [];
+  const b = doble && der ? der.split(":") : [];
+  const faltan = doble ? Math.max(0, 8 - a.length - b.length) : 0;
+  const partes = [...a, ...Array(faltan).fill("0"), ...b];
+  return `${partes.slice(0, 4).map((p) => p.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+// Límite simple en memoria (por instancia de la función): hasta `max` marcas por `ventanaMs`.
+// usar() suma una marca o corta con 429; devolver() la saca (por ejemplo, si el ingreso salió bien).
+export function limitador(max, ventanaMs, mensaje) {
+  const marcas = new Map();
+  let contador = 0;
+  function limpiar(ahora) {
+    for (const [clave, lista] of marcas) {
+      const vigentes = lista.filter((m) => ahora - m.t < ventanaMs);
+      if (vigentes.length) marcas.set(clave, vigentes);
+      else marcas.delete(clave);
+    }
+  }
+  return {
+    usar(clave) {
+      const ahora = Date.now();
+      if (marcas.size > 5000) limpiar(ahora);
+      const lista = (marcas.get(clave) || []).filter((m) => ahora - m.t < ventanaMs);
+      if (lista.length >= max) {
+        marcas.set(clave, lista);
+        throw new HttpError(429, mensaje);
+      }
+      const marca = { t: ahora, n: (contador += 1) };
+      lista.push(marca);
+      marcas.set(clave, lista);
+      return marca;
+    },
+    devolver(clave, marca) {
+      const resto = (marcas.get(clave) || []).filter((m) => m !== marca);
+      if (resto.length) marcas.set(clave, resto);
+      else marcas.delete(clave);
+    },
+  };
+}

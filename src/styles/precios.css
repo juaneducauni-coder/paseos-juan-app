@@ -2,10 +2,10 @@
 
 .precios-main {
   display: grid;
-  gap: 16px;
+  gap: 22px;
   max-width: 860px;
   margin: 0 auto;
-  padding: 116px 16px 48px;
+  padding: 120px var(--gutter-mobile, 20px) 56px;
 }
 
 .precios-head h1 {
@@ -19,18 +19,21 @@
 }
 
 .precios-fecha {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   color: var(--ink);
   font-size: 1.05rem;
+  line-height: 1.55;
 }
 
 .precios-aviso {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
+  max-width: min(100%, var(--measure, 64ch));
   color: var(--public-muted);
   font-weight: 700;
+  line-height: 1.55;
 }
 
 .precios-aviso .line-icon {
@@ -42,16 +45,20 @@
 
 .precios-card,
 .precios-cta {
-  border: 1px solid var(--line);
-  border-radius: 24px;
+  border: 1px solid rgba(15, 31, 19, 0.08);
+  border-radius: var(--radius-blob-a, 34px 22px 38px 24px / 24px 36px 22px 32px);
   background: var(--public-card);
   box-shadow: var(--soft-shadow);
-  padding: 20px 16px;
+  padding: 24px 20px;
+}
+
+.precios-card:nth-of-type(even) {
+  border-radius: var(--radius-blob-b, 24px 36px 22px 34px / 32px 24px 36px 22px);
 }
 
 .precios-card h2,
 .precios-cta h2 {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   font-size: 1.25rem;
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -59,8 +66,10 @@
 }
 
 .precios-sub {
-  margin: 0 0 14px;
+  margin: 0 0 16px;
+  max-width: min(100%, var(--measure, 64ch));
   color: var(--public-muted);
+  line-height: 1.58;
 }
 
 .precios-table-wrap {
@@ -81,7 +90,7 @@
 .precios-table th,
 .precios-table td {
   border-top: 1px solid var(--line);
-  padding: 12px 4px;
+  padding: 14px 8px;
   text-align: right;
 }
 
@@ -117,7 +126,7 @@
 .precios-descuentos {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 12px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -126,21 +135,24 @@
 .precios-descuentos li {
   display: grid;
   justify-items: center;
-  gap: 2px;
-  border-radius: 18px;
+  gap: 4px;
+  border-radius: var(--radius-blob-sm, 20px 14px 22px 15px / 15px 22px 14px 20px);
   background: var(--public-tint);
-  padding: 14px 6px;
+  padding: 16px 10px;
 }
 
 .precios-descuentos strong {
   color: var(--green);
-  font-size: 1.6rem;
+  font-size: 1.35rem;
   font-weight: 950;
+  line-height: 1.1;
+  text-align: center;
 }
 
 .precios-descuentos span {
   color: var(--ink);
   font-weight: 700;
+  text-align: center;
 }
 
 .precios-consultar {
@@ -155,9 +167,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   border-top: 1px solid var(--line);
-  padding: 12px 0;
+  padding: 16px 0;
 }
 
 .precios-consultar li:first-child {
@@ -167,31 +179,38 @@
 .precios-consultar strong {
   display: block;
   color: var(--ink);
+  line-height: 1.45;
 }
 
 .precios-consultar span {
   color: var(--public-muted);
   font-size: 0.92rem;
+  line-height: 1.55;
 }
 
 .precios-consultar .secondary-button {
   flex: none;
-  min-height: 48px;
-  padding: 0 16px;
+  min-height: var(--touch-min, 48px);
+  border-radius: var(--radius-btn, 22px 15px 24px 16px / 16px 24px 15px 22px);
+  padding: 0 18px;
   font-size: 0.82rem;
 }
 
 .precios-cta {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   border: 0;
+  border-radius: 40px 24px 44px 26px / 24px 42px 26px 40px;
   background: #015f3d;
+  box-shadow: var(--shadow);
   color: #ffffff;
 }
 
 .precios-cta p {
   margin: 0;
+  max-width: min(100%, var(--measure, 64ch));
   color: #e3efe8;
+  line-height: 1.58;
 }
 
 .precios-cta small {
@@ -239,12 +258,12 @@ html[data-theme="dark"] .precios-cta .secondary-button {
 
 @media (min-width: 640px) {
   .precios-main {
-    padding: 132px 24px 64px;
+    padding: 136px 28px 72px;
   }
 
   .precios-card,
   .precios-cta {
-    padding: 26px 28px;
+    padding: 30px 32px;
   }
 
   .precios-table td {
@@ -254,4 +273,19 @@ html[data-theme="dark"] .precios-cta .secondary-button {
   .precios-cta-actions {
     grid-template-columns: repeat(2, max-content);
   }
+}
+
+/* Más aire entre columnas de precios; la primera columna (plan) queda pegada al borde */
+.precios-table th:first-child {
+  padding-left: 0;
+}
+
+.precios-table th:last-child,
+.precios-table td:last-child {
+  padding-right: 0;
+}
+
+.precios-table tbody tr th,
+.precios-table tbody tr td {
+  padding-block: 16px;
 }
