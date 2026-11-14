@@ -8,6 +8,7 @@ App web de **Paseos Juan** (paseos **grupales** de perros en Pilar y La Lonja, A
 - Página pública: inicio (servicios, sin precios), `/precios`, `/tienda`, formulario de evaluación.
 - Páginas del equipo (usuario y PIN, o Google): `/admin`, `/coordinador`, `/supervisor`, `/paseador` (también para el ayudante).
 - Servidor: funciones de Vercel en `api/`. Datos en Google Sheets (vía `apps-script/Code.gs`) o, provisorio, Vercel Blob.
+- **Límite de Vercel (plan gratis): como máximo 12 funciones en `api/`.** No sumes archivos nuevos en `api/`: agregá la acción dentro de una función que ya existe (ver `api/auth.js` y `api/_rutas/`). Una prueba (`npm run test:api`) falla si se pasa el límite.
 - Contrato de datos, roles y permisos: **`docs/datos-compartidos.md`** (leelo antes de tocar nada).
 - Datos reales de perros, rutas y horarios: `src/data/realData.js`.
 

@@ -92,3 +92,8 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - **Encontrado y arreglado:** desde el servidor de chats (E-045), las versiones de prueba de Vercel fallaban al armarse: el plan gratis permite 12 funciones del servidor y había 14. Se agruparon las de ingreso (`/api/auth/...`) y las de clientes (`/api/clientes/...`) en una función cada una, con reglas en `vercel.json` para que las direcciones sigan iguales. Quedan 8 funciones.
 - 44 pruebas del servidor OK, armado OK, recorrido sin fallas, portal del cliente OK.
 - Comprobado en Vercel: la versión de prueba del commit 25cb864 quedó lista (READY); `/api/salud` y `/api/auth/me` responden bien con las reglas nuevas.
+
+## 14/11/2026 — 04:36 (revisión de cada hora)
+
+- Prueba nueva: falla si `api/` pasa las 12 funciones de Vercel (para que no vuelva a romperse la versión de prueba). Regla anotada en `AGENTS.md` para ChatGPT y Gemini.
+- 45 pruebas del servidor OK, armado OK, recorrido sin fallas.

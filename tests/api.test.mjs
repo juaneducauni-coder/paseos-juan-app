@@ -1089,3 +1089,15 @@ test("revisión de la noche: rutas sin pisar, avisos sin duplicar y reintentos c
   assert.equal(b.body.mensaje.id, a.body.mensaje.id);
 });
 
+test("Vercel: no más de 12 funciones del servidor (límite del plan gratis)", async () => {
+  const { readdirSync, statSync } = await import("node:fs");
+  const raiz = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "api");
+  const contar = (dir) => readdirSync(dir).reduce((total, nombre) => {
+    if (nombre.startsWith("_") || nombre.startsWith(".")) return total;
+    const ruta = path.join(dir, nombre);
+    return total + (statSync(ruta).isDirectory() ? contar(ruta) : /\.(js|mjs|ts)$/.test(nombre) ? 1 : 0);
+  }, 0);
+  const funciones = contar(raiz);
+  assert.ok(funciones <= 12, `Hay ${funciones} funciones en api/: el plan gratis de Vercel permite 12. Agrupalas (ver api/auth.js).`);
+});
+
