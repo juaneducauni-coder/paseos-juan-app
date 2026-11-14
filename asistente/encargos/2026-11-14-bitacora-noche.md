@@ -86,3 +86,9 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
   - El chat pide los mensajes nuevos con 2 minutos de margen (no se pierde uno que tardó en guardarse).
 - Pruebas: 44 del servidor OK, armado OK, recorrido sin fallas, mensajes sin señal OK, prueba de pérdida de paseos pendientes: ya no se pierden.
 - Queda anotado (sin urgencia): con el almacenamiento provisorio, cada chat abierto relee el canal entero cuando hay algo nuevo; conviene conectar la planilla.
+
+## 14/11/2026 — 03:36 (revisión de cada hora)
+
+- **Encontrado y arreglado:** desde el servidor de chats (E-045), las versiones de prueba de Vercel fallaban al armarse: el plan gratis permite 12 funciones del servidor y había 14. Se agruparon las de ingreso (`/api/auth/...`) y las de clientes (`/api/clientes/...`) en una función cada una, con reglas en `vercel.json` para que las direcciones sigan iguales. Quedan 8 funciones.
+- 44 pruebas del servidor OK, armado OK, recorrido sin fallas, portal del cliente OK.
+- Comprobado en Vercel: la versión de prueba del commit 25cb864 quedó lista (READY); `/api/salud` y `/api/auth/me` responden bien con las reglas nuevas.
