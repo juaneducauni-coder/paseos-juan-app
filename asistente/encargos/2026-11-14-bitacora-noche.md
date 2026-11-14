@@ -97,3 +97,9 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 
 - Prueba nueva: falla si `api/` pasa las 12 funciones de Vercel (para que no vuelva a romperse la versión de prueba). Regla anotada en `AGENTS.md` para ChatGPT y Gemini.
 - 45 pruebas del servidor OK, armado OK, recorrido sin fallas.
+
+## 14/11/2026 — 05:38 (revisión de cada hora)
+
+- 45 pruebas del servidor OK, armado OK, recorrido sin fallas. 45 cambios subidos desde el comienzo de la noche.
+- Resumen para Juan preparado: `asistente/encargos/2026-11-14-resumen-para-juan.md`.
+- Sigue: revisión de las 06:30, borrar la tarea programada y dejar el resumen final.
