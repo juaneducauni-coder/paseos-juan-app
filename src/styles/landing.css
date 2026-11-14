@@ -547,6 +547,70 @@ html[data-theme="dark"] .prices-strip .primary-button {
   line-height: 1.62;
 }
 
+/* Preguntas frecuentes: cada pregunta es un blanco de toque de 48 px como mínimo. */
+.trust-section .faq details {
+  padding: 4px 0;
+}
+
+.trust-section .faq summary {
+  box-sizing: border-box;
+  min-height: var(--touch-min, 48px);
+  padding: 12px 0;
+  line-height: 1.5;
+}
+
+.trust-section .faq details p {
+  margin: 0 0 12px;
+}
+
+/* Bloques secundarios de la página de inicio: plegados para que la página sea más corta. */
+.landing-fold {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.landing-fold > summary {
+  display: inline-flex;
+  min-height: var(--touch-min, 48px);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(2, 95, 64, 0.2);
+  border-radius: 999px;
+  background: var(--public-card);
+  color: var(--green);
+  font-weight: 850;
+  list-style: none;
+  padding: 0 18px;
+}
+
+.landing-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-fold > summary .pill-icon,
+.landing-fold-chevron {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.landing-fold[open] > summary {
+  margin-bottom: 20px;
+}
+
+.landing-fold[open] .landing-fold-chevron {
+  transform: rotate(180deg);
+}
+
+.landing-fold > summary:focus-visible {
+  outline: 3px solid var(--green);
+  outline-offset: 3px;
+}
+
+html[data-theme="dark"] .landing-fold > summary {
+  border-color: rgba(92, 196, 151, 0.4);
+}
+
 @media (max-width: 760px) {
   .services-section,
   .how-section {

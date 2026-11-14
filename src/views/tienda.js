@@ -83,7 +83,7 @@ function productCard(product, cart) {
               <output aria-live="off">${qty}</output>
               <button type="button" data-tienda="sumar" data-id="${product.id}" aria-label="Sumar un ${esc(product.nombre)}" ${qty >= MAX_QTY ? "disabled" : ""}>+</button>
             </div>`
-          : `<button class="tienda-add" type="button" data-tienda="sumar" data-id="${product.id}">${hasPrice(product) ? "Sumar al pedido" : "Consultar este producto"}<span class="visually-hidden">: ${esc(product.nombre)}</span></button>`}
+          : `<button class="tienda-add" type="button" data-tienda="sumar" data-id="${product.id}">${hasPrice(product) ? "Sumar al pedido" : "Consultar"}<span class="visually-hidden"> ${esc(product.nombre)}</span></button>`}
       </div>
     </article>
   `;

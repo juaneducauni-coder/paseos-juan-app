@@ -14,8 +14,28 @@ import { publicShell, publicFooter } from "./landing.js";
 
 const MENSAJE_CONSULTAR = "Hola, vi los precios en la página y quiero consultar por los paseos grupales para mi perro.";
 
+// En el celular cada opción es una tarjeta con un renglón por tamaño (precios enteros, sin
+// cortes); en pantallas anchas se ve la tabla. Solo una de las dos está visible.
+function tarjetasPorTamano({ caption, filas }) {
+  return `
+    <ul class="precios-planes" aria-label="${caption}">
+      ${filas.map((fila) => `
+        <li class="precios-plan">
+          <p class="precios-plan-titulo"><strong>${fila.titulo}</strong>${fila.detalle ? `<span>${fila.detalle}</span>` : ""}</p>
+          <dl>
+            ${TAMANOS.map((tamano) => `
+              <div><dt>${tamano}</dt><dd>${formatoPesos(fila.precios[tamano])}</dd></div>
+            `).join("")}
+          </dl>
+        </li>
+      `).join("")}
+    </ul>
+  `;
+}
+
 function tablaPorTamano({ caption, filas }) {
   return `
+    ${tarjetasPorTamano({ caption, filas })}
     <div class="precios-table-wrap">
       <table class="precios-table">
         <caption class="visually-hidden">${caption}</caption>

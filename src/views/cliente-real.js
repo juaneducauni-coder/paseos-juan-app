@@ -31,6 +31,7 @@ const ui = {
   cargado: new Set(),
   pago: { estado: "cargando", alias: "", instrucciones: "" },
   pagoPedido: false,
+  reglasAbiertas: false,
 };
 
 // Consultas que se repiten mientras la página está abierta (se cortan al salir de /cliente).
@@ -266,7 +267,6 @@ function encabezado(user) {
         <h1 class="clr-hola">${nombre ? `Hola, ${esc(nombre)}` : "Hola"}</h1>
         <p class="clr-fecha">${esc(diaSemana(hoy))} ${esc(ddmmaaaa(hoy))}</p>
       </div>
-      <a class="cl-btn is-ghost is-small clr-salir" href="/salir" data-link>${icon("logOut", "cl-icon-sm")} Cerrar sesión</a>
     </header>
   `;
 }
@@ -579,10 +579,10 @@ function reglasBloque() {
   const silenciado = hasta && hasta.getTime() > Date.now();
   return `
     ${Array.isArray(reglas) && reglas.length ? `
-      <div class="clr-reglas">
-        <p class="cl-h4">${icon("shieldCheck", "cl-icon-sm")} Reglas</p>
+      <details class="clr-reglas" data-clr-reglas ${ui.reglasAbiertas ? "open" : ""}>
+        <summary>${icon("shieldCheck", "cl-icon-sm")} Reglas de la comunidad ${icon("chevronDown", "cl-icon-sm cl-chevron")}</summary>
         <ul>${reglas.map((regla) => `<li>${esc(regla)}</li>`).join("")}</ul>
-      </div>
+      </details>
     ` : ""}
     ${silenciado ? `<p class="cl-warning" data-clr-silenciado>${icon("alertCircle", "cl-icon-sm")} El admin te silenció hasta el ${esc(ddmmaaaa(hoyAR(hasta)))} a las ${esc(horaAR(hasta))}.</p>` : ""}
   `;
@@ -653,7 +653,7 @@ function actualizar(region) {
   const element = root.querySelector(`[data-clr-region="${region}"]`);
   if (!element) return;
   const focoDentro = element.contains(document.activeElement) ? document.activeElement : null;
-  const focoClave = focoDentro?.dataset?.clrFoto || (focoDentro?.matches?.("[data-clr-mas]") ? "mas" : "") || (focoDentro?.matches?.("[data-clr-copiar]") ? "copiar" : "");
+  const focoClave = focoDentro?.dataset?.clrFoto || (focoDentro?.matches?.("[data-clr-mas]") ? "mas" : "") || (focoDentro?.matches?.("[data-clr-copiar]") ? "copiar" : "") || (focoDentro?.matches?.("[data-clr-reglas] > summary") ? "reglas" : "");
   let pegadoAbajo = false;
   if (region === "comunidad") pegadoAbajo = element.scrollHeight - element.scrollTop - element.clientHeight < 40 || !element.dataset.clrListo;
   element.innerHTML = REGIONES[region]();
@@ -663,7 +663,8 @@ function actualizar(region) {
   }
   if (region === "reglas") estadoComposerComunidad();
   if (focoClave) {
-    const selector = focoClave === "mas" ? "[data-clr-mas]" : focoClave === "copiar" ? "[data-clr-copiar]" : `[data-clr-foto="${CSS.escape(focoClave)}"]`;
+    const fijos = { mas: "[data-clr-mas]", copiar: "[data-clr-copiar]", reglas: "[data-clr-reglas] > summary" };
+    const selector = fijos[focoClave] || `[data-clr-foto="${CSS.escape(focoClave)}"]`;
     element.querySelector(selector)?.focus({ preventScroll: true });
   }
 }
@@ -872,7 +873,12 @@ async function handleSubmit(event) {
 
 function handleToggle(event) {
   const details = event.target;
-  if (!(details instanceof HTMLDetailsElement) || !details.dataset.clrPanel) return;
+  if (!(details instanceof HTMLDetailsElement)) return;
+  if (details.matches("[data-clr-reglas]")) {
+    ui.reglasAbiertas = details.open;
+    return;
+  }
+  if (!details.dataset.clrPanel) return;
   const id = details.dataset.clrPanel;
   if (details.open !== ui.open.has(id)) abrioPanel(id, details.open);
 }

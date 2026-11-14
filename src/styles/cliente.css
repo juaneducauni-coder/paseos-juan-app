@@ -2168,6 +2168,84 @@ body:has(.clr-page) .floating-chat {
   display: none !important;
 }
 
+/* El botón redondo de accesibilidad tapaba las tarjetas: en esta página se abre desde
+   "Tema y movimiento", arriba. El panel sigue saliendo abajo a la izquierda. */
+body:has(.clr-page) #a11y-root .a11y-toggle {
+  display: none;
+}
+
+/* ---- Encabezado mínimo del cliente: logo + "Mi página" y "Tema y movimiento" ---- */
+
+.topbar.topbar-cliente {
+  gap: 10px;
+}
+
+.topbar-cliente .brand {
+  flex: 0 1 auto;
+}
+
+.topbar-cliente .brand span:last-child {
+  display: grid;
+}
+
+.topbar-cliente .brand strong {
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.topbar-cliente .brand small {
+  display: block;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.topbar-a11y {
+  display: inline-flex;
+  min-width: var(--touch-min, 48px);
+  min-height: var(--touch-min, 48px);
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(2, 95, 64, 0.2);
+  border-radius: 999px;
+  background: rgba(2, 95, 64, 0.08);
+  color: #025f40;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.15;
+  padding: 6px 14px;
+  text-align: left;
+}
+
+.topbar-a11y-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.topbar-a11y:focus-visible {
+  outline: 3px solid #5cc497;
+  outline-offset: 2px;
+}
+
+html[data-theme="dark"] .topbar-a11y {
+  border-color: rgba(92, 196, 151, 0.4);
+  background: rgba(92, 196, 151, 0.12);
+  color: #5cc497;
+}
+
+@media (max-width: 400px) {
+  .topbar-a11y {
+    max-width: 128px;
+    padding: 4px 12px;
+  }
+}
+
 .clr-head {
   display: flex;
   flex-wrap: wrap;
@@ -2489,20 +2567,45 @@ body:has(.clr-page) .floating-chat {
   border: 0;
 }
 
+/* Reglas de la comunidad: plegadas, para que primero se vea dónde escribir. */
 .clr-reglas {
   display: grid;
   gap: 6px;
   border: 1px dashed var(--cl-line-strong);
   border-radius: var(--radius-blob-sm, 20px 14px 22px 15px / 15px 22px 14px 20px);
   background: var(--cl-card-2);
-  padding: 14px 16px;
+  padding: 0 16px;
+}
+
+.clr-reglas > summary {
+  display: flex;
+  min-height: var(--touch-min, 48px);
+  align-items: center;
+  gap: 8px;
+  color: var(--cl-ink);
+  font-weight: 850;
+  cursor: pointer;
+  list-style: none;
+}
+
+.clr-reglas > summary::-webkit-details-marker {
+  display: none;
+}
+
+.clr-reglas > summary .cl-chevron {
+  margin-left: auto;
+  color: var(--cl-muted);
+}
+
+.clr-reglas[open] > summary .cl-chevron {
+  transform: rotate(180deg);
 }
 
 .clr-reglas ul {
   display: grid;
   gap: 4px;
   margin: 0;
-  padding-left: 1.2em;
+  padding: 0 0 14px 1.2em;
   color: var(--cl-text);
   font-size: 0.94rem;
   line-height: 1.45;
