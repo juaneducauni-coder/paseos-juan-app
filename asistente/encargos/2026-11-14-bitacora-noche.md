@@ -72,3 +72,17 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - Avisos automáticos urgentes en rojo en el chat. 43 pruebas del servidor OK, armado OK, recorrido sin fallas.
 - En curso: revisión de código independiente de todo lo hecho esta noche (40 cambios), buscando errores antes de publicar.
 - Sigue: arreglar lo que encuentre y preparar el resumen para Juan.
+
+## 14/11/2026 — 03:10 aprox.
+
+- **Revisión de código independiente de la noche:** 9 hallazgos, arreglados los importantes:
+  - (Ya estaba antes) Si en un celular cambiaba el usuario o vencía la sesión, se borraban paseos sin enviar. Ahora quedan guardados hasta que esa persona vuelva a entrar o renueve la sesión.
+  - "Cargar todas" y "Editar" del coordinador podían pisar rutas guardadas. Ahora el servidor no pisa lo guardado ("solo crear") y la pantalla solo ofrece cargar cuando leyó la lista del servidor.
+  - Dos guardados casi juntos del mismo paseo mandaban dos avisos al cliente. Ahora el aviso tiene un id fijo y sale una sola vez.
+  - Un reintento de mensaje con el reloj del celular corrido se duplicaba. Ahora el servidor guarda qué mensaje salió de cada reintento.
+  - "Sin leer" daba 0 si el último mensaje era mío. Corregido.
+  - Pedido de cambio en Coordinación: sin "URGENTE" repetido y sin códigos de ruta.
+  - Dos "Aprobar" del mismo pedido creaban dos clientes. Ahora un pedido crea un solo cliente.
+  - El chat pide los mensajes nuevos con 2 minutos de margen (no se pierde uno que tardó en guardarse).
+- Pruebas: 44 del servidor OK, armado OK, recorrido sin fallas, mensajes sin señal OK, prueba de pérdida de paseos pendientes: ya no se pierden.
+- Queda anotado (sin urgencia): con el almacenamiento provisorio, cada chat abierto relee el canal entero cuando hay algo nuevo; conviene conectar la planilla.

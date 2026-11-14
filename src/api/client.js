@@ -201,9 +201,16 @@ function mergePending(col, list) {
   return [...byId.values()];
 }
 
+const desdeServidor = new Set();
+
 export const registros = {
   cached(col, opts = {}) {
     return mergePending(col, readJson(cacheKey(col, opts), []));
+  },
+
+  // true si en esta visita la colección ya se leyó del servidor (no solo de lo guardado en el celular).
+  desdeServidor(col) {
+    return desdeServidor.has(col);
   },
 
   async list(col, opts = {}) {
@@ -212,6 +219,7 @@ export const registros = {
     if (opts.prefijo) params.set("prefijo", opts.prefijo);
     try {
       const data = await request(`/api/registros?${params}`);
+      desdeServidor.add(col);
       const before = localStorage.getItem(cacheKey(col, opts));
       writeJson(cacheKey(col, opts), data.registros);
       if (before !== JSON.stringify(data.registros)) emit(col);
@@ -237,7 +245,10 @@ export const registros = {
       const all = readJson(OUTBOX_KEY, []);
       const prev = all.find((p) => p.col === col && p.data.id === record.id);
       const outbox = all.filter((p) => p !== prev && !(p.col === col && p.data.id === record.id));
-      outbox.push({ op: "save", col, data: { ...(prev?.data || {}), ...record }, usuario: session.user()?.usuario, at: Date.now() });
+      const data = { ...(prev?.data || {}), ...record };
+      // Un cambio posterior del mismo registro ya no es "solo crear": es lo último que quiso la persona.
+      if (!record.soloCrear) delete data.soloCrear;
+      outbox.push({ op: "save", col, data, usuario: session.user()?.usuario, at: Date.now() });
       writeJson(OUTBOX_KEY, outbox);
       emit(col);
       return { ...record, pendiente: true };
@@ -252,8 +263,10 @@ export const registros = {
     emit(col);
   },
 
+  // Solo lo mío: lo que dejó otra persona en este celular se manda cuando ella vuelva a entrar.
   pendingCount() {
-    return readJson(OUTBOX_KEY, []).length;
+    const me = session.user()?.usuario;
+    return readJson(OUTBOX_KEY, []).filter((item) => !item.usuario || item.usuario === me).length;
   },
 
   // Refresca cada minuto mientras la pestaña está visible. Devuelve una función para cortar.
@@ -310,11 +323,9 @@ export async function flushPending() {
   const touched = new Set();
   try {
     for (const item of outbox) {
-      // Lo que dejó pendiente otra persona en este mismo celular no se envía con mi usuario.
-      if (item.usuario && item.usuario !== me) {
-        done.add(item.at);
-        continue;
-      }
+      // Lo que dejó pendiente otra persona en este mismo celular no se envía con mi usuario:
+      // queda guardado para cuando esa persona vuelva a entrar (no se borra).
+      if (item.usuario && item.usuario !== me) continue;
       try {
         if (item.op === "save") {
           const result = await request("/api/registros", { method: "POST", body: { col: item.col, ...item.data } });
@@ -323,8 +334,12 @@ export async function flushPending() {
         }
         done.add(item.at);
       } catch (error) {
-        // Sin señal: queda para después. Otros errores (permiso, datos inválidos) no se reintentan.
-        if (error.status !== 0) done.add(item.at);
+        // Sin señal, sesión vencida (401), servidor caído (5xx) o "esperá" (429): queda para después.
+        // Otros errores (permiso, datos inválidos) no se reintentan.
+        const reintentar = error.status === 0 || error.status === 401 || error.status === 408 || error.status === 429 || error.status >= 500;
+        if (!reintentar) done.add(item.at);
+        // Con la sesión vencida no tiene sentido seguir probando el resto ahora.
+        if (error.status === 401) break;
       }
     }
   } finally {
@@ -687,7 +702,9 @@ export const mensajes = {
     // mensajes de otros que llegaron mientras tanto (por ejemplo, después de un rato sin señal).
     const desde = previos.filter((m) => !m.local).reduce((max, m) => [max, m.creadoEn || "", m.actualizadoEn || ""].sort().pop(), "");
     const params = new URLSearchParams({ canal });
-    if (desde) params.set("desde", desde);
+    // Con 2 minutos de margen: un mensaje que tardó en guardarse (hora anterior) no se pierde.
+    // Los repetidos se juntan por id.
+    if (desde) params.set("desde", new Date(Math.max(0, Date.parse(desde) - 2 * 60 * 1000)).toISOString());
     try {
       const data = await request(`/api/mensajes?${params}`);
       if (data.reglas) writeJson(`${MSJ_KEY(canal)}_info`, { reglas: data.reglas, silenciadoHasta: data.silenciadoHasta });

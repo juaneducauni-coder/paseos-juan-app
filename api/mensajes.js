@@ -19,7 +19,7 @@ import { store } from "./_lib/store.js";
 import { accesoCanal, CANALES_GRUPO, CANAL_COMUNIDAD, COMUNIDAD_ROLES, otroDelDirecto, puedeVerArchivoUsuario } from "./_lib/permisos.js";
 import {
   publicar, mensajesDe, clienteDelPerro, limpiarTextoMensaje, errorTexto, idLectura, TIPOS_MENSAJE,
-  REGLAS_COMUNIDAD, tieneDatosPrivados, borrarMensaje, silenciados, silenciar, datosDeReintento, idMensaje,
+  REGLAS_COMUNIDAD, tieneDatosPrivados, borrarMensaje, silenciados, silenciar, datosDeReintento,
 } from "./_lib/mensajes.js";
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
@@ -84,7 +84,8 @@ async function resumen(user) {
     const ultimo = indice?.ultimo || null;
     const leidoHasta = lecturas[canal] || "";
     let sinLeer = 0;
-    if (ultimo && ultimo.autor !== user.usuario && (!leidoHasta || ultimo.creadoEn > leidoHasta)) {
+    // Aunque el último sea mío, puede haber mensajes de otros sin leer antes: se cuentan igual.
+    if (ultimo && (!leidoHasta || ultimo.creadoEn > leidoHasta)) {
       sinLeer = contarSinLeer(await mensajesDe(canal, leidoHasta), user, leidoHasta);
     }
     canales.push({ canal, ...info, ultimo, sinLeer, leidoHasta: leidoHasta || null });
@@ -231,8 +232,8 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
   // Reintento de un mensaje escrito sin señal: si ya llegó, se devuelve el mismo (no se duplica).
   const reintento = datosDeReintento(body, user.usuario);
   if (reintento.sufijo) {
-    const id = idMensaje(canal, reintento.escritoEn || new Date(), reintento.sufijo);
-    const previo = reintento.escritoEn ? await store.get("mensajes", id) : null;
+    const indice = await store.get("reintentos", reintento.sufijo);
+    const previo = indice?.mensajeId ? await store.get("mensajes", indice.mensajeId) : null;
     if (previo && previo.autor === user.usuario) {
       return send(res, 200, { ok: true, repetido: true, mensaje: user.rol === "cliente" ? paraCliente(previo, user) : previo });
     }
@@ -245,8 +246,11 @@ export default handler({ GET: 1, POST: 1 }, async (req, res) => {
     perroId: enComunidad ? "" : perroId,
     perroNombre: enComunidad ? "" : limpiarTextoMensaje(body.perroNombre).slice(0, 60),
     autor: user,
-    reintento: reintento.sufijo && reintento.escritoEn ? reintento : null,
+    reintento: reintento.escritoEn ? { escritoEn: reintento.escritoEn } : null,
   });
+  if (reintento.sufijo) {
+    await store.put("reintentos", { id: reintento.sufijo, col: "reintentos", mensajeId: mensaje.id, creadoEn: mensaje.creadoEn });
+  }
   // Quien avisa por perro y no ve clientes no recibe el canal (no se entera de qué cliente es).
   if (porPerro && permiso.soloAvisos) {
     return send(res, 201, { ok: true, mensaje: { id: mensaje.id, texto: mensaje.texto, tipo: mensaje.tipo, perroId: mensaje.perroId, creadoEn: mensaje.creadoEn } });

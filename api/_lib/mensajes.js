@@ -62,8 +62,9 @@ export function idMensaje(canal, date = new Date(), sufijo = "") {
 }
 
 // Mensaje escrito sin señal (E-058): el celular manda su identificador (cid) y la hora en que se
-// escribió. El id queda fijo para ese cid, así un reintento no lo duplica. La hora vale si es de
-// las últimas 6 horas (y no del futuro); si no, se usa la hora en que llegó.
+// escribió. El servidor guarda en "reintentos" qué mensaje salió de cada cid (sufijo = usuario + cid),
+// así un reintento no lo duplica aunque el reloj del celular esté corrido. La hora escrita se
+// muestra si es de las últimas 6 horas (y no del futuro).
 const CID = /^c[a-z0-9]{6,24}$/;
 export function datosDeReintento(body, autor, ahora = new Date()) {
   const cid = typeof body.cid === "string" && CID.test(body.cid) ? body.cid : "";
@@ -95,8 +96,15 @@ function resumenUltimo(m) {
 // Guarda un mensaje y actualiza el último mensaje del canal.
 export async function publicar({ canal, texto, tipo = "texto", adjuntoId = "", perroId = "", perroNombre = "", autor, automatico = false, clave = "", reintento = null }) {
   const ahora = new Date();
+  // Con clave (avisos automáticos): el id sale de la clave, así dos guardados casi juntos del mismo
+  // paseo escriben el MISMO mensaje y el cliente no recibe el aviso dos veces.
+  const idFijo = clave ? idMensaje(canal, new Date(`${hoyAR(ahora)}T00:00:00.000Z`), createHash("sha256").update(clave).digest("hex").slice(0, 16)) : "";
+  if (idFijo) {
+    const yaEsta = await store.get("mensajes", idFijo);
+    if (yaEsta) return yaEsta;
+  }
   const mensaje = {
-    id: reintento?.sufijo ? idMensaje(canal, reintento.escritoEn || ahora, reintento.sufijo) : idMensaje(canal, ahora),
+    id: idFijo || idMensaje(canal, ahora),
     col: "mensajes",
     canal,
     fecha: hoyAR(ahora),

@@ -240,6 +240,10 @@ export default handler({ GET: 1, POST: 1, DELETE: 1 }, async (req, res) => {
 
     const ahora = new Date().toISOString();
     const previo = body.id ? await store.get(col, id) : null;
+    // soloCrear: cargar algo nuevo sin pisar lo que ya está guardado (por ejemplo, una ruta de la planilla).
+    const soloCrear = body.soloCrear === true;
+    delete body.soloCrear;
+    if (soloCrear && previo) throw new HttpError(409, "Ya estaba cargada: no se pisó lo guardado.");
     let datos = reglasPorRegistro(col, id, limpiar(body, coleccion(col).maxBytes), previo, user);
     if (col === "ajustes") datos = validarAjustes(id, datos);
     // El acceso del cliente (enlace) y la aprobación de Juan solo se cambian por /api/clientes/*.
@@ -331,7 +335,10 @@ async function avisoAlEquipo(col, registro, user) {
     await publicar({ canal: "calle", texto, tipo: "aviso", autor: user, automatico: true, clave: `incidente:${registro.id}` });
     return;
   }
-  const titulo = corto(registro.titulo || registro.tipo, 160);
+  // Sin "URGENTE" repetido (ya va adelante) y sin códigos internos de ruta.
+  const titulo = corto(registro.titulo || registro.tipo, 160)
+    .replace(/^URGENTE\s*·\s*/i, "")
+    .replace(/\bPJ_(\d+)[MT]\b/gi, "Ruta $1");
   const texto = `${registro.urgente ? "URGENTE · " : ""}Pedido de cambio de ${user.nombre}: ${titulo || "ver detalle"}. Respondelo en Pedidos.`;
   await publicar({ canal: "coordinacion", texto, tipo: "aviso", autor: user, automatico: true, clave: `solicitud:${registro.id}` });
 }

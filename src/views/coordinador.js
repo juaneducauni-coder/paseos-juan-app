@@ -749,6 +749,9 @@ function rutasPlanilla() {
 }
 
 function baseFaltantes() {
+  // Sin la lista del servidor (sin señal o recién entrando) no se sabe qué falta: no se ofrece
+  // cargar nada, así no se pisa una ruta guardada (el servidor igual rechaza pisarla).
+  if (!registros.desdeServidor("plantillas")) return [];
   const guardadas = new Set(getPlantillas().map((p) => plantillaId(p.ruta, p.dia)));
   return rutasPlanilla().filter((p) => !guardadas.has(plantillaId(p.ruta, p.dia)));
 }
@@ -3615,13 +3618,17 @@ function handleCoordinadorClick(event) {
         cargaProgreso = `Guardando ${ok + 1} de ${base.length}…`;
         scheduleRerender();
         try {
-          const result = await registros.save("plantillas", p);
+          const result = await registros.save("plantillas", { ...p, soloCrear: true });
           ok += 1;
           if (result.pendiente) pend += 1;
         } catch (error) {
-          lastError = error.message;
+          // Ya estaba guardada (otra persona la cargó): no es un error, no se pisó.
+          if (error.status === 409) ok += 1;
+          else lastError = error.message;
         }
       }
+      // Se vuelve a leer del servidor lo que quedó guardado.
+      registros.list("plantillas", COLS.plantillas()).catch(() => null);
       cargaConfirm = false;
       cargaProgreso = "";
       if (lastError) showToast(`Se guardaron ${ok} de ${base.length} rutas. Error: ${lastError}`, { tone: "error" });
@@ -3665,10 +3672,14 @@ function handleCoordinadorClick(event) {
       baseGuardando = p.id;
       render();
       focusById(focusId);
-      const saved = await guardar("plantillas", p, { ok: `${p.ruta} cargada. Ya la ve el equipo.` });
+      const saved = await guardar("plantillas", { ...p, soloCrear: true }, { ok: `${routeName(p.ruta)} cargada. Ya la ve el equipo.` });
       baseGuardando = "";
       if (saved && !editor) abrir();
-      else render();
+      else {
+        // Si ya estaba cargada (otra persona la guardó), se trae la versión guardada.
+        if (!saved) registros.list("plantillas", COLS.plantillas()).catch(() => null);
+        render();
+      }
     });
     return true;
   }

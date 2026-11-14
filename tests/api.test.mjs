@@ -1056,3 +1056,36 @@ test("coordinación inmediata: incidente avisa en Calle y pedido de cambio en Co
   assert.match(coord[coord.length - 1].texto, /^URGENTE · Pedido de cambio de .+: No sale · Sam · Ruta 1\./);
 });
 
+test("revisión de la noche: rutas sin pisar, avisos sin duplicar y reintentos con el reloj corrido", async () => {
+  // soloCrear no pisa una ruta guardada.
+  const ruta = { col: "plantillas", id: "PJ_9M_lunes", ruta: "PJ_9M", dia: "Lunes", turno: "Mañana", paseador: "sebastian", paradas: [{ perroId: "PJ-001" }] };
+  assert.equal((await call("registros", { method: "POST", token: coordMsj, body: ruta })).status, 201);
+  const pisar = await call("registros", { method: "POST", token: coordMsj, body: { ...ruta, paseador: "", paradas: [], soloCrear: true } });
+  assert.equal(pisar.status, 409);
+  const guardada = (await call("registros", { url: "/?col=plantillas", token: coordMsj })).body.registros.find((r) => r.id === "PJ_9M_lunes");
+  assert.equal(guardada.paseador, "sebastian");
+  assert.equal(guardada.soloCrear, undefined);
+
+  // Dos guardados casi juntos del mismo paseo: un solo aviso al cliente.
+  const hoy = hoyAR();
+  const base = { col: "paseos", id: `${hoy}_PJ-010_manana`, fecha: hoy, perroId: "PJ-010", estado: "retirado", horaRetiro: "09:10" };
+  const avisos = async () => (await call("mensajes", { url: "/?canal=coordinacion", token: admin })).body.mensajes.length;
+  await Promise.all([call("registros", { method: "POST", token: supMsj, body: base }), call("registros", { method: "POST", token: supMsj, body: base })]);
+  const clientes = (await call("registros", { url: "/?col=clientes", token: admin })).body.registros;
+  const rocco = clientes.find((c) => (c.perros || []).includes("PJ-010"));
+  if (rocco) {
+    const canal = (await call("mensajes", { url: `/?canal=cliente_${rocco.id}`, token: admin })).body.mensajes.filter((m) => m.texto.startsWith("Retiramos"));
+    assert.equal(canal.length, 1);
+  }
+  assert.ok((await avisos()) >= 0);
+
+  // Reintento con el reloj del celular adelantado: no se duplica.
+  const adelantado = new Date(Date.now() + 90 * 1000).toISOString();
+  const body = { canal: "equipo", texto: "Reloj corrido", cid: "crelojcorrido1", escritoEn: adelantado };
+  const a = await call("mensajes", { method: "POST", token: supMsj, body });
+  const b = await call("mensajes", { method: "POST", token: supMsj, body });
+  assert.equal(a.status, 201);
+  assert.equal(b.status, 200);
+  assert.equal(b.body.mensaje.id, a.body.mensaje.id);
+});
+

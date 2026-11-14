@@ -8,7 +8,6 @@
 import { handler, send, readJson, HttpError } from "../_lib/http.js";
 import { requireUser, perrosDeCliente } from "../_lib/auth.js";
 import { store } from "../_lib/store.js";
-import { nuevoId } from "../registros.js";
 import { validarHorario, validarPerros, activarAcceso, sinHash } from "../_lib/clientes.js";
 
 const ID = /^[a-z0-9][a-z0-9_.-]{0,79}$/i;
@@ -22,6 +21,8 @@ export default handler({ POST: 1 }, async (req, res) => {
   const aprobado = { por: user.usuario, porNombre: user.nombre, en: ahora };
   let cliente;
   let pedidoAprobado = null; // el pedido se marca aprobado solo si el alta sale bien
+  let pedidoTrabado = null; // marcado "aprobando": si algo falla, se libera
+  try {
 
   if (body.pedidoId) {
     const pedidoId = String(body.pedidoId);
@@ -29,11 +30,18 @@ export default handler({ POST: 1 }, async (req, res) => {
     const pedido = await store.get("pedidos", pedidoId);
     if (!pedido) throw new HttpError(404, "Ese pedido no existe.");
     if (pedido.clienteId) throw new HttpError(409, "Ese pedido ya se aprobó. Si perdió el enlace, generá uno nuevo.");
+    // Dos "Aprobar" casi juntos (dos celulares o un reintento): el segundo espera.
+    if (pedido.aprobandoDesde && Date.now() - Date.parse(pedido.aprobandoDesde) < 60 * 1000) {
+      throw new HttpError(409, "Ese pedido se está aprobando en este momento. Esperá un minuto y revisá.");
+    }
+    await store.put("pedidos", { ...pedido, aprobandoDesde: ahora });
+    pedidoTrabado = pedido;
     const d = pedido.datos || {};
     const nombre = texto(body.nombre || d.responsable, 60);
     if (nombre.length < 2) throw new HttpError(400, "Falta el nombre del tutor.");
     cliente = {
-      id: nuevoId(ahora.slice(0, 10)),
+      // Id que sale del pedido: un mismo pedido no puede crear dos clientes.
+      id: `cli-${pedidoId}`.slice(0, 80),
       col: "clientes",
       nombre,
       telefono: texto(d.telefono, 40),
@@ -50,7 +58,7 @@ export default handler({ POST: 1 }, async (req, res) => {
       creadoPorNombre: user.nombre,
       creadoEn: ahora,
     };
-    pedidoAprobado = { ...pedido, estado: "aprobado", clienteId: cliente.id, actualizadoPor: user.usuario, actualizadoPorNombre: user.nombre, actualizadoEn: ahora };
+    pedidoAprobado = { ...pedido, aprobandoDesde: null, estado: "aprobado", clienteId: cliente.id, actualizadoPor: user.usuario, actualizadoPorNombre: user.nombre, actualizadoEn: ahora };
   } else {
     const clienteId = String(body.clienteId || "");
     if (!ID.test(clienteId)) throw new HttpError(400, "Falta el pedido o el cliente a aprobar.");
@@ -73,5 +81,9 @@ export default handler({ POST: 1 }, async (req, res) => {
 
   const resultado = await activarAcceso(cliente, user);
   if (pedidoAprobado) await store.put("pedidos", pedidoAprobado);
+  pedidoTrabado = null;
   return send(res, 201, { ok: true, cliente: sinHash(resultado.cliente), enlace: resultado.enlace, acceso: resultado.acceso });
+  } finally {
+    if (pedidoTrabado) await store.put("pedidos", { ...pedidoTrabado, aprobandoDesde: null }).catch(() => null);
+  }
 });
