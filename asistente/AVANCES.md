@@ -43,7 +43,7 @@ Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Ca
 |---|---|---|
 | E-040 Arreglos chicos de paseador, ayudante y admin | Claude | A MEDIAS: se cortó la sesión; revisar qué quedó |
 | E-029 Investigación: chats de las IAs, Drive, tienda importada, diseño profesional | Claude | HECHO (`asistente/investigacion/2026-11-14-investigacion.md`) |
-| E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | SERVIDOR Y `client.js` LISTOS (falta integrar): faltan las pantallas de chat, la de aprobar altas en el admin y el alias en el panel. Contrato en `docs/datos-compartidos.md` |
+| E-045 Chats entre roles, avisos al cliente, acceso de clientes (P-01) y chat de clientes (P-08) | Claude | SERVIDOR LISTO E INTEGRADO (4debe51); pantallas en E-047, E-048 y E-049: faltan las pantallas de chat, la de aprobar altas en el admin y el alias en el panel. Contrato en `docs/datos-compartidos.md` |
 | E-046 Manual con historias ilustradas | Claude | EN CURSO |
 | E-047 Pantalla de chats del equipo | Claude | EN CURSO |
 | E-048 Admin: altas de clientes, alias y moderación | Claude | EN CURSO |
