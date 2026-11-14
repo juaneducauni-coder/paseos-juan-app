@@ -103,3 +103,10 @@ Objetivo de Juan: todo fácil y rápido en el celular para cada rol, comunicaci�
 - 45 pruebas del servidor OK, armado OK, recorrido sin fallas. 45 cambios subidos desde el comienzo de la noche.
 - Resumen para Juan preparado: `asistente/encargos/2026-11-14-resumen-para-juan.md`.
 - Sigue: revisión de las 06:30, borrar la tarea programada y dejar el resumen final.
+
+## 14/11/2026 — 06:36 (última revisión)
+
+- 45 pruebas del servidor OK, armado OK, recorrido sin fallas.
+- Tarea programada de cada hora borrada (no vuelve a correr).
+- Resumen para Juan: `asistente/encargos/2026-11-14-resumen-para-juan.md`.
+- Nada publicado en main: falta que Juan escriba "publicá en main".

@@ -2,7 +2,7 @@
 
 Un solo lugar para ver qué está hecho, qué se está haciendo y qué falta. Cada IA lo actualiza al tomar y al entregar una tarea.
 
-Última actualización: 14/11/2026 (madrugada) — Claude (JUAN 3.0)
+Última actualización: 14/11/2026 (06:36) — Claude (JUAN 3.0). Resumen de la noche: `asistente/encargos/2026-11-14-resumen-para-juan.md`
 
 ## Necesita a Juan
 
